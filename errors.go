@@ -33,8 +33,7 @@ func defaultErrorHandler[C contexter](ctx C, err error) {
 
 	// Check if response already written
 	if ww, ok := w.(*responseWriter); ok && ww.Written() {
-		// Log error but don't write response
-		return
+		return // Don't write response again, already written
 	}
 
 	switch {
