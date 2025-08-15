@@ -181,17 +181,22 @@ func (m *mux[C]) Handle(pattern string, handler HandlerFunc[C]) {
 	m.handle(mALL, pattern, handler)
 }
 
-// Method registers a handler for a specific HTTP method.
+// Method registers a handler for one or more specific HTTP methods.
 func (m *mux[C]) Method(pattern string, handler HandlerFunc[C], methods ...string) {
 	if len(methods) == 0 {
 		panic(fmt.Errorf("%w: no methods provided", ErrInvalidMethod))
 	}
 
+	seen := make(map[methodTyp]bool)
 	for _, method := range methods {
 		mt, ok := methodMap[strings.ToUpper(method)]
 		if !ok {
 			panic(fmt.Errorf("%w: %s", ErrInvalidMethod, method))
 		}
+		if seen[mt] {
+			continue
+		}
+		seen[mt] = true
 		m.handle(mt, pattern, handler)
 	}
 }
