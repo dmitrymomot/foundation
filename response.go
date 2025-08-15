@@ -1,6 +1,7 @@
 package gokit
 
 import (
+	"encoding/json"
 	"net/http"
 )
 
@@ -100,5 +101,43 @@ func NoContent() Response {
 func Status(code int) Response {
 	return baseResponse{
 		statusCode: code,
+	}
+}
+
+// JSON creates an application/json response with 200 OK status.
+// It marshals the provided value to JSON format.
+// If marshaling fails, it returns a 500 Internal Server Error.
+func JSON(v any) Response {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return baseResponse{
+			content:     []byte(`{"error":"Failed to marshal JSON"}`),
+			statusCode:  http.StatusInternalServerError,
+			contentType: "application/json; charset=utf-8",
+		}
+	}
+	return baseResponse{
+		content:     data,
+		statusCode:  http.StatusOK,
+		contentType: "application/json; charset=utf-8",
+	}
+}
+
+// JSONWithStatus creates an application/json response with custom status code.
+// It marshals the provided value to JSON format.
+// If marshaling fails, it returns a 500 Internal Server Error.
+func JSONWithStatus(v any, status int) Response {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return baseResponse{
+			content:     []byte(`{"error":"Failed to marshal JSON"}`),
+			statusCode:  http.StatusInternalServerError,
+			contentType: "application/json; charset=utf-8",
+		}
+	}
+	return baseResponse{
+		content:     data,
+		statusCode:  status,
+		contentType: "application/json; charset=utf-8",
 	}
 }
