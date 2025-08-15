@@ -21,3 +21,42 @@
 - [ ] default http server with graceful shutdown
 - [ ] default handler for files uploading with customizable storage provider
 - [ ] default SSE and WebSocket support
+
+## Additional Response Types (Planned)
+
+### Streaming Responses
+
+- [ ] `Stream(writer func(w io.Writer) error)` - For chunked/streaming responses
+- [x] `SSE(events <-chan any, opts ...EventOption)` - Server-Sent Events support (implemented)
+- [ ] `StreamJSON(items <-chan any)` - JSON streaming (newline-delimited)
+
+### Error Responses
+
+- `Error(message string, status int)` - Simple error response
+- `ValidationError(errors map[string][]string)` - Field-level validation errors
+- `ProblemDetails(title, detail string, status int)` - RFC 7807 compliant error responses
+
+### Header Manipulation
+
+- `WithHeaders(response Response, headers map[string]string)` - Wrap any response with custom headers
+- `WithCookie(response Response, cookie *http.Cookie)` - Add cookies to response
+- `WithCache(response Response, maxAge int)` - Add cache control headers
+
+### Data Export Responses
+
+- `CSV(records [][]string)` - Export CSV data
+- `CSVFromStruct(data any)` - Convert structs to CSV format
+- `Excel(data any)` - Excel file generation (requires external library)
+
+### Template Responses
+
+- `Template(name string, data any)` - Render HTML templates
+- `TemplateString(tmpl string, data any)` - Inline template rendering
+
+### Partial Content
+
+- `PartialContent(content []byte, start, end, total int64)` - For range requests (206 status)
+
+### WebSocket Upgrade
+
+- `WebSocketUpgrade(handler func(conn *websocket.Conn))` - Handle WebSocket connections
