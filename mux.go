@@ -182,12 +182,18 @@ func (m *mux[C]) Handle(pattern string, handler HandlerFunc[C]) {
 }
 
 // Method registers a handler for a specific HTTP method.
-func (m *mux[C]) Method(method, pattern string, handler HandlerFunc[C]) {
-	mt, ok := methodMap[strings.ToUpper(method)]
-	if !ok {
-		panic(fmt.Errorf("%w: %s", ErrInvalidMethod, method))
+func (m *mux[C]) Method(pattern string, handler HandlerFunc[C], methods ...string) {
+	if len(methods) == 0 {
+		panic(fmt.Errorf("%w: no methods provided", ErrInvalidMethod))
 	}
-	m.handle(mt, pattern, handler)
+
+	for _, method := range methods {
+		mt, ok := methodMap[strings.ToUpper(method)]
+		if !ok {
+			panic(fmt.Errorf("%w: %s", ErrInvalidMethod, method))
+		}
+		m.handle(mt, pattern, handler)
+	}
 }
 
 // Use appends middleware to the router.

@@ -50,7 +50,7 @@ type Router[C contexter] interface {
 
 	// Generic handlers
 	Handle(pattern string, handler HandlerFunc[C])
-	Method(method, pattern string, handler HandlerFunc[C])
+	Method(pattern string, handler HandlerFunc[C], methods ...string)
 
 	// Middleware
 	Use(middlewares ...Middleware[C])
