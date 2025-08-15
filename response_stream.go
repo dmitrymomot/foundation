@@ -21,7 +21,7 @@ type streamResponse struct {
 // Example:
 //
 //	Stream(func(w io.Writer) error {
-//	    for i := 0; i < 100; i++ {
+//	    for i := range 100 {
 //	        fmt.Fprintf(w, "Data chunk %d\n", i)
 //	        if f, ok := w.(http.Flusher); ok {
 //	            f.Flush() // Flush for real-time streaming
@@ -37,22 +37,18 @@ func Stream(writer func(w io.Writer) error) Response {
 
 // Render implements the Response interface for streamResponse.
 func (r *streamResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Check if writer supports flushing
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return nil
 	}
 
-	// Set headers for streaming
 	w.Header().Set("Transfer-Encoding", "chunked")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	// Write status code
 	w.WriteHeader(http.StatusOK)
 
-	// Execute the writer function
 	if err := r.writer(w); err != nil {
 		// Can't change status after WriteHeader, but we can log the error
 		// The error is returned to be handled by the framework
@@ -117,20 +113,17 @@ func StreamJSON(items <-chan any, opts ...StreamOption) Response {
 
 // Render implements the Response interface for streamJSONResponse.
 func (r *streamJSONResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Check if writer supports flushing
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
 		return nil
 	}
 
-	// Set headers for NDJSON streaming
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
-	// Write status code
 	w.WriteHeader(http.StatusOK)
 
 	// Stream items from channel

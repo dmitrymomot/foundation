@@ -15,19 +15,16 @@ type baseResponse struct {
 
 // Render implements the Response interface.
 func (r baseResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Set content type if provided
 	if r.contentType != "" {
 		w.Header().Set("Content-Type", r.contentType)
 	}
 
-	// Set status code (default to 200 if not specified)
 	status := r.statusCode
 	if status == 0 {
 		status = http.StatusOK
 	}
 	w.WriteHeader(status)
 
-	// Write content
 	if len(r.content) > 0 {
 		_, err := w.Write(r.content)
 		return err

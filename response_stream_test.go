@@ -26,7 +26,7 @@ func TestStream_BasicFunctionality(t *testing.T) {
 		t.Parallel()
 
 		response := gokit.Stream(func(w io.Writer) error {
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				_, _ = fmt.Fprintf(w, "chunk-%d\n", i)
 			}
 			return nil
@@ -267,7 +267,7 @@ func TestStream_ContextCancellation(t *testing.T) {
 
 		// Send items slowly
 		go func() {
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				select {
 				case items <- i:
 					time.Sleep(20 * time.Millisecond)
@@ -342,11 +342,11 @@ func TestStream_ConcurrentSafety(t *testing.T) {
 
 		// Send items from multiple goroutines
 		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
-				for j := 0; j < 10; j++ {
+				for j := range 10 {
 					items <- map[string]int{"id": id, "value": j}
 				}
 			}(i)
@@ -390,7 +390,7 @@ func TestStream_ConcurrentSafety(t *testing.T) {
 			var wg sync.WaitGroup
 			errors := make(chan error, 5)
 
-			for i := 0; i < 5; i++ {
+			for i := range 5 {
 				wg.Add(1)
 				go func(id int) {
 					defer wg.Done()
@@ -421,7 +421,7 @@ func TestStream_ConcurrentSafety(t *testing.T) {
 
 		// Verify all goroutines wrote their data
 		output := w.Body.String()
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			assert.Contains(t, output, fmt.Sprintf("goroutine-%d", i))
 		}
 	})
@@ -439,7 +439,7 @@ func TestStream_LargeDatasets(t *testing.T) {
 
 		go func() {
 			defer close(items)
-			for i := 0; i < itemCount; i++ {
+			for i := range itemCount {
 				items <- map[string]any{
 					"id":        i,
 					"timestamp": time.Now().Unix(),
@@ -460,7 +460,7 @@ func TestStream_LargeDatasets(t *testing.T) {
 		assert.Len(t, lines, itemCount)
 
 		// Spot check some lines
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			var data map[string]any
 			err := json.Unmarshal([]byte(lines[i*100]), &data)
 			require.NoError(t, err)
@@ -476,7 +476,7 @@ func TestStream_LargeDatasets(t *testing.T) {
 			_, _ = fmt.Fprintln(w, "id,name,email")
 
 			// Write CSV data
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				_, _ = fmt.Fprintf(w, "%d,User%d,user%d@example.com\n", i, i, i)
 			}
 			return nil
@@ -520,7 +520,7 @@ func TestStream_Integration(t *testing.T) {
 		go func() {
 			defer close(logs)
 			levels := []string{"INFO", "WARN", "ERROR", "DEBUG"}
-			for i := 0; i < 20; i++ {
+			for i := range 20 {
 				logs <- LogEntry{
 					Timestamp: time.Now().Format(time.RFC3339),
 					Level:     levels[i%len(levels)],

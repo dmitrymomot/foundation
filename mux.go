@@ -50,7 +50,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Track response state
 	ww := &responseWriter{ResponseWriter: w}
 
-	// Create fresh context
 	ctx := m.newContext(ww, r)
 
 	// Panic recovery
@@ -77,7 +76,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, eps, handler, params := m.tree.findRoute(method, path)
 
-	// Set params if using Context
 	if bc, ok := any(ctx).(*Context); ok && len(params.Keys) > 0 {
 		for i, key := range params.Keys {
 			if i < len(params.Values) {
@@ -87,7 +85,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if handler == nil {
-		// Check if route exists but method not allowed
 		allowed := []string{}
 		for mt := range eps {
 			if mt == mALL || mt == mSTUB {

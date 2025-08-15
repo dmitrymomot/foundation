@@ -35,8 +35,11 @@ func (w *responseWriter) Status() int {
 }
 
 // Flush implements http.Flusher interface if the underlying ResponseWriter supports it.
-func (w *responseWriter) Flush() {
+// Returns true if flush was successful, false if Flusher is not supported.
+func (w *responseWriter) Flush() bool {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
+		return true
 	}
+	return false
 }

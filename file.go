@@ -17,10 +17,8 @@ type fileResponse struct {
 
 // Render serves the file using http.ServeFile for efficiency.
 func (r fileResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Clean the path to prevent directory traversal
-	cleanPath := filepath.Clean(r.path)
+	cleanPath := filepath.Clean(r.path) // prevent directory traversal
 
-	// Check if file exists
 	info, err := os.Stat(cleanPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -50,10 +48,8 @@ type downloadResponse struct {
 
 // Render serves the file as a download with Content-Disposition header.
 func (r downloadResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Clean the path to prevent directory traversal
-	cleanPath := filepath.Clean(r.path)
+	cleanPath := filepath.Clean(r.path) // prevent directory traversal
 
-	// Check if file exists
 	info, err := os.Stat(cleanPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -75,7 +71,6 @@ func (r downloadResponse) Render(w http.ResponseWriter, req *http.Request) error
 		downloadName = filepath.Base(cleanPath)
 	}
 
-	// Set Content-Disposition header to force download
 	disposition := fmt.Sprintf(`attachment; filename="%s"`, downloadName)
 	w.Header().Set("Content-Disposition", disposition)
 
@@ -100,11 +95,9 @@ type attachmentResponse struct {
 
 // Render serves in-memory data as a downloadable attachment.
 func (r attachmentResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Set Content-Disposition header
 	disposition := fmt.Sprintf(`attachment; filename="%s"`, r.filename)
 	w.Header().Set("Content-Disposition", disposition)
 
-	// Set content type
 	contentType := r.contentType
 	if contentType == "" {
 		// Try to detect from filename extension
@@ -115,10 +108,8 @@ func (r attachmentResponse) Render(w http.ResponseWriter, req *http.Request) err
 	}
 	w.Header().Set("Content-Type", contentType)
 
-	// Set Content-Length
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(r.data)))
 
-	// Write status and data
 	w.WriteHeader(http.StatusOK)
 	_, err := w.Write(r.data)
 	return err
@@ -182,11 +173,9 @@ func (r *streamFileResponse) Render(w http.ResponseWriter, req *http.Request) er
 	filename = strings.ReplaceAll(filename, "\r", "")
 	filename = strings.ReplaceAll(filename, "\"", "'")
 
-	// Set Content-Disposition header
 	disposition := fmt.Sprintf(`attachment; filename="%s"`, filename)
 	w.Header().Set("Content-Disposition", disposition)
 
-	// Set content type
 	contentType := r.contentType
 	if contentType == "" {
 		contentType = mime.TypeByExtension(filepath.Ext(filename))

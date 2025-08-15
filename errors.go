@@ -82,19 +82,16 @@ var (
 func defaultErrorHandler[C contexter](ctx C, err error) {
 	w := ctx.ResponseWriter()
 
-	// Check if response already written
 	if ww, ok := w.(*responseWriter); ok && ww.Written() {
 		return // Don't write response again, already written
 	}
 
-	// Check if it's our Error type
 	var appErr Error
 	if errors.As(err, &appErr) {
 		http.Error(w, appErr.Message, appErr.Status)
 		return
 	}
 
-	// Handle router-specific errors
 	switch {
 	case errors.Is(err, ErrNotFound):
 		http.Error(w, "404 Not Found", http.StatusNotFound)
