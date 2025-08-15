@@ -1,29 +1,11 @@
 package gokit
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 )
-
-// Standard router errors.
-var (
-	ErrNotFound         = errors.New("route not found")
-	ErrMethodNotAllowed = errors.New("method not allowed")
-	ErrNilResponse      = errors.New("handler returned nil response")
-)
-
-// MethodNotAllowedError provides available methods for a route.
-type MethodNotAllowedError struct {
-	Method  string
-	Allowed []string
-}
-
-func (e *MethodNotAllowedError) Error() string {
-	return fmt.Sprintf("method %s not allowed, available: %v", e.Method, e.Allowed)
-}
 
 // mux is the private implementation of Router interface.
 type mux[C Context] struct {
@@ -121,11 +103,11 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Find route
 	method, ok := methodMap[r.Method]
 	if !ok {
-		m.errorHandler(ctx, &MethodNotAllowedError{Method: r.Method, Allowed: []string{}})
+		m.errorHandler(ctx, ErrMethodNotAllowed)
 		return
 	}
 
-	_, eps, handler, params := m.tree.FindRoute(method, path)
+	_, eps, handler, params := m.tree.findRoute(method, path)
 
 	// Set params if using baseContext
 	if bc, ok := any(ctx).(*baseContext); ok && len(params.Keys) > 0 {
@@ -149,10 +131,12 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(allowed) > 0 {
-			m.errorHandler(ctx, &MethodNotAllowedError{
-				Method:  r.Method,
-				Allowed: allowed,
-			})
+			// Set Allow header before calling error handler
+			w := ctx.ResponseWriter()
+			if ww, ok := w.(*responseWriter); ok && !ww.Written() {
+				ww.Header().Set("Allow", strings.Join(allowed, ", "))
+			}
+			m.errorHandler(ctx, ErrMethodNotAllowed)
 		} else {
 			m.errorHandler(ctx, ErrNotFound)
 		}
@@ -352,49 +336,5 @@ func (m *mux[C]) handle(method methodTyp, pattern string, handler HandlerFunc[C]
 	}
 
 	// Add the endpoint to the tree and return the node
-	return m.tree.InsertRoute(method, pattern, h)
-}
-
-// defaultErrorHandler provides default error handling.
-func defaultErrorHandler[C Context](ctx C, err error) {
-	w := ctx.ResponseWriter()
-
-	// Check if response already written
-	if ww, ok := w.(*responseWriter); ok && ww.Written() {
-		// Log error but don't write response
-		return
-	}
-
-	switch {
-	case errors.Is(err, ErrNotFound):
-		http.Error(w, "404 Not Found", http.StatusNotFound)
-	case errors.Is(err, ErrMethodNotAllowed):
-		if e, ok := err.(*MethodNotAllowedError); ok && len(e.Allowed) > 0 {
-			w.Header().Set("Allow", strings.Join(e.Allowed, ", "))
-		}
-		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
-	case errors.Is(err, ErrNilResponse):
-		http.Error(w, "500 Internal Server Error - nil response", http.StatusInternalServerError)
-	default:
-		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-	}
-}
-
-// toError converts any value to an error.
-func toError(v any) error {
-	switch e := v.(type) {
-	case error:
-		return e
-	case string:
-		return errors.New(e)
-	default:
-		return fmt.Errorf("panic: %v", e)
-	}
-}
-
-// WithContextFactory sets a custom context factory for the router.
-func WithContextFactory[C Context](f func(http.ResponseWriter, *http.Request) C) Option[C] {
-	return func(m *mux[C]) {
-		m.newContext = f
-	}
+	return m.tree.insertRoute(method, pattern, h)
 }

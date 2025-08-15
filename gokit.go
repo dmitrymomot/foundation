@@ -94,3 +94,10 @@ func WithMiddleware[C Context](middlewares ...Middleware[C]) Option[C] {
 		m.middlewares = append(m.middlewares, middlewares...)
 	}
 }
+
+// WithContextFactory sets a custom context factory for the router.
+func WithContextFactory[C Context](f func(http.ResponseWriter, *http.Request) C) Option[C] {
+	return func(m *mux[C]) {
+		m.newContext = f
+	}
+}

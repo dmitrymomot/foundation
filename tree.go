@@ -55,6 +55,12 @@ var reverseMethodMap = map[methodTyp]string{
 	mTRACE:   http.MethodTrace,
 }
 
+// routeParams holds URL parameters extracted from the route.
+type routeParams struct {
+	Keys   []string
+	Values []string
+}
+
 // RegisterMethod adds support for custom HTTP method handlers.
 func RegisterMethod(method string) {
 	if method == "" {
@@ -124,7 +130,7 @@ type endpoint[C Context] struct {
 	paramKeys []string
 }
 
-func (s endpoints[C]) Value(method methodTyp) *endpoint[C] {
+func (s endpoints[C]) value(method methodTyp) *endpoint[C] {
 	mh, ok := s[method]
 	if !ok {
 		mh = &endpoint[C]{}
@@ -133,7 +139,7 @@ func (s endpoints[C]) Value(method methodTyp) *endpoint[C] {
 	return mh
 }
 
-func (n *node[C]) InsertRoute(method methodTyp, pattern string, handler HandlerFunc[C]) *node[C] {
+func (n *node[C]) insertRoute(method methodTyp, pattern string, handler HandlerFunc[C]) *node[C] {
 	var parent *node[C]
 	search := pattern
 
@@ -306,7 +312,7 @@ func (n *node[C]) addChild(child *node[C], prefix string) *node[C] {
 	}
 
 	n.children[child.typ] = append(n.children[child.typ], child)
-	n.children[child.typ].Sort()
+	n.children[child.typ].sort()
 	return hn
 }
 
@@ -344,36 +350,36 @@ func (n *node[C]) setEndpoint(method methodTyp, handler HandlerFunc[C], pattern 
 	paramKeys := patParamKeys(pattern)
 
 	if method&mSTUB == mSTUB {
-		n.endpoints.Value(mSTUB).handler = handler
+		n.endpoints.value(mSTUB).handler = handler
 	}
 	if method&mALL == mALL {
-		h := n.endpoints.Value(mALL)
+		h := n.endpoints.value(mALL)
 		h.handler = handler
 		h.pattern = pattern
 		h.paramKeys = paramKeys
 		for _, m := range methodMap {
-			h := n.endpoints.Value(m)
+			h := n.endpoints.value(m)
 			h.handler = handler
 			h.pattern = pattern
 			h.paramKeys = paramKeys
 		}
 	} else {
-		h := n.endpoints.Value(method)
+		h := n.endpoints.value(method)
 		h.handler = handler
 		h.pattern = pattern
 		h.paramKeys = paramKeys
 	}
 }
 
-func (n *node[C]) FindRoute(method methodTyp, path string) (*node[C], endpoints[C], HandlerFunc[C], RouteParams) {
+func (n *node[C]) findRoute(method methodTyp, path string) (*node[C], endpoints[C], HandlerFunc[C], routeParams) {
 	// Reset the context routing pattern and params
-	rctx := &RouteParams{
+	rctx := &routeParams{
 		Keys:   make([]string, 0),
 		Values: make([]string, 0),
 	}
 
 	// Find the routing handlers for the path
-	rn := n.findRoute(method, path, rctx)
+	rn := n.findRouteRecursive(method, path, rctx)
 	if rn == nil {
 		return nil, nil, nil, *rctx
 	}
@@ -387,7 +393,7 @@ func (n *node[C]) FindRoute(method methodTyp, path string) (*node[C], endpoints[
 }
 
 // Recursive edge traversal by checking all nodeTyp groups along the way.
-func (n *node[C]) findRoute(method methodTyp, path string, rctx *RouteParams) *node[C] {
+func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeParams) *node[C] {
 	nn := n
 	search := path
 
@@ -464,7 +470,7 @@ func (n *node[C]) findRoute(method methodTyp, path string, rctx *RouteParams) *n
 				}
 
 				// recursively find the next node on this branch
-				fin := xn.findRoute(method, xsearch, rctx)
+				fin := xn.findRouteRecursive(method, xsearch, rctx)
 				if fin != nil {
 					return fin
 				}
@@ -503,7 +509,7 @@ func (n *node[C]) findRoute(method methodTyp, path string, rctx *RouteParams) *n
 		}
 
 		// recursively find the next node..
-		fin := xn.findRoute(method, xsearch, rctx)
+		fin := xn.findRouteRecursive(method, xsearch, rctx)
 		if fin != nil {
 			return fin
 		}
@@ -699,8 +705,8 @@ func methodTypString(method methodTyp) string {
 
 type nodes[C Context] []*node[C]
 
-// Sort the list of nodes by label
-func (ns nodes[C]) Sort()              { sort.Sort(ns); ns.tailSort() }
+// sort the list of nodes by label
+func (ns nodes[C]) sort()              { sort.Sort(ns); ns.tailSort() }
 func (ns nodes[C]) Len() int           { return len(ns) }
 func (ns nodes[C]) Swap(i, j int)      { ns[i], ns[j] = ns[j], ns[i] }
 func (ns nodes[C]) Less(i, j int) bool { return ns[i].label < ns[j].label }
