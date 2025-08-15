@@ -26,9 +26,9 @@
 
 ### Streaming Responses
 
-- [ ] `Stream(writer func(w io.Writer) error)` - For chunked/streaming responses
+- [x] `Stream(writer func(w io.Writer) error)` - For chunked/streaming responses (implemented)
 - [x] `SSE(events <-chan any, opts ...EventOption)` - Server-Sent Events support (implemented)
-- [ ] `StreamJSON(items <-chan any)` - JSON streaming (newline-delimited)
+- [x] `StreamJSON(items <-chan any)` - JSON streaming (newline-delimited) (implemented)
 
 ### Error Responses
 
