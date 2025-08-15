@@ -1,7 +1,7 @@
 package gokit
 
 // chain builds a single handler from a middleware stack and endpoint.
-func chain[C Context](middlewares []Middleware[C], endpoint HandlerFunc[C]) HandlerFunc[C] {
+func chain[C contexter](middlewares []Middleware[C], endpoint HandlerFunc[C]) HandlerFunc[C] {
 	// Start with the endpoint
 	handler := endpoint
 

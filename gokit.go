@@ -6,14 +6,14 @@ import (
 )
 
 // HandlerFunc provides type-safe HTTP request handling with custom context support.
-// C must implement the Context interface, Response must implement the Response interface.
-type HandlerFunc[C Context] func(ctx C) Response
+// C must implement the contextInterface interface, Response must implement the Response interface.
+type HandlerFunc[C contexter] func(ctx C) Response
 
 // ErrorHandler handles errors from binding or rendering.
-type ErrorHandler[C Context] func(ctx C, err error)
+type ErrorHandler[C contexter] func(ctx C, err error)
 
 // Middleware wraps a HandlerFunc with additional functionality.
-type Middleware[C Context] func(next HandlerFunc[C]) HandlerFunc[C]
+type Middleware[C contexter] func(next HandlerFunc[C]) HandlerFunc[C]
 
 // Response renders itself to an http.ResponseWriter.
 // Implementations should set headers, status code, and write body.
@@ -22,9 +22,10 @@ type Response interface {
 	Render(w http.ResponseWriter, r *http.Request) error
 }
 
-// Context wraps http.Request and http.ResponseWriter with context.Context.
+// contexter wraps http.Request and http.ResponseWriter with context.Context.
 // It embeds the request's context and provides access to HTTP components.
-type Context interface {
+// This is a private interface - use Context for the default implementation.
+type contexter interface {
 	context.Context
 	Request() *http.Request
 	ResponseWriter() http.ResponseWriter
@@ -32,7 +33,7 @@ type Context interface {
 }
 
 // Router is the main routing interface for handling HTTP requests.
-type Router[C Context] interface {
+type Router[C contexter] interface {
 	http.Handler
 	Routes
 
@@ -73,6 +74,6 @@ type Route struct {
 }
 
 // NewRouter creates a new router with the given options.
-func NewRouter[C Context](opts ...Option[C]) Router[C] {
+func NewRouter[C contexter](opts ...Option[C]) Router[C] {
 	return newMux[C](opts...)
 }

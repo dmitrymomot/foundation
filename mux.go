@@ -4,13 +4,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 )
 
 // mux is the private implementation of Router interface.
-type mux[C Context] struct {
+type mux[C contexter] struct {
 	tree         *node[C]
-	pool         *sync.Pool
 	middlewares  []Middleware[C]
 	errorHandler ErrorHandler[C]
 	newContext   func(http.ResponseWriter, *http.Request) C
@@ -20,10 +18,9 @@ type mux[C Context] struct {
 }
 
 // newMux creates a new router instance.
-func newMux[C Context](opts ...Option[C]) *mux[C] {
+func newMux[C contexter](opts ...Option[C]) *mux[C] {
 	m := &mux[C]{
 		tree:         &node[C]{},
-		pool:         &sync.Pool{},
 		errorHandler: defaultErrorHandler[C],
 	}
 
@@ -32,22 +29,17 @@ func newMux[C Context](opts ...Option[C]) *mux[C] {
 		opt(m)
 	}
 
-	// If no context factory provided, check if C is *baseContext
+	// If no context factory provided, check if C is *Context
 	if m.newContext == nil {
 		m.newContext = func(w http.ResponseWriter, r *http.Request) C {
-			// Try to create a baseContext if C is compatible
+			// Try to create a Context if C is compatible
 			var zero C
-			if _, ok := any(zero).(*baseContext); ok {
-				return any(newBaseContext(w, r)).(C)
+			if _, ok := any(zero).(*Context); ok {
+				return any(NewContext(w, r)).(C)
 			}
 			// Otherwise panic - user must provide a context factory
 			panic(ErrNoContextFactory)
 		}
-	}
-
-	// Initialize pool
-	m.pool.New = func() any {
-		return m.newContext(nil, nil)
 	}
 
 	return m
@@ -58,26 +50,8 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Track response state
 	ww := &responseWriter{ResponseWriter: w}
 
-	// Get context from pool
-	var ctx C
-	if m.pool != nil {
-		ctx = m.pool.Get().(C)
-		defer m.pool.Put(ctx)
-	} else {
-		ctx = m.newContext(ww, r)
-	}
-
-	// Initialize context with request/response
-	switch c := any(ctx).(type) {
-	case *baseContext:
-		c.w = ww
-		c.r = r
-		c.reset()
-	case interface {
-		reset(http.ResponseWriter, *http.Request)
-	}:
-		c.reset(ww, r)
-	}
+	// Create fresh context
+	ctx := m.newContext(ww, r)
 
 	// Panic recovery
 	defer func() {
@@ -87,12 +61,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-
-	// Ensure the mux has some routes defined
-	if m.handler == nil && m.tree.endpoints == nil {
-		m.errorHandler(ctx, ErrNotFound)
-		return
-	}
 
 	// Route path
 	path := r.URL.Path
@@ -109,8 +77,8 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, eps, handler, params := m.tree.findRoute(method, path)
 
-	// Set params if using baseContext
-	if bc, ok := any(ctx).(*baseContext); ok && len(params.Keys) > 0 {
+	// Set params if using Context
+	if bc, ok := any(ctx).(*Context); ok && len(params.Keys) > 0 {
 		for i, key := range params.Keys {
 			if i < len(params.Values) {
 				bc.setParam(key, params.Values[i])
@@ -238,7 +206,6 @@ func (m *mux[C]) With(middlewares ...Middleware[C]) Router[C] {
 	mws = append(mws, middlewares...)
 
 	im := &mux[C]{
-		pool:         m.pool,
 		inline:       true,
 		parent:       m,
 		tree:         m.tree,
@@ -269,7 +236,6 @@ func (m *mux[C]) Route(pattern string, fn func(r Router[C])) Router[C] {
 	// Copy configuration from parent
 	subRouter.errorHandler = m.errorHandler
 	subRouter.newContext = m.newContext
-	subRouter.pool = m.pool
 
 	fn(subRouter)
 	m.Mount(pattern, subRouter)

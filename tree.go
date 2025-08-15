@@ -69,7 +69,7 @@ const (
 	ntCatchAll                // /api/v1/*
 )
 
-type node[C Context] struct {
+type node[C contexter] struct {
 	// subroutes on the leaf node
 	subroutes Router[C]
 
@@ -98,9 +98,9 @@ type node[C Context] struct {
 
 // endpoints is a mapping of http method constants to handlers
 // for a given route.
-type endpoints[C Context] map[methodTyp]*endpoint[C]
+type endpoints[C contexter] map[methodTyp]*endpoint[C]
 
-type endpoint[C Context] struct {
+type endpoint[C contexter] struct {
 	// endpoint handler
 	handler HandlerFunc[C]
 
@@ -684,7 +684,7 @@ func methodTypString(method methodTyp) string {
 	return ""
 }
 
-type nodes[C Context] []*node[C]
+type nodes[C contexter] []*node[C]
 
 // sort the list of nodes by label
 func (ns nodes[C]) sort()              { sort.Sort(ns); ns.tailSort() }

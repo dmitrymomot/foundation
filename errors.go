@@ -13,7 +13,7 @@ var (
 	ErrNilResponse      = errors.New("handler returned nil response")
 
 	// Configuration errors
-	ErrNoContextFactory = errors.New("no context factory provided and C is not *baseContext")
+	ErrNoContextFactory = errors.New("no context factory provided and C is not *Context")
 	ErrInvalidMethod    = errors.New("invalid http method")
 	ErrInvalidPattern   = errors.New("routing pattern must begin with '/'")
 	ErrNilRouter        = errors.New("cannot mount nil router")
@@ -28,7 +28,7 @@ var (
 )
 
 // defaultErrorHandler provides default error handling.
-func defaultErrorHandler[C Context](ctx C, err error) {
+func defaultErrorHandler[C contexter](ctx C, err error) {
 	w := ctx.ResponseWriter()
 
 	// Check if response already written
