@@ -3,6 +3,7 @@ package gokit_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -576,4 +577,174 @@ func TestSSE_Integration(t *testing.T) {
 			}
 		}
 	})
+}
+
+// Tests for SSE Error Handlers
+func TestSSE_ErrorHandler(t *testing.T) {
+	t.Parallel()
+
+	t.Run("error_handler_called_on_write_error", func(t *testing.T) {
+		t.Parallel()
+
+		events := make(chan any, 2)
+		var capturedCtx context.Context
+		var capturedError error
+		errorCount := 0
+
+		response := gokit.SSE(events,
+			gokit.WithSSEErrorHandler(func(ctx context.Context, err error) {
+				capturedCtx = ctx
+				capturedError = err
+				errorCount++
+			}),
+			gokit.WithoutKeepAlive(),
+		)
+
+		// Add a valid event
+		events <- map[string]string{"message": "test"}
+		// Add an invalid event that will fail to marshal
+		events <- make(chan int)
+		close(events)
+
+		ctx := context.WithValue(context.Background(), "trace_id", "abc-123")
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		w := httptest.NewRecorder()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err)
+
+		// Check error handler was called
+		assert.Equal(t, 1, errorCount, "Error handler should be called once")
+		assert.NotNil(t, capturedError)
+		assert.Contains(t, capturedError.Error(), "failed to write event")
+		assert.NotNil(t, capturedCtx)
+		assert.Equal(t, "abc-123", capturedCtx.Value("trace_id"))
+
+		// Check valid event was still written
+		output := w.Body.String()
+		assert.Contains(t, output, ": connected")
+		assert.Contains(t, output, `data: {"message":"test"}`)
+	})
+
+	t.Run("no_error_handler_continues_silently", func(t *testing.T) {
+		t.Parallel()
+
+		events := make(chan any, 2)
+
+		// Create response without error handler
+		response := gokit.SSE(events, gokit.WithoutKeepAlive())
+
+		events <- map[string]string{"valid": "data"}
+		events <- make(chan int) // Will fail to marshal
+		close(events)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err)
+
+		// Should still have the valid event
+		output := w.Body.String()
+		assert.Contains(t, output, `data: {"valid":"data"}`)
+	})
+
+	t.Run("keepalive_error_stops_streaming", func(t *testing.T) {
+		t.Parallel()
+
+		// Custom writer that fails after initial writes
+		failWriter := &failingWriter{
+			failAfter: 2, // Allow connection message and first keepalive
+			writer:    httptest.NewRecorder(),
+		}
+
+		events := make(chan any)
+		var keepAliveError error
+
+		response := gokit.SSE(events,
+			gokit.WithSSEErrorHandler(func(ctx context.Context, err error) {
+				if strings.Contains(err.Error(), "keepalive") {
+					keepAliveError = err
+				}
+			}),
+			gokit.WithKeepAlive(10*time.Millisecond),
+		)
+
+		req := httptest.NewRequest("GET", "/", nil)
+
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			close(events)
+		}()
+
+		_ = response.Render(failWriter, req)
+
+		// Should have captured keepalive error
+		assert.NotNil(t, keepAliveError)
+		assert.Contains(t, keepAliveError.Error(), "failed to send keepalive")
+	})
+
+	t.Run("context_values_accessible", func(t *testing.T) {
+		t.Parallel()
+
+		events := make(chan any, 1)
+		var contextValues []string
+
+		response := gokit.SSE(events,
+			gokit.WithSSEErrorHandler(func(ctx context.Context, err error) {
+				if userID := ctx.Value("user_id"); userID != nil {
+					contextValues = append(contextValues, userID.(string))
+				}
+				if requestID := ctx.Value("request_id"); requestID != nil {
+					contextValues = append(contextValues, requestID.(string))
+				}
+			}),
+			gokit.WithoutKeepAlive(),
+		)
+
+		// Send invalid event to trigger error
+		events <- make(chan int)
+		close(events)
+
+		// Create context with multiple values
+		ctx := context.WithValue(context.Background(), "user_id", "user-456")
+		ctx = context.WithValue(ctx, "request_id", "req-789")
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		w := httptest.NewRecorder()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err)
+
+		// Check context values were accessible
+		assert.Contains(t, contextValues, "user-456")
+		assert.Contains(t, contextValues, "req-789")
+	})
+}
+
+// Helper type for testing write failures
+type failingWriter struct {
+	failAfter int
+	writes    int
+	writer    *httptest.ResponseRecorder
+}
+
+func (f *failingWriter) Header() http.Header {
+	return f.writer.Header()
+}
+
+func (f *failingWriter) Write(p []byte) (int, error) {
+	f.writes++
+	if f.writes > f.failAfter {
+		return 0, errors.New("write failed")
+	}
+	return f.writer.Write(p)
+}
+
+func (f *failingWriter) WriteHeader(statusCode int) {
+	f.writer.WriteHeader(statusCode)
+}
+
+func (f *failingWriter) Flush() {
+	// httptest.ResponseRecorder implements Flush directly
+	f.writer.Flush()
 }

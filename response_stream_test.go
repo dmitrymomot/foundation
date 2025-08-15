@@ -610,3 +610,143 @@ func TestStream_Integration(t *testing.T) {
 		}
 	})
 }
+
+// Tests for Error Handlers
+func TestStreamJSON_ErrorHandler(t *testing.T) {
+	t.Parallel()
+
+	t.Run("error_handler_called_on_encode_error", func(t *testing.T) {
+		t.Parallel()
+
+		items := make(chan any, 2)
+		var capturedCtx context.Context
+		var capturedError error
+		var errorCount int
+		mu := sync.Mutex{}
+
+		response := gokit.StreamJSON(items, gokit.WithStreamErrorHandler(func(ctx context.Context, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			capturedCtx = ctx
+			capturedError = err
+			errorCount++
+		}))
+
+		// Send valid item first
+		items <- map[string]string{"valid": "data"}
+		// Send invalid item that will fail to marshal (channels can't be marshaled)
+		items <- make(chan int)
+		close(items)
+
+		ctx := context.WithValue(context.Background(), "request_id", "test-123")
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		w := httptest.NewRecorder()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err) // Should not return error
+
+		// Wait a bit for async processing
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+		assert.Equal(t, 1, errorCount, "Error handler should be called once")
+		assert.NotNil(t, capturedError)
+		assert.Contains(t, capturedError.Error(), "failed to encode item")
+		assert.NotNil(t, capturedCtx)
+		assert.Equal(t, "test-123", capturedCtx.Value("request_id"))
+
+		// Should have the valid item in output
+		output := w.Body.String()
+		assert.Contains(t, output, `{"valid":"data"}`)
+	})
+
+	t.Run("no_error_handler_continues_silently", func(t *testing.T) {
+		t.Parallel()
+
+		items := make(chan any, 2)
+
+		// Create response without error handler
+		response := gokit.StreamJSON(items)
+
+		items <- map[string]string{"valid": "data"}
+		items <- make(chan int) // Will fail to marshal
+		close(items)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err)
+
+		// Should still have the valid item
+		output := w.Body.String()
+		assert.Contains(t, output, `{"valid":"data"}`)
+	})
+
+	t.Run("context_cancellation_stops_streaming", func(t *testing.T) {
+		t.Parallel()
+
+		items := make(chan any)
+		errorCalled := false
+
+		response := gokit.StreamJSON(items, gokit.WithStreamErrorHandler(func(ctx context.Context, err error) {
+			errorCalled = true
+		}))
+
+		ctx, cancel := context.WithCancel(context.Background())
+		req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+		w := httptest.NewRecorder()
+
+		// Cancel context quickly
+		go func() {
+			time.Sleep(10 * time.Millisecond)
+			cancel()
+		}()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err)
+		assert.False(t, errorCalled, "Error handler should not be called on context cancellation")
+	})
+
+	t.Run("multiple_errors_all_handled", func(t *testing.T) {
+		t.Parallel()
+
+		items := make(chan any, 5)
+		var errors []error
+		mu := sync.Mutex{}
+
+		response := gokit.StreamJSON(items, gokit.WithStreamErrorHandler(func(ctx context.Context, err error) {
+			mu.Lock()
+			defer mu.Unlock()
+			errors = append(errors, err)
+		}))
+
+		// Mix valid and invalid items
+		items <- map[string]string{"item": "1"}
+		items <- make(chan int) // Invalid
+		items <- map[string]string{"item": "2"}
+		items <- func() {} // Invalid
+		items <- map[string]string{"item": "3"}
+		close(items)
+
+		req := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		err := response.Render(w, req)
+		assert.NoError(t, err)
+
+		// Wait for processing
+		time.Sleep(10 * time.Millisecond)
+
+		mu.Lock()
+		defer mu.Unlock()
+		assert.Equal(t, 2, len(errors), "Should have 2 errors for invalid items")
+
+		// Check valid items were still written
+		output := w.Body.String()
+		assert.Contains(t, output, `{"item":"1"}`)
+		assert.Contains(t, output, `{"item":"2"}`)
+		assert.Contains(t, output, `{"item":"3"}`)
+	})
+}

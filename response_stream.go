@@ -1,7 +1,9 @@
 package gokit
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -65,7 +67,19 @@ func (r *streamResponse) Render(w http.ResponseWriter, req *http.Request) error 
 
 // streamJSONResponse implements Response for streaming JSON lines (NDJSON).
 type streamJSONResponse struct {
-	items <-chan any
+	items   <-chan any
+	onError func(context.Context, error) // Optional error handler
+}
+
+// StreamOption configures streaming behavior.
+type StreamOption func(*streamJSONResponse)
+
+// WithStreamErrorHandler sets an error handler for streaming errors.
+// The handler receives the request context and error for logging or monitoring.
+func WithStreamErrorHandler(handler func(context.Context, error)) StreamOption {
+	return func(s *streamJSONResponse) {
+		s.onError = handler
+	}
 }
 
 // StreamJSON creates a newline-delimited JSON streaming response.
@@ -84,10 +98,21 @@ type streamJSONResponse struct {
 //	    }
 //	}()
 //	return StreamJSON(items)
-func StreamJSON(items <-chan any) Response {
-	return &streamJSONResponse{
+//
+// With error handling:
+//
+//	return StreamJSON(items, WithStreamErrorHandler(func(ctx context.Context, err error) {
+//	    logger := ctx.Value("logger").(*slog.Logger)
+//	    logger.Error("stream error", "error", err)
+//	}))
+func StreamJSON(items <-chan any, opts ...StreamOption) Response {
+	r := &streamJSONResponse{
 		items: items,
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Render implements the Response interface for streamJSONResponse.
@@ -125,8 +150,12 @@ func (r *streamJSONResponse) Render(w http.ResponseWriter, req *http.Request) er
 
 			// Encode and write the item
 			if err := encoder.Encode(item); err != nil {
-				// Stop streaming on encoding error
-				return nil
+				if r.onError != nil {
+					// Pass request context to error handler
+					r.onError(req.Context(), fmt.Errorf("failed to encode item: %w", err))
+				}
+				// Continue streaming despite error
+				continue
 			}
 
 			// Flush to send data immediately

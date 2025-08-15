@@ -765,23 +765,52 @@ func TestJSONMarshalError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			var response gokit.Response
-			if tt.useStatus {
-				response = gokit.JSONWithStatus(tt.value, tt.statusCode)
-			} else {
-				response = gokit.JSON(tt.value)
-			}
-
-			req := httptest.NewRequest("GET", "/", nil)
-			w := httptest.NewRecorder()
-
-			err := response.Render(w, req)
-
 			if tt.expectError {
-				assert.NoError(t, err) // Render should not error, but return error response
-				assert.Equal(t, http.StatusInternalServerError, w.Code)
-				assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
-				assert.Contains(t, w.Body.String(), `"error":"Failed to marshal JSON"`)
+				// Should panic with Error type
+				assert.Panics(t, func() {
+					if tt.useStatus {
+						gokit.JSONWithStatus(tt.value, tt.statusCode)
+					} else {
+						gokit.JSON(tt.value)
+					}
+				})
+
+				// Verify panic value is Error type
+				func() {
+					defer func() {
+						r := recover()
+						assert.NotNil(t, r)
+						err, ok := r.(gokit.Error)
+						assert.True(t, ok, "panic should be Error type")
+						assert.Equal(t, http.StatusInternalServerError, err.Status)
+						assert.Equal(t, "JSON_MARSHAL_ERROR", err.Code)
+						assert.Equal(t, "Failed to encode response", err.Message)
+					}()
+
+					if tt.useStatus {
+						gokit.JSONWithStatus(tt.value, tt.statusCode)
+					} else {
+						gokit.JSON(tt.value)
+					}
+				}()
+			} else {
+				// Should not panic for valid values
+				var response gokit.Response
+				assert.NotPanics(t, func() {
+					if tt.useStatus {
+						response = gokit.JSONWithStatus(tt.value, tt.statusCode)
+					} else {
+						response = gokit.JSON(tt.value)
+					}
+				})
+
+				// Test normal rendering for valid cases
+				if response != nil {
+					req := httptest.NewRequest("GET", "/", nil)
+					w := httptest.NewRecorder()
+					err := response.Render(w, req)
+					assert.NoError(t, err)
+				}
 			}
 		})
 	}

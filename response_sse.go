@@ -1,12 +1,16 @@
 package gokit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 )
+
+// DefaultSSEKeepAlive is the default keep-alive interval for SSE connections.
+const DefaultSSEKeepAlive = 30 * time.Second
 
 type sseResponse struct {
 	events      <-chan any
@@ -16,6 +20,7 @@ type sseResponse struct {
 	reconnect   int
 	keepAlive   time.Duration
 	noKeepAlive bool
+	onError     func(context.Context, error) // Optional error handler
 }
 
 type EventOption func(*sseResponse)
@@ -56,10 +61,18 @@ func WithoutKeepAlive() EventOption {
 	}
 }
 
+// WithSSEErrorHandler sets an error handler for SSE streaming errors.
+// The handler receives the request context and error for logging or monitoring.
+func WithSSEErrorHandler(handler func(context.Context, error)) EventOption {
+	return func(s *sseResponse) {
+		s.onError = handler
+	}
+}
+
 func SSE(events <-chan any, opts ...EventOption) Response {
 	r := &sseResponse{
 		events:    events,
-		keepAlive: 30 * time.Second,
+		keepAlive: DefaultSSEKeepAlive,
 	}
 
 	for _, opt := range opts {
@@ -87,7 +100,13 @@ func (r *sseResponse) Render(w http.ResponseWriter, req *http.Request) error {
 
 	w.WriteHeader(http.StatusOK)
 
-	_, _ = fmt.Fprintf(w, ": connected\n\n")
+	// Write initial connection message
+	if _, err := fmt.Fprintf(w, ": connected\n\n"); err != nil {
+		if r.onError != nil {
+			r.onError(req.Context(), fmt.Errorf("failed to write connection message: %w", err))
+		}
+		return nil
+	}
 	flusher.Flush()
 
 	var keepAliveTicker *time.Ticker
@@ -106,7 +125,10 @@ func (r *sseResponse) Render(w http.ResponseWriter, req *http.Request) error {
 
 		case <-keepAliveChan:
 			if _, err := fmt.Fprintf(w, ": keepalive\n\n"); err != nil {
-				return nil
+				if r.onError != nil {
+					r.onError(req.Context(), fmt.Errorf("failed to send keepalive: %w", err))
+				}
+				return nil // Stop on keepalive failure
 			}
 			flusher.Flush()
 
@@ -120,7 +142,11 @@ func (r *sseResponse) Render(w http.ResponseWriter, req *http.Request) error {
 			}
 
 			if err := r.writeEvent(w, data); err != nil {
-				return nil
+				if r.onError != nil {
+					r.onError(req.Context(), fmt.Errorf("failed to write event: %w", err))
+				}
+				// Continue streaming despite write error
+				continue
 			}
 			flusher.Flush()
 		}

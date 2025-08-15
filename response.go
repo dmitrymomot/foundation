@@ -106,15 +106,15 @@ func Status(code int) Response {
 
 // JSON creates an application/json response with 200 OK status.
 // It marshals the provided value to JSON format.
-// If marshaling fails, it returns a 500 Internal Server Error.
+// If marshaling fails, it panics with an Error that can be caught by recovery middleware.
 func JSON(v any) Response {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return baseResponse{
-			content:     []byte(`{"error":"Failed to marshal JSON"}`),
-			statusCode:  http.StatusInternalServerError,
-			contentType: "application/json; charset=utf-8",
-		}
+		panic(Error{
+			Status:  http.StatusInternalServerError,
+			Code:    "JSON_MARSHAL_ERROR",
+			Message: "Failed to encode response",
+		})
 	}
 	return baseResponse{
 		content:     data,
@@ -125,15 +125,15 @@ func JSON(v any) Response {
 
 // JSONWithStatus creates an application/json response with custom status code.
 // It marshals the provided value to JSON format.
-// If marshaling fails, it returns a 500 Internal Server Error.
+// If marshaling fails, it panics with an Error that can be caught by recovery middleware.
 func JSONWithStatus(v any, status int) Response {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return baseResponse{
-			content:     []byte(`{"error":"Failed to marshal JSON"}`),
-			statusCode:  http.StatusInternalServerError,
-			contentType: "application/json; charset=utf-8",
-		}
+		panic(Error{
+			Status:  http.StatusInternalServerError,
+			Code:    "JSON_MARSHAL_ERROR",
+			Message: "Failed to encode response",
+		})
 	}
 	return baseResponse{
 		content:     data,
