@@ -21,14 +21,10 @@
 - [ ] default http server with graceful shutdown
 - [ ] default handler for files uploading with customizable storage provider
 - [ ] default SSE and WebSocket support
+- [ ] add useful helper methods to default Context implementation
+- [ ] add ability to setup binder
 
 ## Additional Response Types (Planned)
-
-### Streaming Responses
-
-- [x] `Stream(writer func(w io.Writer) error)` - For chunked/streaming responses (implemented)
-- [x] `SSE(events <-chan any, opts ...EventOption)` - Server-Sent Events support (implemented)
-- [x] `StreamJSON(items <-chan any)` - JSON streaming (newline-delimited) (implemented)
 
 ### Error Responses
 
@@ -45,8 +41,6 @@
 ### Data Export Responses
 
 - `CSV(records [][]string)` - Export CSV data
-- `CSVFromStruct(data any)` - Convert structs to CSV format
-- `Excel(data any)` - Excel file generation (requires external library)
 
 ### Template Responses
 
