@@ -33,3 +33,10 @@ func (w *responseWriter) Written() bool {
 func (w *responseWriter) Status() int {
 	return w.status
 }
+
+// Flush implements http.Flusher interface if the underlying ResponseWriter supports it.
+func (w *responseWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
