@@ -16,17 +16,17 @@
 
 ### 🏆 Winners by Category
 
-| Category                         | Winner                  | Runner-up               | Third                |
-| -------------------------------- | ----------------------- | ----------------------- | -------------------- |
-| **Static Routes**                | Echo (1351 ns/op)       | GoKit (1402 ns/op) ✅   | Chi (1714 ns/op)     |
-| **Parameterized Routes**         | Echo (1737 ns/op)       | GoKit (1924 ns/op) ✅   | Chi (1980 ns/op)     |
-| **JSON Response**                | Echo (1753 ns/op)       | GoKit (1779 ns/op) ✅   | Chi (1874 ns/op)     |
-| **Large JSON (1000 items)**      | GoKit (643798 ns/op) 🏆 | Chi (646694 ns/op)      | Echo (647302 ns/op)  |
-| **3 Middlewares**                | Echo (1727 ns/op)       | GoKit (1775 ns/op) ✅   | Chi (1966 ns/op)     |
-| **5 Middlewares**                | Echo (2132 ns/op)       | GoKit (2181 ns/op) ✅   | Chi (2282 ns/op)     |
-| **JSON Parsing**                 | Chi (2667 ns/op)        | GoKit (2794 ns/op) ✅   | Echo (2858 ns/op)    |
-| **Complex Routing (100 routes)** | Echo (1925 ns/op)       | GoKit (2045 ns/op) ✅   | Chi (2082 ns/op)     |
-| **Parallel Requests**            | Echo (1273 ns/op)       | GoKit (1286 ns/op) ✅   | Chi (1338 ns/op)     |
+| Category                         | Winner                  | Runner-up             | Third               |
+| -------------------------------- | ----------------------- | --------------------- | ------------------- |
+| **Static Routes**                | Echo (1351 ns/op)       | GoKit (1402 ns/op) ✅ | Chi (1714 ns/op)    |
+| **Parameterized Routes**         | Echo (1737 ns/op)       | GoKit (1924 ns/op) ✅ | Chi (1980 ns/op)    |
+| **JSON Response**                | Echo (1753 ns/op)       | GoKit (1779 ns/op) ✅ | Chi (1874 ns/op)    |
+| **Large JSON (1000 items)**      | GoKit (643798 ns/op) 🏆 | Chi (646694 ns/op)    | Echo (647302 ns/op) |
+| **3 Middlewares**                | Echo (1727 ns/op)       | GoKit (1775 ns/op) ✅ | Chi (1966 ns/op)    |
+| **5 Middlewares**                | Echo (2132 ns/op)       | GoKit (2181 ns/op) ✅ | Chi (2282 ns/op)    |
+| **JSON Parsing**                 | Chi (2667 ns/op)        | GoKit (2794 ns/op) ✅ | Echo (2858 ns/op)   |
+| **Complex Routing (100 routes)** | Echo (1925 ns/op)       | GoKit (2045 ns/op) ✅ | Chi (2082 ns/op)    |
+| **Parallel Requests**            | Echo (1273 ns/op)       | GoKit (1286 ns/op) ✅ | Chi (1338 ns/op)    |
 
 ---
 
