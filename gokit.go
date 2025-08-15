@@ -28,6 +28,7 @@ type Context interface {
 	context.Context
 	Request() *http.Request
 	ResponseWriter() http.ResponseWriter
+	Param(key string) string
 }
 
 // Router is the main routing interface for handling HTTP requests.
@@ -71,33 +72,7 @@ type Route struct {
 	Pattern string
 }
 
-// Option configures a Router during creation.
-type Option[C Context] func(*mux[C])
-
 // NewRouter creates a new router with the given options.
 func NewRouter[C Context](opts ...Option[C]) Router[C] {
 	return newMux[C](opts...)
-}
-
-// WithErrorHandler sets a custom error handler for the router.
-func WithErrorHandler[C Context](h ErrorHandler[C]) Option[C] {
-	return func(m *mux[C]) {
-		if h != nil {
-			m.errorHandler = h
-		}
-	}
-}
-
-// WithMiddleware adds middleware to the router.
-func WithMiddleware[C Context](middlewares ...Middleware[C]) Option[C] {
-	return func(m *mux[C]) {
-		m.middlewares = append(m.middlewares, middlewares...)
-	}
-}
-
-// WithContextFactory sets a custom context factory for the router.
-func WithContextFactory[C Context](f func(http.ResponseWriter, *http.Request) C) Option[C] {
-	return func(m *mux[C]) {
-		m.newContext = f
-	}
 }
