@@ -87,7 +87,7 @@ func (r *sseResponse) Render(w http.ResponseWriter, req *http.Request) error {
 
 	w.WriteHeader(http.StatusOK)
 
-	fmt.Fprintf(w, ": connected\n\n")
+	_, _ = fmt.Fprintf(w, ": connected\n\n")
 	flusher.Flush()
 
 	var keepAliveTicker *time.Ticker
