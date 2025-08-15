@@ -60,8 +60,8 @@ func (c *Context) setParam(key, value string) {
 // NewContext creates a new Context instance.
 func NewContext(w http.ResponseWriter, r *http.Request) *Context {
 	return &Context{
-		w:      w,
-		r:      r,
-		params: make(map[string]string),
+		w: w,
+		r: r,
+		// params map is lazily initialized in setParam when needed
 	}
 }

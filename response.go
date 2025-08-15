@@ -1,7 +1,6 @@
 package gokit
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -97,41 +96,5 @@ func NoContent() Response {
 func Status(code int) Response {
 	return baseResponse{
 		statusCode: code,
-	}
-}
-
-// JSON creates an application/json response with 200 OK status.
-// If marshaling fails, it panics with an Error that can be caught by recovery middleware.
-func JSON(v any) Response {
-	data, err := json.Marshal(v)
-	if err != nil {
-		panic(Error{
-			Status:  http.StatusInternalServerError,
-			Code:    "JSON_MARSHAL_ERROR",
-			Message: "Failed to encode response",
-		})
-	}
-	return baseResponse{
-		content:     data,
-		statusCode:  http.StatusOK,
-		contentType: "application/json; charset=utf-8",
-	}
-}
-
-// JSONWithStatus creates an application/json response with custom status code.
-// If marshaling fails, it panics with an Error that can be caught by recovery middleware.
-func JSONWithStatus(v any, status int) Response {
-	data, err := json.Marshal(v)
-	if err != nil {
-		panic(Error{
-			Status:  http.StatusInternalServerError,
-			Code:    "JSON_MARSHAL_ERROR",
-			Message: "Failed to encode response",
-		})
-	}
-	return baseResponse{
-		content:     data,
-		statusCode:  status,
-		contentType: "application/json; charset=utf-8",
 	}
 }
