@@ -33,26 +33,26 @@ type jsonResponse struct {
 func (r *jsonResponse) Render(w http.ResponseWriter, req *http.Request) error {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
+	// Determine final status code
 	status := r.statusCode
-	if r.data == nil {
-		status = http.StatusNoContent
-	}
-
-	switch status {
-	case http.StatusNoContent:
-		w.WriteHeader(status)
-		return nil
-	case http.StatusNotModified:
-		w.WriteHeader(status)
-		return nil
-	default:
-		if status == 0 {
-			status = http.StatusOK
+	if status == 0 {
+		if r.data == nil {
+			status = http.StatusNoContent // 204 for nil data with unspecified status
+		} else {
+			status = http.StatusOK // 200 for non-nil data with unspecified status
 		}
-		w.WriteHeader(status)
 	}
 
-	// Encode directly to response writer - no intermediate buffer
+	// Write status header
+	w.WriteHeader(status)
+
+	// Handle special status codes that shouldn't have body per HTTP spec
+	switch status {
+	case http.StatusNoContent, http.StatusNotModified:
+		return nil // No body for 204 or 304
+	}
+
+	// For all other statuses, encode the data (nil encodes as "null")
 	// This is much more memory efficient for large JSON payloads
 	return json.NewEncoder(w).Encode(r.data)
 }

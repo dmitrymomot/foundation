@@ -193,7 +193,7 @@ func TestJSONWithStatus(t *testing.T) {
 			name:       "no_content_with_data",
 			value:      map[string]string{"data": "should still be sent"},
 			statusCode: http.StatusNoContent,
-			expected:   `{"data":"should still be sent"}`,
+			expected:   ``, // 204 No Content must not have a body per HTTP spec
 		},
 	}
 
@@ -217,12 +217,17 @@ func TestJSONWithStatus(t *testing.T) {
 			assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
 
 			// Parse both expected and actual JSON to compare them properly
-			var expectedJSON, actualJSON any
-			err = json.Unmarshal([]byte(tt.expected), &expectedJSON)
-			assert.NoError(t, err)
-			err = json.Unmarshal(w.Body.Bytes(), &actualJSON)
-			assert.NoError(t, err)
-			assert.Equal(t, expectedJSON, actualJSON)
+			// Handle empty body for 204 No Content
+			if tt.expected == "" {
+				assert.Empty(t, w.Body.String())
+			} else {
+				var expectedJSON, actualJSON any
+				err = json.Unmarshal([]byte(tt.expected), &expectedJSON)
+				assert.NoError(t, err)
+				err = json.Unmarshal(w.Body.Bytes(), &actualJSON)
+				assert.NoError(t, err)
+				assert.Equal(t, expectedJSON, actualJSON)
+			}
 		})
 	}
 }
