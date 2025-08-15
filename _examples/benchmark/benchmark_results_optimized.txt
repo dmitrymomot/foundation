@@ -1,0 +1,33 @@
+goos: darwin
+goarch: arm64
+pkg: benchmark
+cpu: Apple M3 Max
+BenchmarkGoKit_StaticRoute-4          	 2603385	      1402 ns/op	    6233 B/op	      22 allocs/op
+BenchmarkGoKit_ParameterizedRoute-4   	 1879622	      1924 ns/op	    6994 B/op	      30 allocs/op
+BenchmarkGoKit_JSONResponse-4         	 2036570	      1779 ns/op	    6411 B/op	      22 allocs/op
+BenchmarkGoKit_LargeJSON-4            	    5607	    643798 ns/op	  393502 B/op	    5022 allocs/op
+BenchmarkGoKit_Middleware3-4          	 2037871	      1775 ns/op	    6705 B/op	      31 allocs/op
+BenchmarkGoKit_Middleware5-4          	 1660300	      2181 ns/op	    6858 B/op	      38 allocs/op
+BenchmarkGoKit_ParseJSON-4            	 1286496	      2794 ns/op	    8083 B/op	      41 allocs/op
+BenchmarkGoKit_ComplexRouting-4       	 1762594	      2045 ns/op	    7034 B/op	      30 allocs/op
+BenchmarkChi_StaticRoute-4            	 2090436	      1714 ns/op	    6490 B/op	      21 allocs/op
+BenchmarkChi_ParameterizedRoute-4     	 1821535	      1980 ns/op	    7244 B/op	      27 allocs/op
+BenchmarkChi_JSONResponse-4           	 1931256	      1874 ns/op	    6692 B/op	      21 allocs/op
+BenchmarkChi_LargeJSON-4              	    5592	    646694 ns/op	  388331 B/op	    5021 allocs/op
+BenchmarkChi_Middleware3-4            	 1840454	      1966 ns/op	    6906 B/op	      27 allocs/op
+BenchmarkChi_Middleware5-4            	 1581706	      2282 ns/op	    6988 B/op	      32 allocs/op
+BenchmarkChi_ParseJSON-4              	 1359328	      2667 ns/op	    7996 B/op	      38 allocs/op
+BenchmarkChi_ComplexRouting-4         	 1722580	      2082 ns/op	    7284 B/op	      27 allocs/op
+BenchmarkEcho_StaticRoute-4           	 2660024	      1351 ns/op	    6122 B/op	      19 allocs/op
+BenchmarkEcho_ParameterizedRoute-4    	 2067327	      1737 ns/op	    6588 B/op	      24 allocs/op
+BenchmarkEcho_JSONResponse-4          	 2068647	      1753 ns/op	    6372 B/op	      20 allocs/op
+BenchmarkEcho_LargeJSON-4             	    5552	    647302 ns/op	  388012 B/op	    5020 allocs/op
+BenchmarkEcho_Middleware3-4           	 2095164	      1727 ns/op	    6594 B/op	      28 allocs/op
+BenchmarkEcho_Middleware5-4           	 1690507	      2132 ns/op	    6748 B/op	      35 allocs/op
+BenchmarkEcho_ParseJSON-4             	 1270228	      2858 ns/op	    8044 B/op	      39 allocs/op
+BenchmarkEcho_ComplexRouting-4        	 1914319	      1925 ns/op	    6628 B/op	      24 allocs/op
+BenchmarkGoKit_Parallel-4             	 2877075	      1286 ns/op	    6611 B/op	      26 allocs/op
+BenchmarkChi_Parallel-4               	 2695258	      1338 ns/op	    6894 B/op	      25 allocs/op
+BenchmarkEcho_Parallel-4              	 2840362	      1273 ns/op	    6574 B/op	      24 allocs/op
+PASS
+ok  	benchmark	144.490s
