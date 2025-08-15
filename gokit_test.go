@@ -655,7 +655,7 @@ func TestRouter_CustomErrorHandler(t *testing.T) {
 	customErrorHandler := func(ctx *gokit.Context, err error) {
 		handledError = err
 		ctx.ResponseWriter().WriteHeader(http.StatusTeapot)
-		ctx.ResponseWriter().Write([]byte("custom error"))
+		_, _ = ctx.ResponseWriter().Write([]byte("custom error"))
 	}
 
 	router := gokit.NewRouter[*gokit.Context](
