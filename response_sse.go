@@ -23,38 +23,45 @@ type sseResponse struct {
 	onError     func(context.Context, error) // Optional error handler
 }
 
+// EventOption configures Server-Sent Events behavior.
 type EventOption func(*sseResponse)
 
+// WithEventName sets the event name for SSE events.
 func WithEventName(name string) EventOption {
 	return func(s *sseResponse) {
 		s.eventName = name
 	}
 }
 
+// WithEventID sets a fixed event ID for all SSE events.
 func WithEventID(id string) EventOption {
 	return func(s *sseResponse) {
 		s.eventID = id
 	}
 }
 
+// WithEventIDGenerator sets a function to generate event IDs dynamically based on data.
 func WithEventIDGenerator(fn func(data any) string) EventOption {
 	return func(s *sseResponse) {
 		s.idGen = fn
 	}
 }
 
+// WithReconnectTime sets the client reconnection time in milliseconds for SSE.
 func WithReconnectTime(milliseconds int) EventOption {
 	return func(s *sseResponse) {
 		s.reconnect = milliseconds
 	}
 }
 
+// WithKeepAlive sets the keep-alive interval for SSE connections.
 func WithKeepAlive(interval time.Duration) EventOption {
 	return func(s *sseResponse) {
 		s.keepAlive = interval
 	}
 }
 
+// WithoutKeepAlive disables keep-alive messages for SSE connections.
 func WithoutKeepAlive() EventOption {
 	return func(s *sseResponse) {
 		s.noKeepAlive = true
@@ -69,6 +76,7 @@ func WithSSEErrorHandler(handler func(context.Context, error)) EventOption {
 	}
 }
 
+// SSE creates a Server-Sent Events response from a channel of data.
 func SSE(events <-chan any, opts ...EventOption) Response {
 	r := &sseResponse{
 		events:    events,

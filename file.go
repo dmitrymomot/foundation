@@ -17,7 +17,8 @@ type fileResponse struct {
 
 // Render serves the file using http.ServeFile for efficiency.
 func (r fileResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	cleanPath := filepath.Clean(r.path) // prevent directory traversal
+	// Prevent directory traversal attacks like ../../etc/passwd
+	cleanPath := filepath.Clean(r.path)
 
 	info, err := os.Stat(cleanPath)
 	if err != nil {
@@ -28,14 +29,12 @@ func (r fileResponse) Render(w http.ResponseWriter, req *http.Request) error {
 		return err
 	}
 
-	// Don't serve directories
 	if info.IsDir() {
 		http.NotFound(w, req)
 		return nil
 	}
 
-	// Use http.ServeFile for efficient file serving
-	// It handles Range requests, If-Modified-Since, and content type detection
+	// http.ServeFile handles Range requests, If-Modified-Since, and content type detection
 	http.ServeFile(w, req, cleanPath)
 	return nil
 }
@@ -48,7 +47,7 @@ type downloadResponse struct {
 
 // Render serves the file as a download with Content-Disposition header.
 func (r downloadResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	cleanPath := filepath.Clean(r.path) // prevent directory traversal
+	cleanPath := filepath.Clean(r.path)
 
 	info, err := os.Stat(cleanPath)
 	if err != nil {
@@ -59,13 +58,11 @@ func (r downloadResponse) Render(w http.ResponseWriter, req *http.Request) error
 		return err
 	}
 
-	// Don't serve directories
 	if info.IsDir() {
 		http.NotFound(w, req)
 		return nil
 	}
 
-	// Determine filename for download
 	downloadName := r.filename
 	if downloadName == "" {
 		downloadName = filepath.Base(cleanPath)
@@ -74,14 +71,12 @@ func (r downloadResponse) Render(w http.ResponseWriter, req *http.Request) error
 	disposition := fmt.Sprintf(`attachment; filename="%s"`, downloadName)
 	w.Header().Set("Content-Disposition", disposition)
 
-	// Detect and set content type
 	contentType := mime.TypeByExtension(filepath.Ext(cleanPath))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", contentType)
 
-	// Serve the file
 	http.ServeFile(w, req, cleanPath)
 	return nil
 }
@@ -100,7 +95,6 @@ func (r attachmentResponse) Render(w http.ResponseWriter, req *http.Request) err
 
 	contentType := r.contentType
 	if contentType == "" {
-		// Try to detect from filename extension
 		contentType = mime.TypeByExtension(filepath.Ext(r.filename))
 		if contentType == "" {
 			contentType = "application/octet-stream"
@@ -137,7 +131,7 @@ func Download(path string, filename string) Response {
 // If contentType is empty, it will be detected from the filename extension,
 // defaulting to "application/octet-stream" if detection fails.
 func Attachment(data []byte, filename string, contentType string) Response {
-	// Sanitize filename to prevent header injection
+	// Prevent HTTP header injection attacks through newlines and quotes
 	filename = strings.ReplaceAll(filename, "\n", "")
 	filename = strings.ReplaceAll(filename, "\r", "")
 	filename = strings.ReplaceAll(filename, "\"", "'")
@@ -168,7 +162,6 @@ type streamFileResponse struct {
 
 // Render streams data from the reader as a downloadable file.
 func (r *streamFileResponse) Render(w http.ResponseWriter, req *http.Request) error {
-	// Sanitize filename
 	filename := strings.ReplaceAll(r.filename, "\n", "")
 	filename = strings.ReplaceAll(filename, "\r", "")
 	filename = strings.ReplaceAll(filename, "\"", "'")
@@ -185,7 +178,6 @@ func (r *streamFileResponse) Render(w http.ResponseWriter, req *http.Request) er
 	}
 	w.Header().Set("Content-Type", contentType)
 
-	// Stream the content
 	w.WriteHeader(http.StatusOK)
 	_, err := io.Copy(w, r.reader)
 	return err

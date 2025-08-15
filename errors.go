@@ -82,8 +82,9 @@ var (
 func defaultErrorHandler[C contexter](ctx C, err error) {
 	w := ctx.ResponseWriter()
 
+	// Prevent double-writing responses which causes HTTP protocol errors
 	if ww, ok := w.(*responseWriter); ok && ww.Written() {
-		return // Don't write response again, already written
+		return
 	}
 
 	var appErr Error
@@ -96,7 +97,6 @@ func defaultErrorHandler[C contexter](ctx C, err error) {
 	case errors.Is(err, ErrNotFound):
 		http.Error(w, "404 Not Found", http.StatusNotFound)
 	case errors.Is(err, ErrMethodNotAllowed):
-		// Allow header should already be set by the caller if applicable
 		http.Error(w, "405 Method Not Allowed", http.StatusMethodNotAllowed)
 	case errors.Is(err, ErrNilResponse):
 		http.Error(w, "500 Internal Server Error - nil response", http.StatusInternalServerError)

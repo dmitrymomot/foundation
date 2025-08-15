@@ -6,7 +6,6 @@ import (
 )
 
 // baseResponse implements Response interface with bytes content.
-// It provides a flexible foundation for various content types.
 type baseResponse struct {
 	content     []byte
 	statusCode  int
@@ -102,7 +101,6 @@ func Status(code int) Response {
 }
 
 // JSON creates an application/json response with 200 OK status.
-// It marshals the provided value to JSON format.
 // If marshaling fails, it panics with an Error that can be caught by recovery middleware.
 func JSON(v any) Response {
 	data, err := json.Marshal(v)
@@ -121,7 +119,6 @@ func JSON(v any) Response {
 }
 
 // JSONWithStatus creates an application/json response with custom status code.
-// It marshals the provided value to JSON format.
 // If marshaling fails, it panics with an Error that can be caught by recovery middleware.
 func JSONWithStatus(v any, status int) Response {
 	data, err := json.Marshal(v)
