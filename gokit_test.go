@@ -120,9 +120,9 @@ func TestRouter_MethodHandler(t *testing.T) {
 
 	router := gokit.NewRouter[*gokit.Context]()
 
-	router.Method("GET", "/custom", func(ctx *gokit.Context) gokit.Response {
+	router.Method("/custom", func(ctx *gokit.Context) gokit.Response {
 		return gokit.String("CUSTOM_GET")
-	})
+	}, "GET")
 
 	req := httptest.NewRequest("GET", "/custom", nil)
 	w := httptest.NewRecorder()
@@ -779,9 +779,87 @@ func TestRouter_InvalidMethod(t *testing.T) {
 	router := gokit.NewRouter[*gokit.Context]()
 
 	assert.Panics(t, func() {
-		router.Method("INVALID", "/test", func(ctx *gokit.Context) gokit.Response {
+		router.Method("/test", func(ctx *gokit.Context) gokit.Response {
+			return gokit.String("test")
+		}, "INVALID")
+	})
+}
+
+func TestRouter_MethodMultipleMethods(t *testing.T) {
+	t.Parallel()
+
+	router := gokit.NewRouter[*gokit.Context]()
+
+	router.Method("/api", func(ctx *gokit.Context) gokit.Response {
+		return gokit.String("success")
+	}, "GET", "POST", "PUT")
+
+	tests := []struct {
+		method string
+		status int
+		body   string
+	}{
+		{"GET", http.StatusOK, "success"},
+		{"POST", http.StatusOK, "success"},
+		{"PUT", http.StatusOK, "success"},
+		{"DELETE", http.StatusMethodNotAllowed, "405 Method Not Allowed"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.method, func(t *testing.T) {
+			req := httptest.NewRequest(test.method, "/api", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, test.status, w.Code)
+			assert.Contains(t, w.Body.String(), test.body)
+		})
+	}
+}
+
+func TestRouter_MethodNoMethodsPanic(t *testing.T) {
+	t.Parallel()
+
+	router := gokit.NewRouter[*gokit.Context]()
+
+	assert.Panics(t, func() {
+		router.Method("/test", func(ctx *gokit.Context) gokit.Response {
 			return gokit.String("test")
 		})
+	})
+}
+
+func TestRouter_MethodDuplicateMethods(t *testing.T) {
+	t.Parallel()
+
+	router := gokit.NewRouter[*gokit.Context]()
+
+	router.Method("/api", func(ctx *gokit.Context) gokit.Response {
+		return gokit.String("success")
+	}, "GET", "GET", "POST")
+
+	tests := []string{"GET", "POST"}
+	for _, method := range tests {
+		t.Run(method, func(t *testing.T) {
+			req := httptest.NewRequest(method, "/api", nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, "success", w.Body.String())
+		})
+	}
+}
+
+func TestRouter_MethodInvalidMethodInList(t *testing.T) {
+	t.Parallel()
+
+	router := gokit.NewRouter[*gokit.Context]()
+
+	assert.Panics(t, func() {
+		router.Method("/test", func(ctx *gokit.Context) gokit.Response {
+			return gokit.String("test")
+		}, "GET", "INVALID", "POST")
 	})
 }
 
