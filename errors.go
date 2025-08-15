@@ -11,6 +11,20 @@ var (
 	ErrNotFound         = errors.New("route not found")
 	ErrMethodNotAllowed = errors.New("method not allowed")
 	ErrNilResponse      = errors.New("handler returned nil response")
+
+	// Configuration errors
+	ErrNoContextFactory = errors.New("no context factory provided and C is not *baseContext")
+	ErrInvalidMethod    = errors.New("invalid http method")
+	ErrInvalidPattern   = errors.New("routing pattern must begin with '/'")
+	ErrNilRouter        = errors.New("cannot mount nil router")
+	ErrNilSubrouter     = errors.New("subrouter function cannot be nil")
+
+	// Pattern parsing errors
+	ErrInvalidRegexp    = errors.New("invalid regexp pattern in route param")
+	ErrMissingChild     = errors.New("replacing missing child")
+	ErrWildcardPosition = errors.New("wildcard '*' must be the last pattern in a route")
+	ErrParamDelimiter   = errors.New("route param closing delimiter '}' is missing")
+	ErrDuplicateParam   = errors.New("routing pattern contains duplicate param key")
 )
 
 // defaultErrorHandler provides default error handling.

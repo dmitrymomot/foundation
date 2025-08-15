@@ -67,10 +67,7 @@ func (c *baseContext) reset() {
 	c.w = nil
 	c.r = nil
 	if c.params != nil {
-		// Clear the map for reuse
-		for k := range c.params {
-			delete(c.params, k)
-		}
+		clear(c.params)
 	}
 }
 

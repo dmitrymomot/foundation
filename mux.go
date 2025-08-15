@@ -41,7 +41,7 @@ func newMux[C Context](opts ...Option[C]) *mux[C] {
 				return any(newBaseContext(w, r)).(C)
 			}
 			// Otherwise panic - user must provide a context factory
-			panic("gokit: no context factory provided and C is not *baseContext")
+			panic(ErrNoContextFactory)
 		}
 	}
 
@@ -217,7 +217,7 @@ func (m *mux[C]) Handle(pattern string, handler HandlerFunc[C]) {
 func (m *mux[C]) Method(method, pattern string, handler HandlerFunc[C]) {
 	mt, ok := methodMap[strings.ToUpper(method)]
 	if !ok {
-		panic(fmt.Sprintf("gokit: '%s' http method is not supported", method))
+		panic(fmt.Errorf("%w: %s", ErrInvalidMethod, method))
 	}
 	m.handle(mt, pattern, handler)
 }
@@ -262,7 +262,7 @@ func (m *mux[C]) Group(fn func(r Router[C])) Router[C] {
 // Route creates a new sub-router mounted at the given pattern.
 func (m *mux[C]) Route(pattern string, fn func(r Router[C])) Router[C] {
 	if fn == nil {
-		panic(fmt.Sprintf("gokit: attempting to Route() a nil subrouter on '%s'", pattern))
+		panic(fmt.Errorf("%w on '%s'", ErrNilSubrouter, pattern))
 	}
 	subRouter := newMux[C]()
 
@@ -279,7 +279,7 @@ func (m *mux[C]) Route(pattern string, fn func(r Router[C])) Router[C] {
 // Mount attaches a sub-router at the given pattern.
 func (m *mux[C]) Mount(pattern string, sub Router[C]) {
 	if sub == nil {
-		panic(fmt.Sprintf("gokit: attempting to Mount() a nil router on '%s'", pattern))
+		panic(fmt.Errorf("%w on '%s'", ErrNilRouter, pattern))
 	}
 
 	// Type assertion to access private mux
@@ -324,7 +324,7 @@ func (m *mux[C]) Routes() []Route {
 // handle registers a handler in the routing tree.
 func (m *mux[C]) handle(method methodTyp, pattern string, handler HandlerFunc[C]) *node[C] {
 	if len(pattern) == 0 || pattern[0] != '/' {
-		panic(fmt.Sprintf("gokit: routing pattern must begin with '/' in '%s'", pattern))
+		panic(fmt.Errorf("%w: '%s'", ErrInvalidPattern, pattern))
 	}
 
 	// Build endpoint handler with inline middlewares for the route

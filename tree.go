@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -59,24 +58,6 @@ var reverseMethodMap = map[methodTyp]string{
 type routeParams struct {
 	Keys   []string
 	Values []string
-}
-
-// RegisterMethod adds support for custom HTTP method handlers.
-func RegisterMethod(method string) {
-	if method == "" {
-		return
-	}
-	method = strings.ToUpper(method)
-	if _, ok := methodMap[method]; ok {
-		return
-	}
-	n := len(methodMap)
-	if n > strconv.IntSize-2 {
-		panic(fmt.Sprintf("gokit: max number of methods reached (%d)", strconv.IntSize))
-	}
-	mt := methodTyp(2 << n)
-	methodMap[method] = mt
-	mALL |= mt
 }
 
 type nodeTyp uint8
@@ -255,7 +236,7 @@ func (n *node[C]) addChild(child *node[C], prefix string) *node[C] {
 		if segTyp == ntRegexp {
 			rex, err := regexp.Compile(segRexpat)
 			if err != nil {
-				panic(fmt.Sprintf("gokit: invalid regexp pattern '%s' in route param", segRexpat))
+				panic(fmt.Errorf("%w: '%s'", ErrInvalidRegexp, segRexpat))
 			}
 			child.prefix = segRexpat
 			child.rex = rex
@@ -317,7 +298,7 @@ func (n *node[C]) addChild(child *node[C], prefix string) *node[C] {
 }
 
 func (n *node[C]) replaceChild(label, tail byte, child *node[C]) {
-	for i := range len(n.children[child.typ]) {
+	for i := range n.children[child.typ] {
 		if n.children[child.typ][i].label == label && n.children[child.typ][i].tail == tail {
 			n.children[child.typ][i] = child
 			n.children[child.typ][i].label = label
@@ -325,12 +306,12 @@ func (n *node[C]) replaceChild(label, tail byte, child *node[C]) {
 			return
 		}
 	}
-	panic("gokit: replacing missing child")
+	panic(ErrMissingChild)
 }
 
 func (n *node[C]) getEdge(ntyp nodeTyp, label, tail byte, prefix string) *node[C] {
 	nds := n.children[ntyp]
-	for i := range len(nds) {
+	for i := range nds {
 		if nds[i].label == label && nds[i].tail == tail {
 			if ntyp == ntRegexp && nds[i].prefix != prefix {
 				continue
@@ -426,7 +407,7 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 			}
 
 			// serially loop through each node grouped by the tail delimiter
-			for idx := range len(nds) {
+			for idx := range nds {
 				xn = nds[idx]
 
 				// label for param nodes is the delimiter byte
@@ -602,7 +583,7 @@ func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int) {
 
 	// Sanity check
 	if ps >= 0 && ws >= 0 && ws < ps {
-		panic("gokit: wildcard '*' must be the last pattern in a route, otherwise use a '{param}'")
+		panic(ErrWildcardPosition)
 	}
 
 	var tail byte = '/' // Default endpoint tail to / byte
@@ -626,7 +607,7 @@ func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int) {
 			}
 		}
 		if pe == ps {
-			panic("gokit: route param closing delimiter '}' is missing")
+			panic(ErrParamDelimiter)
 		}
 
 		key := pattern[ps+1 : pe]
@@ -655,7 +636,7 @@ func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int) {
 
 	// Wildcard pattern as finale
 	if ws < len(pattern)-1 {
-		panic("gokit: wildcard '*' must be the last value in a route. trim trailing text or use a '{param}' instead")
+		panic(ErrWildcardPosition)
 	}
 	return ntCatchAll, "*", "", 0, ws, len(pattern)
 }
@@ -668,9 +649,9 @@ func patParamKeys(pattern string) []string {
 		if ptyp == ntStatic {
 			return paramKeys
 		}
-		for i := range len(paramKeys) {
+		for i := range paramKeys {
 			if paramKeys[i] == paramKey {
-				panic(fmt.Sprintf("gokit: routing pattern '%s' contains duplicate param key, '%s'", pattern, paramKey))
+				panic(fmt.Errorf("%w: '%s' has duplicate key '%s'", ErrDuplicateParam, pattern, paramKey))
 			}
 		}
 		paramKeys = append(paramKeys, paramKey)
