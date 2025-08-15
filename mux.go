@@ -187,11 +187,16 @@ func (m *mux[C]) Method(pattern string, handler HandlerFunc[C], methods ...strin
 		panic(fmt.Errorf("%w: no methods provided", ErrInvalidMethod))
 	}
 
+	seen := make(map[methodTyp]bool)
 	for _, method := range methods {
 		mt, ok := methodMap[strings.ToUpper(method)]
 		if !ok {
 			panic(fmt.Errorf("%w: %s", ErrInvalidMethod, method))
 		}
+		if seen[mt] {
+			continue
+		}
+		seen[mt] = true
 		m.handle(mt, pattern, handler)
 	}
 }
