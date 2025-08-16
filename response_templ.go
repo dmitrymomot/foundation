@@ -30,7 +30,10 @@ func (r *templResponse) Render(w http.ResponseWriter, req *http.Request) error {
 
 	// Render the templ component with request context
 	// This allows components to access request-scoped values
-	return r.component.Render(req.Context(), w)
+	if err := r.component.Render(req.Context(), w); err != nil {
+		return ErrInternalServerError.WithError(err)
+	}
+	return nil
 }
 
 // Templ creates an HTML response using a templ component with 200 OK status.

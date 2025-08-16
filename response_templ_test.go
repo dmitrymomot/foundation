@@ -173,7 +173,14 @@ func TestTempl_ComponentError(t *testing.T) {
 
 	err := response.Render(w, req)
 	assert.Error(t, err)
-	assert.Equal(t, "render failed", err.Error())
+
+	// Check that it's an Error type with the original error in details
+	var appErr gokit.Error
+	if assert.ErrorAs(t, err, &appErr) {
+		assert.Equal(t, "Internal Server Error", appErr.Message)
+		assert.Equal(t, "internal_server_error", appErr.Code)
+		assert.Equal(t, "render failed", appErr.Details["cause"])
+	}
 
 	// Headers should still be set
 	assert.Equal(t, "text/html; charset=utf-8", w.Header().Get("Content-Type"))
