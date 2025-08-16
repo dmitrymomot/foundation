@@ -188,7 +188,7 @@ func TestRouterErrors(t *testing.T) {
 	}{
 		{gokit.ErrNotFound, http.StatusNotFound, "not_found", "Not Found"},
 		{gokit.ErrMethodNotAllowed, http.StatusMethodNotAllowed, "method_not_allowed", "Method Not Allowed"},
-		{gokit.ErrNilResponse, http.StatusInternalServerError, "nil_response", "handler returned nil response"},
+		{gokit.ErrNilResponse, http.StatusInternalServerError, "internal_server_error", "handler returned nil response"},
 	}
 
 	for _, tt := range tests {
