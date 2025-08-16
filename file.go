@@ -1,6 +1,8 @@
 package gokit
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"mime"
@@ -181,4 +183,34 @@ func (r *streamFileResponse) Render(w http.ResponseWriter, req *http.Request) er
 	w.WriteHeader(http.StatusOK)
 	_, err := io.Copy(w, r.reader)
 	return err
+}
+
+// CSV creates a response for downloading CSV data.
+// The records should be a 2D slice where each inner slice is a row.
+// The file will be served with content type "text/csv" and appropriate
+// download headers.
+func CSV(records [][]string, filename string) Response {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+
+	// Write all records
+	if err := w.WriteAll(records); err != nil {
+		// Return error response if CSV writing fails
+		return ErrInternalServerError.WithMessage("failed to generate CSV")
+	}
+
+	// Ensure .csv extension
+	if !strings.HasSuffix(filename, ".csv") {
+		filename = filename + ".csv"
+	}
+
+	return Attachment(buf.Bytes(), filename, "text/csv; charset=utf-8")
+}
+
+// CSVWithHeaders creates a response for downloading CSV data with custom headers.
+// The first parameter is the header row, followed by data rows.
+// This is a convenience wrapper around CSV for common use cases.
+func CSVWithHeaders(headers []string, rows [][]string, filename string) Response {
+	records := append([][]string{headers}, rows...)
+	return CSV(records, filename)
 }
