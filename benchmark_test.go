@@ -20,7 +20,7 @@ func BenchmarkJSON(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		response := gokit.JSON(data)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/", nil)
@@ -32,7 +32,7 @@ func BenchmarkString(b *testing.B) {
 	content := "Hello, World! This is a test response."
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		response := gokit.String(content)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/", nil)
@@ -43,10 +43,10 @@ func BenchmarkString(b *testing.B) {
 // Benchmark streaming
 func BenchmarkStreamJSON(b *testing.B) {
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		items := make(chan any, 100)
 		go func() {
-			for j := 0; j < 100; j++ {
+			for j := range 100 {
 				items <- map[string]int{"id": j, "value": j * 2}
 			}
 			close(items)
@@ -62,10 +62,10 @@ func BenchmarkStreamJSON(b *testing.B) {
 // Benchmark SSE
 func BenchmarkSSE(b *testing.B) {
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		events := make(chan any, 10)
 		go func() {
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				events <- map[string]int{"count": j}
 			}
 			close(events)
@@ -96,7 +96,7 @@ func BenchmarkRouter(b *testing.B) {
 
 	b.ResetTimer()
 	b.Run("static_route", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/", nil)
 			router.ServeHTTP(w, req)
@@ -104,7 +104,7 @@ func BenchmarkRouter(b *testing.B) {
 	})
 
 	b.Run("parameterized_route", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("GET", "/users/123", nil)
 			router.ServeHTTP(w, req)
@@ -112,7 +112,7 @@ func BenchmarkRouter(b *testing.B) {
 	})
 
 	b.Run("post_route", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/users", nil)
 			router.ServeHTTP(w, req)
@@ -151,7 +151,7 @@ func BenchmarkMiddleware(b *testing.B) {
 	})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/", nil)
 		router.ServeHTTP(w, req)
@@ -167,7 +167,7 @@ func BenchmarkErrorHandling(b *testing.B) {
 	})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/panic", nil)
 		router.ServeHTTP(w, req)
@@ -193,7 +193,7 @@ func BenchmarkLargeJSON(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		response := gokit.JSON(data)
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/", nil)
@@ -219,7 +219,7 @@ func BenchmarkFileResponse(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		response := gokit.File(tmpfile.Name())
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/", nil)
@@ -232,7 +232,7 @@ func BenchmarkAttachment(b *testing.B) {
 	data := bytes.Repeat([]byte("test data\n"), 100)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		response := gokit.Attachment(data, "test.txt", "text/plain")
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/", nil)
@@ -250,7 +250,7 @@ func BenchmarkMemoryAllocations(b *testing.B) {
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/json", nil)
 		router.ServeHTTP(w, req)

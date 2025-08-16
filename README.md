@@ -26,10 +26,6 @@
 
 ## Additional Response Types (Planned)
 
-### Data Export Responses
-
-- `CSV(records [][]string)` - Export CSV data
-
 ### Template Responses
 
 - `Template(name string, data any)` - Render HTML templates
