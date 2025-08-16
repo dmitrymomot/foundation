@@ -2,7 +2,7 @@ package gokit
 
 import "net/http"
 
-// responseWriter wraps http.ResponseWriter to track if response was written.
+// responseWriter wraps http.ResponseWriter to track response state.
 type responseWriter struct {
 	http.ResponseWriter
 	written bool
@@ -32,4 +32,13 @@ func (w *responseWriter) Written() bool {
 // Status returns the HTTP status code of the response.
 func (w *responseWriter) Status() int {
 	return w.status
+}
+
+// Flush implements http.Flusher interface if the underlying ResponseWriter supports it.
+func (w *responseWriter) Flush() bool {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+		return true
+	}
+	return false
 }

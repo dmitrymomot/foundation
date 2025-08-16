@@ -585,7 +585,7 @@ func TestRouter_ErrorHandling(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Contains(t, w.Body.String(), "404 Not Found")
+		assert.Contains(t, w.Body.String(), "Not Found")
 	})
 
 	t.Run("method_not_allowed", func(t *testing.T) {
@@ -600,7 +600,7 @@ func TestRouter_ErrorHandling(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusMethodNotAllowed, w.Code)
-		assert.Contains(t, w.Body.String(), "405 Method Not Allowed")
+		assert.Contains(t, w.Body.String(), "Method Not Allowed")
 		assert.Equal(t, "GET", w.Header().Get("Allow"))
 	})
 
@@ -645,7 +645,7 @@ func TestRouter_PanicRecovery(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, w.Body.String(), "500 Internal Server Error")
+	assert.Contains(t, w.Body.String(), "test panic")
 }
 
 func TestRouter_CustomErrorHandler(t *testing.T) {
@@ -802,7 +802,7 @@ func TestRouter_MethodMultipleMethods(t *testing.T) {
 		{"GET", http.StatusOK, "success"},
 		{"POST", http.StatusOK, "success"},
 		{"PUT", http.StatusOK, "success"},
-		{"DELETE", http.StatusMethodNotAllowed, "405 Method Not Allowed"},
+		{"DELETE", http.StatusMethodNotAllowed, "Method Not Allowed"},
 	}
 
 	for _, test := range tests {
@@ -914,7 +914,7 @@ func TestRouter_ConcurrentAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	numGoroutines := 100
 
-	for i := 0; i < numGoroutines; i++ {
+	for i := range numGoroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()

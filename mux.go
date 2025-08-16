@@ -24,20 +24,17 @@ func newMux[C contexter](opts ...Option[C]) *mux[C] {
 		errorHandler: defaultErrorHandler[C],
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(m)
 	}
 
-	// If no context factory provided, check if C is *Context
+	// Auto-detect Context type if no factory provided
 	if m.newContext == nil {
 		m.newContext = func(w http.ResponseWriter, r *http.Request) C {
-			// Try to create a Context if C is compatible
 			var zero C
 			if _, ok := any(zero).(*Context); ok {
 				return any(NewContext(w, r)).(C)
 			}
-			// Otherwise panic - user must provide a context factory
 			panic(ErrNoContextFactory)
 		}
 	}
@@ -47,13 +44,10 @@ func newMux[C contexter](opts ...Option[C]) *mux[C] {
 
 // ServeHTTP implements http.Handler interface.
 func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Track response state
 	ww := &responseWriter{ResponseWriter: w}
-
-	// Create fresh context
 	ctx := m.newContext(ww, r)
 
-	// Panic recovery
+	// Recover from panics to prevent server crashes
 	defer func() {
 		if err := recover(); err != nil {
 			if !ww.Written() {
@@ -62,13 +56,11 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Route path
 	path := r.URL.Path
 	if path == "" {
 		path = "/"
 	}
 
-	// Find route
 	method, ok := methodMap[r.Method]
 	if !ok {
 		m.errorHandler(ctx, ErrMethodNotAllowed)
@@ -77,7 +69,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	_, eps, handler, params := m.tree.findRoute(method, path)
 
-	// Set params if using Context
 	if bc, ok := any(ctx).(*Context); ok && len(params.Keys) > 0 {
 		for i, key := range params.Keys {
 			if i < len(params.Values) {
@@ -87,7 +78,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if handler == nil {
-		// Check if route exists but method not allowed
 		allowed := []string{}
 		for mt := range eps {
 			if mt == mALL || mt == mSTUB {
@@ -99,7 +89,7 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if len(allowed) > 0 {
-			// Set Allow header before calling error handler
+			// Set Allow header per RFC 7231 before responding with 405
 			w := ctx.ResponseWriter()
 			if ww, ok := w.(*responseWriter); ok && !ww.Written() {
 				ww.Header().Set("Allow", strings.Join(allowed, ", "))
@@ -111,19 +101,16 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Apply middleware chain
 	if len(m.middlewares) > 0 {
 		handler = chain(m.middlewares, handler)
 	}
 
-	// Execute handler
 	response := handler(ctx)
 	if response == nil {
 		m.errorHandler(ctx, ErrNilResponse)
 		return
 	}
 
-	// Render response
 	if err := response.Render(ww, r); err != nil {
 		if !ww.Written() {
 			m.errorHandler(ctx, err)
@@ -211,7 +198,6 @@ func (m *mux[C]) Use(middlewares ...Middleware[C]) {
 
 // With creates a new inline router with additional middleware.
 func (m *mux[C]) With(middlewares ...Middleware[C]) Router[C] {
-	// Copy middlewares from parent
 	mws := make([]Middleware[C], len(m.middlewares))
 	copy(mws, m.middlewares)
 	mws = append(mws, middlewares...)
@@ -244,7 +230,6 @@ func (m *mux[C]) Route(pattern string, fn func(r Router[C])) Router[C] {
 	}
 	subRouter := newMux[C]()
 
-	// Copy configuration from parent
 	subRouter.errorHandler = m.errorHandler
 	subRouter.newContext = m.newContext
 
@@ -259,35 +244,28 @@ func (m *mux[C]) Mount(pattern string, sub Router[C]) {
 		panic(fmt.Errorf("%w on '%s'", ErrNilRouter, pattern))
 	}
 
-	// Type assertion to access private mux
 	subMux, ok := sub.(*mux[C])
 	if !ok {
 		panic("gokit: can only mount *mux[C] routers")
 	}
 
-	// Share error handler if sub doesn't have one
 	if subMux.errorHandler == nil {
 		subMux.errorHandler = m.errorHandler
 	}
 
-	// Create mount handler
+	// Stub handler - actual routing is handled by the tree traversal
 	mountHandler := func(ctx C) Response {
-		// This is a stub handler for mounting
-		// The actual routing is handled by the tree structure
 		return nil
 	}
 
-	// Ensure pattern ends with /*
 	if pattern == "" || pattern[len(pattern)-1] != '/' {
 		m.handle(mALL|mSTUB, pattern, mountHandler)
 		m.handle(mALL|mSTUB, pattern+"/", mountHandler)
 		pattern += "/"
 	}
 
-	// Register the mount point with wildcard
 	n := m.handle(mALL|mSTUB, pattern+"*", mountHandler)
 
-	// Attach the sub-router to the node
 	if n != nil {
 		n.subroutes = sub
 	}
@@ -304,7 +282,6 @@ func (m *mux[C]) handle(method methodTyp, pattern string, handler HandlerFunc[C]
 		panic(fmt.Errorf("%w: '%s'", ErrInvalidPattern, pattern))
 	}
 
-	// Build endpoint handler with inline middlewares for the route
 	var h HandlerFunc[C]
 	if m.inline {
 		h = chain(m.middlewares, handler)
@@ -312,6 +289,5 @@ func (m *mux[C]) handle(method methodTyp, pattern string, handler HandlerFunc[C]
 		h = handler
 	}
 
-	// Add the endpoint to the tree and return the node
 	return m.tree.insertRoute(method, pattern, h)
 }

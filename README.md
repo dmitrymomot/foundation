@@ -21,3 +21,20 @@
 - [ ] default http server with graceful shutdown
 - [ ] default handler for files uploading with customizable storage provider
 - [ ] default SSE and WebSocket support
+- [ ] add useful helper methods to default Context implementation
+- [ ] add ability to setup binder
+
+## Additional Response Types (Planned)
+
+### Template Responses
+
+- `Template(name string, data any)` - Render HTML templates
+- `TemplateString(tmpl string, data any)` - Inline template rendering
+
+### Partial Content
+
+- `PartialContent(content []byte, start, end, total int64)` - For range requests (206 status)
+
+### WebSocket Upgrade
+
+- `WebSocketUpgrade(handler func(conn *websocket.Conn))` - Handle WebSocket connections

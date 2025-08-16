@@ -1,3 +1,7 @@
+// Package gokit provides a high-performance HTTP router and toolkit for building
+// JSON APIs, web services, and HTTP-based applications in Go. It features type-safe
+// request handlers, structured error handling, streaming responses, and a powerful
+// middleware system.
 package gokit
 
 import (
@@ -5,26 +9,23 @@ import (
 	"net/http"
 )
 
-// HandlerFunc provides type-safe HTTP request handling with custom context support.
-// C must implement the contextInterface interface, Response must implement the Response interface.
+// HandlerFunc is a type-safe HTTP request handler with custom context support.
 type HandlerFunc[C contexter] func(ctx C) Response
 
-// ErrorHandler handles errors from binding or rendering.
+// ErrorHandler handles errors during request processing.
 type ErrorHandler[C contexter] func(ctx C, err error)
 
-// Middleware wraps a HandlerFunc with additional functionality.
+// Middleware wraps handlers to add cross-cutting functionality.
 type Middleware[C contexter] func(next HandlerFunc[C]) HandlerFunc[C]
 
-// Response renders itself to an http.ResponseWriter.
-// Implementations should set headers, status code, and write body.
-// Errors are handled by the framework (returns 500).
+// Response renders HTTP responses. Implementations should set headers, status, and body.
+// Rendering errors are handled by the framework's error handler.
 type Response interface {
 	Render(w http.ResponseWriter, r *http.Request) error
 }
 
-// contexter wraps http.Request and http.ResponseWriter with context.Context.
-// It embeds the request's context and provides access to HTTP components.
-// This is a private interface - use Context for the default implementation.
+// contexter defines the contract for request contexts in the framework.
+// Use Context for the default implementation.
 type contexter interface {
 	context.Context
 	Request() *http.Request

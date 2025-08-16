@@ -1,3 +1,15 @@
+// Basic gokit example demonstrating text and JSON responses.
+//
+// Run:
+//
+//	go run main.go
+//
+// Try:
+//
+//	curl http://localhost:8080/hello/world
+//	curl http://localhost:8080/api
+//	curl http://localhost:8080/api/user/123
+//	curl -X POST -d "Hello" http://localhost:8080/echo
 package main
 
 import (
@@ -9,62 +21,38 @@ import (
 	"github.com/dmitrymomot/gokit"
 )
 
-// Simple middleware that adds a custom header
-func addHeaderMiddleware(next gokit.HandlerFunc[*gokit.Context]) gokit.HandlerFunc[*gokit.Context] {
-	return func(ctx *gokit.Context) gokit.Response {
-		ctx.ResponseWriter().Header().Set("X-App-Name", "gokit-example")
-		return next(ctx)
-	}
-}
-
 func main() {
-	// Create router with middleware - using the default Context type
-	r := gokit.NewRouter[*gokit.Context](
-		gokit.WithMiddleware(addHeaderMiddleware),
-	)
+	r := gokit.NewRouter[*gokit.Context]()
 
-	// Home page
 	r.Get("/", func(ctx *gokit.Context) gokit.Response {
-		return gokit.String("Welcome to gokit! Try these endpoints:\n" +
-			"- GET /hello/{name}\n" +
-			"- POST /echo (with body)\n" +
-			"- GET /redirect\n" +
-			"- GET /panic\n")
+		return gokit.String("Hello, gokit!")
 	})
 
-	// Greeting with URL parameter
 	r.Get("/hello/{name}", func(ctx *gokit.Context) gokit.Response {
 		name := ctx.Param("name")
 		return gokit.String(fmt.Sprintf("Hello, %s!", name))
 	})
 
-	// Echo endpoint - returns what you send
-	r.Post("/echo", func(ctx *gokit.Context) gokit.Response {
-		body, err := io.ReadAll(ctx.Request().Body)
-		if err != nil {
-			return gokit.StringWithStatus("Error reading body", http.StatusBadRequest)
+	r.Get("/api", func(ctx *gokit.Context) gokit.Response {
+		data := map[string]any{
+			"message": "Hello from JSON API",
+			"version": "1.0.0",
 		}
-		return gokit.String(fmt.Sprintf("You sent: %s", string(body)))
+		return gokit.JSON(data)
 	})
 
-	// Redirect example
-	r.Get("/redirect", func(ctx *gokit.Context) gokit.Response {
-		return gokit.Redirect("/")
+	r.Get("/api/user/{id}", func(ctx *gokit.Context) gokit.Response {
+		user := map[string]any{
+			"id":   ctx.Param("id"),
+			"name": fmt.Sprintf("User %s", ctx.Param("id")),
+		}
+		return gokit.JSON(user)
 	})
 
-	// Panic endpoint to test error recovery
-	r.Get("/panic", func(ctx *gokit.Context) gokit.Response {
-		panic("This is a test panic!")
+	r.Post("/echo", func(ctx *gokit.Context) gokit.Response {
+		body, _ := io.ReadAll(ctx.Request().Body)
+		return gokit.String(string(body))
 	})
-
-	// Start server
-	fmt.Println("Server starting on http://localhost:8080")
-	fmt.Println("\nTest with:")
-	fmt.Println("  curl http://localhost:8080/")
-	fmt.Println("  curl http://localhost:8080/hello/world")
-	fmt.Println("  curl -X POST http://localhost:8080/echo -d 'Hello gokit!'")
-	fmt.Println("  curl -L http://localhost:8080/redirect")
-	fmt.Println("  curl http://localhost:8080/panic")
 
 	log.Fatal(http.ListenAndServe(":8080", r))
 }

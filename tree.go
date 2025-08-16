@@ -1,8 +1,11 @@
 package gokit
 
-// Radix tree implementation based on the original work by
-// Armon Dadgar in https://github.com/armon/go-radix/blob/master/radix.go
-// (MIT licensed). Heavily modified for use as a HTTP routing tree.
+// Radix tree implementation for HTTP routing, based on Armon Dadgar's go-radix
+// (MIT licensed). Optimized for URL path matching with support for:
+// - Static routes (/users/profile)
+// - Parameters (/users/{id})
+// - Regex constraints (/users/{id:[0-9]+})
+// - Wildcards (/files/*)
 
 import (
 	"fmt"
@@ -373,11 +376,14 @@ func (n *node[C]) findRoute(method methodTyp, path string) (*node[C], endpoints[
 	return rn, rn.endpoints, nil, *rctx
 }
 
-// Recursive edge traversal by checking all nodeTyp groups along the way.
+// findRouteRecursive performs depth-first traversal of the radix tree.
+// It tries node types in priority order: static > regex > param > wildcard.
+// This ensures /users/admin matches before /users/{id}.
 func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeParams) *node[C] {
 	nn := n
 	search := path
 
+	// Try each node type in priority order
 	for t, nds := range nn.children {
 		ntyp := nodeTyp(t)
 		if len(nds) == 0 {
@@ -394,6 +400,7 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 
 		switch ntyp {
 		case ntStatic:
+			// Binary search for static routes - O(log n) lookup
 			xn = nds.findEdge(label)
 			if xn == nil || !strings.HasPrefix(xsearch, xn.prefix) {
 				continue
@@ -401,26 +408,25 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 			xsearch = xsearch[len(xn.prefix):]
 
 		case ntParam, ntRegexp:
-			// short-circuit and return no matching route for empty param values
 			if xsearch == "" {
 				continue
 			}
 
-			// serially loop through each node grouped by the tail delimiter
+			// Try each parameter node with this tail delimiter
 			for idx := range nds {
 				xn = nds[idx]
 
-				// label for param nodes is the delimiter byte
+				// Find the parameter's end delimiter
 				p := strings.IndexByte(xsearch, xn.tail)
 
 				if p < 0 {
 					if xn.tail == '/' {
-						p = len(xsearch)
+						p = len(xsearch) // Match rest of path
 					} else {
 						continue
 					}
 				} else if ntyp == ntRegexp && p == 0 {
-					continue
+					continue // Empty regex match not allowed
 				}
 
 				if ntyp == ntRegexp && xn.rex != nil {
@@ -428,8 +434,7 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 						continue
 					}
 				} else if strings.IndexByte(xsearch[:p], '/') != -1 {
-					// avoid a match across path segments
-					continue
+					continue // Parameters cannot span path segments
 				}
 
 				prevlen := len(rctx.Values)
@@ -450,13 +455,12 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 					}
 				}
 
-				// recursively find the next node on this branch
 				fin := xn.findRouteRecursive(method, xsearch, rctx)
 				if fin != nil {
 					return fin
 				}
 
-				// not found on this branch, reset vars
+				// Backtrack: restore parameter state and try next node
 				rctx.Values = rctx.Values[:prevlen]
 				xsearch = search
 			}
@@ -464,7 +468,7 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 			rctx.Values = append(rctx.Values, "")
 
 		default:
-			// catch-all nodes
+			// Wildcard catch-all: matches remaining path
 			rctx.Values = append(rctx.Values, search)
 			xn = nds[0]
 			xsearch = ""
@@ -489,13 +493,12 @@ func (n *node[C]) findRouteRecursive(method methodTyp, path string, rctx *routeP
 			}
 		}
 
-		// recursively find the next node..
 		fin := xn.findRouteRecursive(method, xsearch, rctx)
 		if fin != nil {
 			return fin
 		}
 
-		// Did not find final handler, let's remove the param here if it was set
+		// Backtrack: clean up parameters if this branch failed
 		if xn.typ > ntStatic {
 			if len(rctx.Values) > 0 {
 				rctx.Values = rctx.Values[:len(rctx.Values)-1]
@@ -611,7 +614,7 @@ func patNextSegment(pattern string) (nodeTyp, string, string, byte, int, int) {
 		}
 
 		key := pattern[ps+1 : pe]
-		pe++ // set end to next position
+		pe++
 
 		if pe < len(pattern) {
 			tail = pattern[pe]
@@ -692,8 +695,8 @@ func (ns nodes[C]) Len() int           { return len(ns) }
 func (ns nodes[C]) Swap(i, j int)      { ns[i], ns[j] = ns[j], ns[i] }
 func (ns nodes[C]) Less(i, j int) bool { return ns[i].label < ns[j].label }
 
-// tailSort pushes nodes with '/' as the tail to the end of the list for param nodes.
-// The list order determines the traversal order.
+// tailSort ensures parameters ending with '/' are tried last.
+// This prioritizes /users/{id}/edit over /users/{id} for path /users/123/edit.
 func (ns nodes[C]) tailSort() {
 	for i := len(ns) - 1; i >= 0; i-- {
 		if ns[i].typ > ntStatic && ns[i].tail == '/' {
@@ -703,6 +706,8 @@ func (ns nodes[C]) tailSort() {
 	}
 }
 
+// findEdge performs binary search to find a static route node by first character.
+// This provides O(log n) lookup performance for static routes.
 func (ns nodes[C]) findEdge(label byte) *node[C] {
 	num := len(ns)
 	idx := 0
@@ -714,7 +719,7 @@ func (ns nodes[C]) findEdge(label byte) *node[C] {
 		} else if label < ns[idx].label {
 			j = idx - 1
 		} else {
-			i = num // breaks cond
+			i = num
 		}
 	}
 	if ns[idx].label != label {

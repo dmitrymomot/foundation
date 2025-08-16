@@ -1,0 +1,216 @@
+package gokit
+
+import (
+	"bytes"
+	"encoding/csv"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// fileResponse implements Response for serving static files.
+type fileResponse struct {
+	path string
+}
+
+// Render serves the file using http.ServeFile for efficiency.
+func (r fileResponse) Render(w http.ResponseWriter, req *http.Request) error {
+	// Prevent directory traversal attacks like ../../etc/passwd
+	cleanPath := filepath.Clean(r.path)
+
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, req)
+			return nil
+		}
+		return err
+	}
+
+	if info.IsDir() {
+		http.NotFound(w, req)
+		return nil
+	}
+
+	// http.ServeFile handles Range requests, If-Modified-Since, and content type detection
+	http.ServeFile(w, req, cleanPath)
+	return nil
+}
+
+// downloadResponse implements Response for forced file downloads.
+type downloadResponse struct {
+	path     string
+	filename string
+}
+
+// Render serves the file as a download with Content-Disposition header.
+func (r downloadResponse) Render(w http.ResponseWriter, req *http.Request) error {
+	cleanPath := filepath.Clean(r.path)
+
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, req)
+			return nil
+		}
+		return err
+	}
+
+	if info.IsDir() {
+		http.NotFound(w, req)
+		return nil
+	}
+
+	downloadName := r.filename
+	if downloadName == "" {
+		downloadName = filepath.Base(cleanPath)
+	}
+
+	disposition := fmt.Sprintf(`attachment; filename="%s"`, downloadName)
+	w.Header().Set("Content-Disposition", disposition)
+
+	contentType := mime.TypeByExtension(filepath.Ext(cleanPath))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	http.ServeFile(w, req, cleanPath)
+	return nil
+}
+
+// attachmentResponse implements Response for in-memory file downloads.
+type attachmentResponse struct {
+	data        []byte
+	filename    string
+	contentType string
+}
+
+// Render serves in-memory data as a downloadable attachment.
+func (r attachmentResponse) Render(w http.ResponseWriter, req *http.Request) error {
+	disposition := fmt.Sprintf(`attachment; filename="%s"`, r.filename)
+	w.Header().Set("Content-Disposition", disposition)
+
+	contentType := r.contentType
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(r.filename))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(r.data)))
+
+	w.WriteHeader(http.StatusOK)
+	_, err := w.Write(r.data)
+	return err
+}
+
+// File creates a response that serves a static file from the filesystem.
+// It automatically detects the content type and supports range requests.
+// Returns 404 if the file doesn't exist or is a directory.
+func File(path string) Response {
+	return fileResponse{path: path}
+}
+
+// Download creates a response that forces the browser to download the file
+// instead of displaying it inline. If filename is empty, uses the base name
+// of the file path.
+func Download(path string, filename string) Response {
+	return downloadResponse{
+		path:     path,
+		filename: filename,
+	}
+}
+
+// Attachment creates a response for downloading in-memory data as a file.
+// This is useful for dynamically generated content that needs to be downloaded.
+// If contentType is empty, it will be detected from the filename extension,
+// defaulting to "application/octet-stream" if detection fails.
+func Attachment(data []byte, filename string, contentType string) Response {
+	// Prevent HTTP header injection attacks through newlines and quotes
+	filename = strings.ReplaceAll(filename, "\n", "")
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\"", "'")
+
+	return attachmentResponse{
+		data:        data,
+		filename:    filename,
+		contentType: contentType,
+	}
+}
+
+// FileReader creates a response that streams data from an io.Reader as a downloadable file.
+// This is useful for large files or streams that shouldn't be loaded entirely into memory.
+func FileReader(reader io.Reader, filename string, contentType string) Response {
+	return &streamFileResponse{
+		reader:      reader,
+		filename:    filename,
+		contentType: contentType,
+	}
+}
+
+// streamFileResponse implements Response for streaming file downloads.
+type streamFileResponse struct {
+	reader      io.Reader
+	filename    string
+	contentType string
+}
+
+// Render streams data from the reader as a downloadable file.
+func (r *streamFileResponse) Render(w http.ResponseWriter, req *http.Request) error {
+	filename := strings.ReplaceAll(r.filename, "\n", "")
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\"", "'")
+
+	disposition := fmt.Sprintf(`attachment; filename="%s"`, filename)
+	w.Header().Set("Content-Disposition", disposition)
+
+	contentType := r.contentType
+	if contentType == "" {
+		contentType = mime.TypeByExtension(filepath.Ext(filename))
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	w.WriteHeader(http.StatusOK)
+	_, err := io.Copy(w, r.reader)
+	return err
+}
+
+// CSV creates a response for downloading CSV data.
+// The records should be a 2D slice where each inner slice is a row.
+// The file will be served with content type "text/csv" and appropriate
+// download headers.
+func CSV(records [][]string, filename string) Response {
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+
+	// Write all records
+	if err := w.WriteAll(records); err != nil {
+		// Return error response if CSV writing fails
+		return ErrInternalServerError.WithMessage("failed to generate CSV")
+	}
+
+	// Ensure .csv extension
+	if !strings.HasSuffix(filename, ".csv") {
+		filename = filename + ".csv"
+	}
+
+	return Attachment(buf.Bytes(), filename, "text/csv; charset=utf-8")
+}
+
+// CSVWithHeaders creates a response for downloading CSV data with custom headers.
+// The first parameter is the header row, followed by data rows.
+// This is a convenience wrapper around CSV for common use cases.
+func CSVWithHeaders(headers []string, rows [][]string, filename string) Response {
+	records := append([][]string{headers}, rows...)
+	return CSV(records, filename)
+}
