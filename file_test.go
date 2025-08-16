@@ -471,3 +471,131 @@ func TestFileReaderWithReader(t *testing.T) {
 	contentType := w.Header().Get("Content-Type")
 	assert.Equal(t, "text/plain", contentType)
 }
+
+func TestCSV(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		records          [][]string
+		filename         string
+		expectedFilename string
+		expectedContent  string
+	}{
+		{
+			name: "simple_csv",
+			records: [][]string{
+				{"Name", "Age", "City"},
+				{"Alice", "30", "New York"},
+				{"Bob", "25", "Los Angeles"},
+			},
+			filename:         "users",
+			expectedFilename: "users.csv",
+			expectedContent:  "Name,Age,City\nAlice,30,New York\nBob,25,Los Angeles\n",
+		},
+		{
+			name: "csv_with_extension",
+			records: [][]string{
+				{"Product", "Price"},
+				{"Apple", "1.99"},
+				{"Banana", "0.99"},
+			},
+			filename:         "products.csv",
+			expectedFilename: "products.csv",
+			expectedContent:  "Product,Price\nApple,1.99\nBanana,0.99\n",
+		},
+		{
+			name: "csv_with_special_chars",
+			records: [][]string{
+				{"Field1", "Field2"},
+				{"Value with, comma", "Value with \"quotes\""},
+				{"Multi\nline", "Tab\there"},
+			},
+			filename:         "special",
+			expectedFilename: "special.csv",
+			expectedContent:  "Field1,Field2\n\"Value with, comma\",\"Value with \"\"quotes\"\"\"\n\"Multi\nline\",Tab\there\n",
+		},
+		{
+			name:             "empty_csv",
+			records:          [][]string{},
+			filename:         "empty",
+			expectedFilename: "empty.csv",
+			expectedContent:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := gokit.CSV(tt.records, tt.filename)
+			req := httptest.NewRequest("GET", "/", nil)
+			w := httptest.NewRecorder()
+
+			err := response.Render(w, req)
+			assert.NoError(t, err)
+			assert.Equal(t, http.StatusOK, w.Code)
+
+			// Check Content-Type
+			contentType := w.Header().Get("Content-Type")
+			assert.Equal(t, "text/csv; charset=utf-8", contentType)
+
+			// Check Content-Disposition
+			disposition := w.Header().Get("Content-Disposition")
+			assert.Contains(t, disposition, "attachment")
+			assert.Contains(t, disposition, tt.expectedFilename)
+
+			// Check content
+			assert.Equal(t, tt.expectedContent, w.Body.String())
+		})
+	}
+}
+
+func TestCSVWithHeaders(t *testing.T) {
+	t.Parallel()
+
+	headers := []string{"ID", "Name", "Email"}
+	rows := [][]string{
+		{"1", "John Doe", "john@example.com"},
+		{"2", "Jane Smith", "jane@example.com"},
+		{"3", "Bob Johnson", "bob@example.com"},
+	}
+
+	response := gokit.CSVWithHeaders(headers, rows, "users")
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+
+	err := response.Render(w, req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Check headers
+	contentType := w.Header().Get("Content-Type")
+	assert.Equal(t, "text/csv; charset=utf-8", contentType)
+
+	disposition := w.Header().Get("Content-Disposition")
+	assert.Contains(t, disposition, "attachment")
+	assert.Contains(t, disposition, "users.csv")
+
+	// Check content includes headers and rows
+	expectedContent := "ID,Name,Email\n1,John Doe,john@example.com\n2,Jane Smith,jane@example.com\n3,Bob Johnson,bob@example.com\n"
+	assert.Equal(t, expectedContent, w.Body.String())
+}
+
+func TestCSVWithEmptyData(t *testing.T) {
+	t.Parallel()
+
+	// Test with headers but no rows
+	headers := []string{"Col1", "Col2", "Col3"}
+	rows := [][]string{}
+
+	response := gokit.CSVWithHeaders(headers, rows, "empty_data")
+	req := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+
+	err := response.Render(w, req)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	// Should only have headers
+	expectedContent := "Col1,Col2,Col3\n"
+	assert.Equal(t, expectedContent, w.Body.String())
+}
