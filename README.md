@@ -26,18 +26,6 @@
 
 ## Additional Response Types (Planned)
 
-### Error Responses
-
-- `Error(message string, status int)` - Simple error response
-- `ValidationError(errors map[string][]string)` - Field-level validation errors
-- `ProblemDetails(title, detail string, status int)` - RFC 7807 compliant error responses
-
-### Header Manipulation
-
-- `WithHeaders(response Response, headers map[string]string)` - Wrap any response with custom headers
-- `WithCookie(response Response, cookie *http.Cookie)` - Add cookies to response
-- `WithCache(response Response, maxAge int)` - Add cache control headers
-
 ### Data Export Responses
 
 - `CSV(records [][]string)` - Export CSV data
