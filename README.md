@@ -27,9 +27,9 @@ gokit/
 │   ├── chain.go         # Middleware chaining
 │   └── context.go       # Router-specific context
 │
-├── httpserver/          # Server management
-│   ├── server.go        # HTTP server configuration
-│   └── options.go       # Server initialization options
+├── server/              # Minimal HTTP server
+│   ├── server.go        # Core server with graceful shutdown
+│   └── options.go       # Minimal configuration options
 │
 ├── response/            # Response implementations
 │   ├── base.go         # Basic responses
@@ -80,6 +80,30 @@ This provides:
 - **Clarity**: Handler returns business result, not HTTP details
 - **Type safety**: Compiler ensures valid responses
 
+### Server Package
+
+The `server` package provides a minimal, production-ready HTTP server with:
+
+- **Required address**: Explicit port configuration prevents confusion
+- **Built-in graceful shutdown**: Always graceful with 30s default timeout
+- **Context-aware logging**: Uses `InfoContext`/`ErrorContext` for proper tracing
+- **TLS support**: Simple HTTPS with `WithTLS(*tls.Config)`
+- **Thread-safe**: No race conditions, proper mutex handling
+- **Minimal API**: ~140 lines of code, just works out of the box
+
+```go
+// Simple usage
+server.Run(ctx, ":8080", handler)
+
+// With options
+srv := server.New(":8080",
+    server.WithLogger(logger),
+    server.WithTLS(tlsConfig),
+    server.WithShutdownTimeout(10*time.Second),
+)
+srv.Run(ctx, handler)
+```
+
 ## To-Do
 
 - [x] Rework go-chi to change handler interface from `func(http.ResponseWriter, *http.Request)` => `func(Context) Response`
@@ -88,7 +112,7 @@ This provides:
 - [x] router new function must be configurable via options pattern
 - [ ] robust default configuration, especially for my personal purpose
 - [ ] default middlewares with new interface
-- [ ] default http server with graceful shutdown
+- [x] default http server with graceful shutdown (see `server` package)
 - [ ] default handler for files uploading with customizable storage provider
 - [ ] default SSE and WebSocket support
 - [ ] add useful helper methods to default Context implementation
