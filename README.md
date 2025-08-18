@@ -53,6 +53,7 @@ gokit/
 ### Why Not Fully Modular?
 
 Unlike Fiber's plugin architecture, GoKit maintains a **tightly integrated core** because:
+
 - The generic type system `[C contexter]` creates natural coupling
 - The `Error` type implements both `error` and `Response` interfaces
 - Internal router is optimized for the specific handler signature
@@ -73,6 +74,7 @@ func handler(ctx *Context) Response {
 ```
 
 This provides:
+
 - **Testability**: Easy to test Response objects without HTTP
 - **Composability**: Can wrap/decorate responses
 - **Clarity**: Handler returns business result, not HTTP details
@@ -93,11 +95,6 @@ This provides:
 - [ ] add ability to setup binder
 
 ## Additional Response Types (Planned)
-
-### Template Responses
-
-- `Template(name string, data any)` - Render HTML templates
-- `TemplateString(tmpl string, data any)` - Inline template rendering
 
 ### Partial Content
 
