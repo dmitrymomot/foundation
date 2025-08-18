@@ -104,7 +104,7 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(m.middlewares) > 0 {
-		fn = handler.Chain(m.middlewares, fn)
+		fn = chain(m.middlewares, fn)
 	}
 
 	response := fn(ctx)
@@ -286,7 +286,7 @@ func (m *mux[C]) handle(method methodTyp, pattern string, fn handler.HandlerFunc
 
 	var h handler.HandlerFunc[C]
 	if m.inline {
-		h = handler.Chain(m.middlewares, fn)
+		h = chain(m.middlewares, fn)
 	} else {
 		h = fn
 	}
