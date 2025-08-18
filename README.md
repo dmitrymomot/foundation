@@ -18,20 +18,28 @@ The framework follows a **modular single-package design** with logical separatio
 
 ```
 gokit/
-├── Core (root package)
-│   ├── gokit.go          # Core interfaces & types
-│   ├── context.go        # Context implementation
-│   ├── mux.go            # Router implementation
-│   ├── errors.go         # Error handling
-│   └── writer.go         # Response writer utilities
+├── handler/             # Handler interfaces & utilities
+│   ├── context.go       # Generic context interfaces
+│   └── handler.go       # Core handler definitions
 │
-├── response/             # Response implementations
-│   ├── base.go           # Basic responses (String, HTML, etc.)
-│   ├── json.go           # JSON responses
-│   ├── sse.go            # Server-sent events
-│   └── ...               # Other response types
+├── router/              # Routing logic
+│   ├── mux.go           # Router implementation
+│   ├── chain.go         # Middleware chaining
+│   └── context.go       # Router-specific context
 │
-└── middleware/           # Optional middleware
+├── httpserver/          # Server management
+│   ├── server.go        # HTTP server configuration
+│   └── options.go       # Server initialization options
+│
+├── response/            # Response implementations
+│   ├── base.go         # Basic responses
+│   ├── json.go         # JSON responses
+│   ├── sse.go         # Server-sent events
+│   └── ...            # Other response types
+│
+└── (root)              # Core package
+    ├── gokit.go        # Package-level helpers
+    └── errors.go       # Global error types
 ```
 
 ### Key Design Principles
