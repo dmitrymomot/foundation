@@ -13,7 +13,7 @@ type mux[C handler.Context] struct {
 	tree         *node[C]
 	middlewares  []handler.Middleware[C]
 	errorHandler handler.ErrorHandler[C]
-	newContext   func(http.ResponseWriter, *http.Request) C
+	newContext   func(http.ResponseWriter, *http.Request, map[string]string) C
 	parent       *mux[C] // for sub-routers
 	inline       bool    // for inline groups
 	handler      handler.HandlerFunc[C]
@@ -32,10 +32,10 @@ func newMux[C handler.Context](opts ...Option[C]) *mux[C] {
 
 	// Auto-detect Context type if no factory provided
 	if m.newContext == nil {
-		m.newContext = func(w http.ResponseWriter, r *http.Request) C {
+		m.newContext = func(w http.ResponseWriter, r *http.Request, params map[string]string) C {
 			var zero C
 			if _, ok := any(zero).(*Context); ok {
-				return any(newContext(w, r)).(C)
+				return any(newContext(w, r, params)).(C)
 			}
 			panic(ErrNoContextFactory)
 		}
@@ -47,7 +47,36 @@ func newMux[C handler.Context](opts ...Option[C]) *mux[C] {
 // ServeHTTP implements http.Handler interface.
 func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ww := &responseWriter{ResponseWriter: w}
-	ctx := m.newContext(ww, r)
+
+	path := r.URL.Path
+	if path == "" {
+		path = "/"
+	}
+
+	method, ok := methodMap[r.Method]
+	if !ok {
+		// Create context with empty params for error handling
+		ctx := m.newContext(ww, r, nil)
+		m.errorHandler(ctx, ErrMethodNotAllowed)
+		return
+	}
+
+	// Find route and extract params
+	_, eps, fn, params := m.tree.findRoute(method, path)
+
+	// Build params map
+	var paramsMap map[string]string
+	if len(params.Keys) > 0 {
+		paramsMap = make(map[string]string, len(params.Keys))
+		for i, key := range params.Keys {
+			if i < len(params.Values) {
+				paramsMap[key] = params.Values[i]
+			}
+		}
+	}
+
+	// Create context with params
+	ctx := m.newContext(ww, r, paramsMap)
 
 	// Recover from panics to prevent server crashes
 	defer func() {
@@ -57,27 +86,6 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}()
-
-	path := r.URL.Path
-	if path == "" {
-		path = "/"
-	}
-
-	method, ok := methodMap[r.Method]
-	if !ok {
-		m.errorHandler(ctx, ErrMethodNotAllowed)
-		return
-	}
-
-	_, eps, fn, params := m.tree.findRoute(method, path)
-
-	if bc, ok := any(ctx).(*Context); ok && len(params.Keys) > 0 {
-		for i, key := range params.Keys {
-			if i < len(params.Values) {
-				bc.SetParam(key, params.Values[i])
-			}
-		}
-	}
 
 	if fn == nil {
 		allowed := []string{}

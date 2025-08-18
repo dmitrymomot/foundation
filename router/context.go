@@ -50,18 +50,11 @@ func (c *Context) Param(key string) string {
 	return c.params[key]
 }
 
-func (c *Context) SetParam(key, value string) {
-	if c.params == nil {
-		c.params = make(map[string]string)
-	}
-	c.params[key] = value
-}
-
 // newContext creates a new Context instance.
-func newContext(w http.ResponseWriter, r *http.Request) *Context {
+func newContext(w http.ResponseWriter, r *http.Request, params map[string]string) *Context {
 	return &Context{
-		w: w,
-		r: r,
-		// params map is lazily initialized in setParam when needed
+		w:      w,
+		r:      r,
+		params: params,
 	}
 }
