@@ -39,14 +39,42 @@ func defaultErrorHandler[C handler.Context](ctx C, err error) {
 	http.Error(w, err.Error(), http.StatusInternalServerError)
 }
 
-// toError converts any value to an error.
-func toError(v any) error {
-	switch e := v.(type) {
-	case error:
-		return e
-	case string:
-		return errors.New(e)
-	default:
-		return fmt.Errorf("panic: %v", e)
+// PanicError interface allows external error handlers to detect and handle panics.
+// When a panic is recovered by the router, it's wrapped in an error that implements
+// this interface, providing access to the original panic value and stack trace.
+type PanicError interface {
+	error
+	// Value returns the original panic value.
+	Value() any
+	// Stack returns the stack trace captured at the panic point.
+	Stack() []byte
+}
+
+// panicError is the private implementation of PanicError interface.
+type panicError struct {
+	value any
+	stack []byte
+}
+
+// Error implements the error interface.
+func (e *panicError) Error() string {
+	return fmt.Sprintf("panic: %v", e.value)
+}
+
+// Value returns the original panic value.
+func (e *panicError) Value() any {
+	return e.value
+}
+
+// Stack returns the stack trace.
+func (e *panicError) Stack() []byte {
+	return e.stack
+}
+
+// Unwrap allows errors.Is/As to work with wrapped panics.
+func (e *panicError) Unwrap() error {
+	if err, ok := e.value.(error); ok {
+		return err
 	}
+	return nil
 }
