@@ -11,6 +11,7 @@ require (
 	github.com/aws/smithy-go v1.22.5
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/joho/godotenv v1.5.1
 	github.com/mrz1836/postmark v1.7.4
