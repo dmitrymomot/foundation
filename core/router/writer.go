@@ -1,6 +1,9 @@
 package router
 
 import (
+	"bufio"
+	"errors"
+	"net"
 	"net/http"
 )
 
@@ -49,4 +52,22 @@ func (w *responseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// Hijack implements http.Hijacker interface for WebSocket support.
+// It delegates to the underlying ResponseWriter if it supports hijacking.
+func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hijacker, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hijacker.Hijack()
+	}
+	return nil, nil, errors.New("response writer doesn't support hijacking")
+}
+
+// Push implements http.Pusher interface for HTTP/2 server push support.
+// It delegates to the underlying ResponseWriter if it supports pushing.
+func (w *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if pusher, ok := w.ResponseWriter.(http.Pusher); ok {
+		return pusher.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
