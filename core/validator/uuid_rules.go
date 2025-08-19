@@ -85,6 +85,9 @@ func NonNilUUIDString(field, value string) Rule {
 func ValidUUIDVersion(field string, value uuid.UUID, version int) Rule {
 	return Rule{
 		Check: func() bool {
+			if version < 0 || version > 255 {
+				return false
+			}
 			return value.Version() == uuid.Version(version)
 		},
 		Error: ValidationError{
@@ -112,6 +115,9 @@ func ValidUUIDVersionString(field, value string, version int) Rule {
 
 			parsedUUID, err := uuid.Parse(value)
 			if err != nil {
+				return false
+			}
+			if version < 0 || version > 255 {
 				return false
 			}
 			return parsedUUID.Version() == uuid.Version(version)
