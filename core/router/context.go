@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"net/http"
 	"time"
 )
@@ -30,6 +31,13 @@ func (c *Context) Err() error {
 // Value returns the value associated with this context for key, or nil if no value is associated with key.
 func (c *Context) Value(key any) any {
 	return c.r.Context().Value(key)
+}
+
+// SetValue stores a value in the request's context.
+// The value can be retrieved using the Value method.
+func (c *Context) SetValue(key, val any) {
+	ctx := context.WithValue(c.r.Context(), key, val)
+	c.r = c.r.WithContext(ctx)
 }
 
 // Request returns the HTTP request associated with this context.

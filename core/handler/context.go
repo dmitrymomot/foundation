@@ -12,8 +12,5 @@ type Context interface {
 	Request() *http.Request
 	ResponseWriter() http.ResponseWriter
 	Param(key string) string
-	// Set(key, val any)
-	// Get(key any) any
-	// SetCookie(cookie *http.Cookie) error
-	// GetCookie(name string) (*http.Cookie, error)
+	SetValue(key, val any)
 }
