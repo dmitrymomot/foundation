@@ -457,3 +457,275 @@ func TestResponseWriterCustomStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestResponseWriterHijackerInterface(t *testing.T) {
+	t.Parallel()
+
+	r := router.New[*router.Context]()
+
+	r.Get("/hijack", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			// Test if Hijacker interface is supported
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("hijacker not supported"))
+				return nil
+			}
+
+			// Since httptest.ResponseRecorder doesn't implement Hijacker,
+			// we expect this to fail, but we're testing the interface is available
+			conn, bufrw, err := hijacker.Hijack()
+			if err != nil {
+				// Expected for httptest.ResponseRecorder
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("hijacker interface available but not supported by test recorder"))
+				return nil
+			}
+
+			// If we got here, we have a real connection (won't happen in test)
+			defer conn.Close()
+			bufrw.WriteString("HTTP/1.1 101 Switching Protocols\r\n\r\n")
+			bufrw.Flush()
+			return nil
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/hijack", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	// httptest.ResponseRecorder doesn't implement Hijacker,
+	// but our wrapper should still expose the interface
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "hijacker interface available but not supported by test recorder", w.Body.String())
+}
+
+func TestResponseWriterHijackerNotSupported(t *testing.T) {
+	t.Parallel()
+
+	r := router.New[*router.Context]()
+	hijackAttempted := false
+	hijackError := ""
+
+	r.Get("/no-hijack", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			// Try to hijack
+			if hijacker, ok := w.(http.Hijacker); ok {
+				hijackAttempted = true
+				_, _, err := hijacker.Hijack()
+				if err != nil {
+					hijackError = err.Error()
+				}
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("response"))
+			return nil
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/no-hijack", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	assert.True(t, hijackAttempted)
+	assert.Contains(t, hijackError, "hijack") // The error message should mention hijacking
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "response", w.Body.String())
+}
+
+func TestResponseWriterPusherInterface(t *testing.T) {
+	t.Parallel()
+
+	r := router.New[*router.Context]()
+
+	r.Get("/push", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			// Test if Pusher interface is supported
+			pusher, ok := w.(http.Pusher)
+			if !ok {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("pusher not supported"))
+				return nil
+			}
+
+			// Try to push a resource
+			err := pusher.Push("/static/style.css", &http.PushOptions{
+				Header: http.Header{
+					"Accept-Encoding": []string{"gzip"},
+				},
+			})
+
+			if err == http.ErrNotSupported {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("pusher interface available but not supported"))
+				return nil
+			}
+
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("push failed: " + err.Error()))
+				return nil
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("push succeeded"))
+			return nil
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/push", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	// httptest.ResponseRecorder doesn't implement Pusher,
+	// but our wrapper should still expose the interface
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "pusher interface available but not supported", w.Body.String())
+}
+
+func TestResponseWriterPusherNotSupported(t *testing.T) {
+	t.Parallel()
+
+	r := router.New[*router.Context]()
+	pushAttempted := false
+	pushError := error(nil)
+
+	r.Get("/no-push", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			// Try to push
+			if pusher, ok := w.(http.Pusher); ok {
+				pushAttempted = true
+				pushError = pusher.Push("/resource", nil)
+			}
+
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("response"))
+			return nil
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/no-push", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	assert.True(t, pushAttempted)
+	assert.Equal(t, http.ErrNotSupported, pushError)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "response", w.Body.String())
+}
+
+func TestResponseWriterAllInterfaces(t *testing.T) {
+	t.Parallel()
+
+	r := router.New[*router.Context]()
+
+	r.Get("/all-interfaces", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			// Verify all interfaces are available
+			interfaces := []string{}
+
+			// Check basic ResponseWriter
+			var _ http.ResponseWriter = w
+			interfaces = append(interfaces, "ResponseWriter")
+
+			// Check Flusher
+			if _, ok := w.(http.Flusher); ok {
+				interfaces = append(interfaces, "Flusher")
+			}
+
+			// Check Hijacker
+			if _, ok := w.(http.Hijacker); ok {
+				interfaces = append(interfaces, "Hijacker")
+			}
+
+			// Check Pusher
+			if _, ok := w.(http.Pusher); ok {
+				interfaces = append(interfaces, "Pusher")
+			}
+
+			w.WriteHeader(http.StatusOK)
+			for i, iface := range interfaces {
+				if i > 0 {
+					w.Write([]byte(","))
+				}
+				w.Write([]byte(iface))
+			}
+			return nil
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/all-interfaces", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body := w.Body.String()
+	assert.Contains(t, body, "ResponseWriter")
+	assert.Contains(t, body, "Flusher")
+	assert.Contains(t, body, "Hijacker")
+	assert.Contains(t, body, "Pusher")
+}
+
+func TestResponseWriterWebSocketUpgrade(t *testing.T) {
+	t.Parallel()
+
+	r := router.New[*router.Context]()
+
+	r.Get("/ws", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			// Check for WebSocket upgrade headers
+			if r.Header.Get("Upgrade") != "websocket" {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("not a websocket request"))
+				return nil
+			}
+
+			// Verify we can access Hijacker for WebSocket upgrade
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("websocket upgrade not supported"))
+				return nil
+			}
+
+			// In real WebSocket upgrade, we would:
+			// 1. Send 101 Switching Protocols
+			// 2. Hijack the connection
+			// 3. Perform WebSocket handshake
+			// But in test, we just verify the interface is available
+			_ = hijacker
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("websocket upgrade ready"))
+			return nil
+		}
+	})
+
+	// Test with WebSocket headers
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "websocket upgrade ready", w.Body.String())
+
+	// Test without WebSocket headers
+	req2 := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	w2 := httptest.NewRecorder()
+
+	r.ServeHTTP(w2, req2)
+
+	assert.Equal(t, http.StatusBadRequest, w2.Code)
+	assert.Equal(t, "not a websocket request", w2.Body.String())
+}
