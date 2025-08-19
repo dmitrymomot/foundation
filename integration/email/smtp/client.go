@@ -141,13 +141,13 @@ func (c *Client) sendWithTLS(serverAddr string, message []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to SMTP server with TLS: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client, err := smtp.NewClient(conn, c.config.Host)
 	if err != nil {
 		return fmt.Errorf("failed to create SMTP client: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	return c.performSMTPTransaction(client, message)
 }
@@ -158,7 +158,7 @@ func (c *Client) sendWithSTARTTLS(serverAddr string, message []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Upgrade to TLS
 	tlsConfig := &tls.Config{
@@ -177,7 +177,7 @@ func (c *Client) sendPlain(serverAddr string, message []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to SMTP server: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	return c.performSMTPTransaction(client, message)
 }
@@ -212,7 +212,7 @@ func (c *Client) performSMTPTransaction(client *smtp.Client, message []byte) err
 	}
 
 	if _, err := writer.Write(message); err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return fmt.Errorf("failed to write message: %w", err)
 	}
 

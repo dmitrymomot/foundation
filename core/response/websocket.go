@@ -104,7 +104,7 @@ func WebSocket(messageHandler func(context.Context, *websocket.Conn) error, opts
 			return nil
 		}
 		defer func() {
-			conn.Close()
+			_ = conn.Close()
 			if cfg.onDisconnect != nil {
 				cfg.onDisconnect(r.Context(), conn)
 			}
@@ -166,7 +166,7 @@ func WebSocketWithChannels(incoming chan<- WebSocketMessage, outgoing <-chan Web
 				return ctx.Err()
 			case msg, ok := <-outgoing:
 				if !ok {
-					conn.WriteMessage(websocket.CloseMessage, []byte{})
+					_ = conn.WriteMessage(websocket.CloseMessage, []byte{})
 					return nil
 				}
 				if err := conn.WriteMessage(msg.Type, msg.Data); err != nil {

@@ -21,10 +21,15 @@ func TestWebSocket_BasicUpgrade(t *testing.T) {
 	t.Run("successful_upgrade", func(t *testing.T) {
 		t.Parallel()
 
-		var connEstablished bool
+		var (
+			connEstablished bool
+			mu              sync.Mutex
+		)
 		handler := response.WebSocket(
 			func(ctx context.Context, conn *websocket.Conn) error {
+				mu.Lock()
 				connEstablished = true
+				mu.Unlock()
 				return nil
 			},
 			response.WithWSAllowAnyOrigin(),
@@ -42,7 +47,9 @@ func TestWebSocket_BasicUpgrade(t *testing.T) {
 		defer conn.Close()
 
 		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
 		assert.True(t, connEstablished)
+		mu.Unlock()
 	})
 
 	t.Run("upgrade_with_custom_buffer_sizes", func(t *testing.T) {
