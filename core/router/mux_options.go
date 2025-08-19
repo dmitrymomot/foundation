@@ -1,6 +1,7 @@
 package router
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/dmitrymomot/gokit/core/handler"
@@ -29,5 +30,14 @@ func WithMiddleware[C handler.Context](middlewares ...handler.Middleware[C]) Opt
 func WithContextFactory[C handler.Context](f func(http.ResponseWriter, *http.Request, map[string]string) C) Option[C] {
 	return func(m *mux[C]) {
 		m.newContext = f
+	}
+}
+
+// WithLogger sets a custom logger for the router.
+func WithLogger[C handler.Context](logger *slog.Logger) Option[C] {
+	return func(m *mux[C]) {
+		if logger != nil {
+			m.logger = logger
+		}
 	}
 }

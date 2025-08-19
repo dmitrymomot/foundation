@@ -336,7 +336,10 @@ func (n *node[C]) setEndpoint(method methodTyp, handler handler.HandlerFunc[C], 
 	paramKeys := patParamKeys(pattern)
 
 	if method&mSTUB == mSTUB {
-		n.endpoints.value(mSTUB).handler = handler
+		h := n.endpoints.value(mSTUB)
+		h.handler = handler
+		h.pattern = pattern
+		h.paramKeys = paramKeys
 	}
 	if method&mALL == mALL {
 		h := n.endpoints.value(mALL)
@@ -373,6 +376,12 @@ func (n *node[C]) findRoute(method methodTyp, path string) (*node[C], endpoints[
 	// Record the routing pattern in the request lifecycle
 	if rn.endpoints[method] != nil && rn.endpoints[method].handler != nil {
 		return rn, rn.endpoints, rn.endpoints[method].handler, *rctx
+	}
+
+	// Check for STUB handler (used for mounting subrouters)
+	// Return the node but with nil handler so mux can check for subroutes
+	if rn.endpoints[mSTUB] != nil && rn.subroutes != nil {
+		return rn, rn.endpoints, nil, *rctx
 	}
 
 	return rn, rn.endpoints, nil, *rctx
