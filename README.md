@@ -14,32 +14,45 @@
 
 ### Package Organization
 
-The framework follows a **modular single-package design** with logical separation:
+The framework follows a **clean API design** with core components organized under `core/`:
 
 ```
 gokit/
-├── handler/             # Handler interfaces & utilities
-│   ├── context.go       # Generic context interfaces
-│   └── handler.go       # Core handler definitions
+├── core/                # Core framework components
+│   ├── handler/         # Handler interfaces & utilities
+│   │   ├── context.go   # Generic context interfaces
+│   │   └── handler.go   # Core handler definitions
+│   │
+│   ├── router/          # Routing logic
+│   │   ├── mux.go       # Router implementation
+│   │   ├── chain.go     # Middleware chaining
+│   │   └── context.go   # Router-specific context
+│   │
+│   ├── server/          # Minimal HTTP server
+│   │   ├── server.go    # Core server with graceful shutdown
+│   │   └── options.go   # Minimal configuration options
+│   │
+│   └── response/        # Response implementations
+│       ├── base.go      # Basic responses
+│       ├── json.go      # JSON responses
+│       ├── sse.go       # Server-sent events
+│       └── ...          # Other response types
 │
-├── router/              # Routing logic
-│   ├── mux.go           # Router implementation
-│   ├── chain.go         # Middleware chaining
-│   └── context.go       # Router-specific context
+├── middleware/          # Built-in middleware implementations
+│   ├── cors/           # CORS handling
+│   ├── logger/         # Request logging
+│   ├── recovery/       # Panic recovery
+│   └── ...             # Other middleware
 │
-├── server/              # Minimal HTTP server
-│   ├── server.go        # Core server with graceful shutdown
-│   └── options.go       # Minimal configuration options
+├── pkg/                 # Optional utilities and helpers
+│   ├── validator/      # Request validation
+│   ├── binder/         # Request binding
+│   └── ...             # Other utilities
 │
-├── response/            # Response implementations
-│   ├── base.go         # Basic responses
-│   ├── json.go         # JSON responses
-│   ├── sse.go         # Server-sent events
-│   └── ...            # Other response types
-│
-└── (root)              # Core package
-    ├── gokit.go        # Package-level helpers
-    └── errors.go       # Global error types
+└── (root)               # Public API
+    ├── gokit.go         # Main framework API (like Fiber)
+    ├── app.go           # App struct and methods
+    └── errors.go        # Global error types
 ```
 
 ### Key Design Principles
