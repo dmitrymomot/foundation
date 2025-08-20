@@ -106,12 +106,3 @@ func wrapWithRateLimitHeaders(resp handler.Response, result *ratelimiter.Result)
 		return resp(w, r)
 	}
 }
-
-// max returns the larger of two integers.
-// Used to ensure remaining rate limit count doesn't go negative.
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
