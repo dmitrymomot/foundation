@@ -27,6 +27,12 @@ var (
 	ErrDuplicateParam   = errors.New("duplicate parameter name")
 )
 
+// statusCode is an unexported interface that errors can implement
+// to provide a custom HTTP status code.
+type statusCode interface {
+	StatusCode() int
+}
+
 // defaultErrorHandler provides default error handling.
 func defaultErrorHandler[C handler.Context](ctx C, err error) {
 	w := ctx.ResponseWriter()
@@ -36,7 +42,13 @@ func defaultErrorHandler[C handler.Context](ctx C, err error) {
 		return
 	}
 
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	// Check if error implements statusCode interface
+	status := http.StatusInternalServerError
+	if sc, ok := err.(statusCode); ok {
+		status = sc.StatusCode()
+	}
+
+	http.Error(w, err.Error(), status)
 }
 
 // PanicError interface allows external error handlers to detect and handle panics.
