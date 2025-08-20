@@ -129,7 +129,7 @@ func TestErrorHandler(t *testing.T) {
 			// Check response
 			assert.Equal(t, tt.expectedStatus, w.Code)
 			assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
-			assert.Equal(t, tt.expectedBody, w.Body.String())
+			assert.Equal(t, tt.expectedBody+"\n", w.Body.String())
 		})
 	}
 }
