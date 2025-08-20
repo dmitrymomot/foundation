@@ -82,37 +82,37 @@ func TestErrorHandler(t *testing.T) {
 			name:           "regular error returns 500",
 			error:          errors.New("internal error"),
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "Internal Server Error\n", // Now returns HTTPError's message
+			expectedBody:   "Internal Server Error\n\n", // Now returns HTTPError's message
 		},
 		{
 			name:           "HTTPError with 401",
 			error:          response.ErrUnauthorized.WithMessage("invalid credentials"),
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "invalid credentials\n", // No trailing newline
+			expectedBody:   "invalid credentials\n\n", // No trailing newline
 		},
 		{
 			name:           "HTTPError with 404",
 			error:          response.ErrNotFound.WithMessage("resource not found"),
 			expectedStatus: http.StatusNotFound,
-			expectedBody:   "resource not found\n", // No trailing newline
+			expectedBody:   "resource not found\n\n", // No trailing newline
 		},
 		{
 			name:           "HTTPError with 400",
 			error:          response.ErrBadRequest.WithMessage("bad request"),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "bad request\n", // No trailing newline
+			expectedBody:   "bad request\n\n", // No trailing newline
 		},
 		{
 			name:           "custom error with StatusCode interface",
 			error:          customStatusError{message: "custom error", status: http.StatusTeapot},
 			expectedStatus: http.StatusTeapot,
-			expectedBody:   "I'm a teapot\n", // Now returns the HTTPError's message
+			expectedBody:   "I'm a teapot\n\n", // Now returns the HTTPError's message
 		},
 		{
 			name:           "HTTPError takes precedence over StatusCode interface",
 			error:          response.ErrForbidden.WithMessage("access denied"),
 			expectedStatus: http.StatusForbidden,
-			expectedBody:   "access denied\n", // No trailing newline
+			expectedBody:   "access denied\n\n", // No trailing newline
 		},
 	}
 
