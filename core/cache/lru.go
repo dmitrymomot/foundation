@@ -17,7 +17,7 @@ type LRUCache[K comparable, V any] struct {
 	items    map[K]*list.Element
 	eviction *list.List
 	mu       sync.Mutex
-	onEvict  func(key K, value V) // Callback for cleanup when items are evicted
+	onEvict  func(key K, value V)
 }
 
 // NewLRUCache creates a new LRU cache with the specified capacity.
@@ -100,6 +100,7 @@ func (c *LRUCache[K, V]) Remove(key K) (V, bool) {
 	return zero, false
 }
 
+// Len returns the current number of items in the cache.
 func (c *LRUCache[K, V]) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -123,7 +124,8 @@ func (c *LRUCache[K, V]) Clear() {
 	c.eviction.Init()
 }
 
-// Must be called with lock held.
+// evictOldest removes the least recently used item from the cache.
+// Caller must hold the mutex.
 func (c *LRUCache[K, V]) evictOldest() {
 	elem := c.eviction.Back()
 	if elem != nil {
@@ -131,7 +133,8 @@ func (c *LRUCache[K, V]) evictOldest() {
 	}
 }
 
-// Must be called with lock held.
+// removeElement removes a specific element from the cache and triggers eviction callback.
+// Caller must hold the mutex.
 func (c *LRUCache[K, V]) removeElement(elem *list.Element) {
 	c.eviction.Remove(elem)
 	entry := elem.Value.(*lruEntry[K, V])

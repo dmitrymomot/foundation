@@ -53,24 +53,25 @@ func bindToStruct(v any, tagName string, values map[string][]string, bindErr err
 	return nil
 }
 
-// parseFieldTag parses the struct field tag and returns the parameter name and whether to skip.
+// parseFieldTag extracts the parameter name from struct tags and determines if the field should be skipped.
+// If no tag is present, it defaults to the lowercase field name.
 func parseFieldTag(field reflect.StructField, tagName string) (paramName string, skip bool) {
 	tag := field.Tag.Get(tagName)
 	if tag == "" {
-		return strings.ToLower(field.Name), false // No tag, use field name in lowercase
+		return strings.ToLower(field.Name), false
 	}
 	if tag == "-" {
-		return "", true // Skip this field
+		return "", true
 	}
 
-	// Handle comma-separated tag options (e.g., "name,omitempty")
+	// Extract parameter name from comma-separated tag options
 	tagParts := strings.Split(tag, ",")
 	return tagParts[0], false
 }
 
 // setFieldValue sets the field value from string values.
 func setFieldValue(field reflect.Value, fieldType reflect.Type, values []string) error {
-	// Handle pointer types
+	// Dereference pointers, creating new instances for nil pointers
 	if fieldType.Kind() == reflect.Pointer {
 		if field.IsNil() {
 			field.Set(reflect.New(fieldType.Elem()))
@@ -78,12 +79,12 @@ func setFieldValue(field reflect.Value, fieldType reflect.Type, values []string)
 		return setFieldValue(field.Elem(), fieldType.Elem(), values)
 	}
 
-	// Handle slice types
+	// Process slice types with multiple values or comma-separated values
 	if fieldType.Kind() == reflect.Slice {
 		return setSliceValue(field, fieldType, values)
 	}
 
-	// For non-slice types, use the first value
+	// Use first value for scalar types, ignoring additional values
 	if len(values) == 0 {
 		return nil
 	}
@@ -117,7 +118,7 @@ func setFieldValue(field reflect.Value, fieldType reflect.Type, values []string)
 	case reflect.Bool:
 		b, err := strconv.ParseBool(value)
 		if err != nil {
-			// Be lenient with boolean values
+			// Accept common boolean representations for user-friendly parsing
 			switch strings.ToLower(value) {
 			case "on", "yes", "1":
 				b = true
@@ -140,7 +141,7 @@ func setFieldValue(field reflect.Value, fieldType reflect.Type, values []string)
 func setSliceValue(field reflect.Value, fieldType reflect.Type, values []string) error {
 	elemType := fieldType.Elem()
 
-	// Support comma-separated values as well
+	// Handle both multiple form fields and comma-separated values in single field
 	var allValues []string
 	for _, v := range values {
 		if strings.Contains(v, ",") {
@@ -163,18 +164,18 @@ func setSliceValue(field reflect.Value, fieldType reflect.Type, values []string)
 	return nil
 }
 
-// sanitizeStringValue removes potentially dangerous characters and normalizes input.
-// This prevents CRLF injection, NUL byte injection, and handles unicode normalization.
+// sanitizeStringValue removes dangerous characters that could be used in injection attacks.
+// It prevents CRLF injection, null byte attacks, and filters invalid Unicode sequences.
 func sanitizeStringValue(value string) string {
 	// Remove NUL bytes
 	value = strings.ReplaceAll(value, "\x00", "")
 
-	// Remove CRLF sequences to prevent header injection
+	// Strip carriage return and line feed to prevent HTTP header injection
 	value = strings.ReplaceAll(value, "\r\n", "")
 	value = strings.ReplaceAll(value, "\r", "")
 	value = strings.ReplaceAll(value, "\n", "")
 
-	// Remove other control characters except tab and space
+	// Filter out control characters while preserving printable content
 	var builder strings.Builder
 	builder.Grow(len(value))
 
@@ -189,20 +190,21 @@ func sanitizeStringValue(value string) string {
 	return builder.String()
 }
 
-// validateBoundary checks if a multipart boundary contains potentially malicious content.
+// validateBoundary performs security validation on multipart form boundaries.
+// It prevents parsing attacks by rejecting malformed or dangerous boundary values.
 func validateBoundary(boundary string) bool {
 	if boundary == "" {
 		return false
 	}
 
-	// Check for control characters that could break parsing
+	// Reject boundaries containing characters that break multipart parsing
 	for _, r := range boundary {
 		if r == '\x00' || r == '\r' || r == '\n' {
 			return false
 		}
 	}
 
-	// RFC7578 recommends max 70 characters
+	// Enforce reasonable length limit to prevent DoS attacks
 	if len(boundary) > 100 {
 		return false
 	}

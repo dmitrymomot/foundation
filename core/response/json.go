@@ -23,26 +23,25 @@ func JSONWithStatus(v any, status int) handler.Response {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 
-		// Determine final status code
+		// Apply HTTP status code logic for JSON responses
 		if status == 0 {
 			if v == nil {
-				status = http.StatusNoContent // 204 for nil data with unspecified status
+				status = http.StatusNoContent
 			} else {
-				status = http.StatusOK // 200 for non-nil data with unspecified status
+				status = http.StatusOK
 			}
 		}
 
 		// Write status header
 		w.WriteHeader(status)
 
-		// Handle special status codes that shouldn't have body per HTTP spec
+		// Respect HTTP spec: certain status codes must not include response body
 		switch status {
 		case http.StatusNoContent, http.StatusNotModified:
-			return nil // No body for 204 or 304
+			return nil
 		}
 
-		// For all other statuses, encode the data (nil encodes as "null")
-		// This is much more memory efficient for large JSON payloads
+		// Stream JSON directly to response writer for memory efficiency
 		return json.NewEncoder(w).Encode(v)
 	}
 }

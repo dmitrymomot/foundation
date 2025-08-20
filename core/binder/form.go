@@ -66,7 +66,7 @@ func Form() func(r *http.Request, v any) error {
 			return fmt.Errorf("%w: missing content-type header, expected application/x-www-form-urlencoded or multipart/form-data", ErrMissingContentType)
 		}
 
-		// Extract media type without parameters
+		// Strip boundary and other parameters from Content-Type
 		mediaType := contentType
 		if idx := strings.Index(contentType, ";"); idx != -1 {
 			mediaType = strings.TrimSpace(contentType[:idx])
@@ -83,7 +83,7 @@ func Form() func(r *http.Request, v any) error {
 			values = r.Form
 
 		case strings.HasPrefix(mediaType, "multipart/form-data"):
-			// Validate multipart content type and boundary for security
+			// Parse and validate boundary parameter to prevent malformed multipart attacks
 			_, params, err := mime.ParseMediaType(contentType)
 			if err != nil {
 				return fmt.Errorf("%w: malformed content type with boundary", ErrFailedToParseForm)
@@ -98,7 +98,7 @@ func Form() func(r *http.Request, v any) error {
 				return fmt.Errorf("%w: invalid boundary parameter", ErrFailedToParseForm)
 			}
 
-			// Note: Request size limits should be handled at server/middleware level
+			// Use DefaultMaxMemory for multipart parsing; larger files spill to disk
 			if err := r.ParseMultipartForm(DefaultMaxMemory); err != nil {
 				return fmt.Errorf("%w: %v", ErrFailedToParseForm, err)
 			}
@@ -114,8 +114,7 @@ func Form() func(r *http.Request, v any) error {
 			return fmt.Errorf("%w: got %s, expected application/x-www-form-urlencoded or multipart/form-data", ErrUnsupportedMediaType, mediaType)
 		}
 
-		// Note: Multipart form cleanup should be handled at server/middleware level
-		// to maintain standard Go behavior and allow access to r.MultipartForm after binding
+		// Cleanup of multipart form is deferred to caller to allow access to files after binding
 		return bindFormAndFiles(v, values, files, ErrFailedToParseForm)
 	}
 }
@@ -138,7 +137,7 @@ func bindFormAndFiles(v any, values map[string][]string, files map[string][]*mul
 		field := rv.Field(i)
 		fieldType := rt.Field(i)
 
-		// Skip unexported fields
+		// Skip unexported fields that reflection cannot modify
 		if !field.CanSet() {
 			continue
 		}
@@ -157,13 +156,13 @@ func bindFormAndFiles(v any, values map[string][]string, files map[string][]*mul
 				continue // Skip explicitly ignored fields
 			}
 
-			// Extract parameter name from tag
+			// Parse tag to extract parameter name, ignoring additional options
 			paramName := formTag
 			if idx := strings.Index(formTag, ","); idx != -1 {
 				paramName = formTag[:idx]
 			}
 
-			// Skip empty parameter names
+			// Skip malformed tags without parameter names
 			if paramName == "" {
 				continue
 			}
@@ -175,9 +174,9 @@ func bindFormAndFiles(v any, values map[string][]string, files map[string][]*mul
 			}
 		}
 
-		// Handle file tag
+		// Handle file uploads when multipart data is present
 		if fileTag != "" && fileTag != "-" && files != nil {
-			// Skip empty file tag values
+			// Skip malformed file tags
 			if fileTag == "" {
 				continue
 			}
@@ -195,7 +194,7 @@ func bindFormAndFiles(v any, values map[string][]string, files map[string][]*mul
 
 // setFileField sets file values to struct fields.
 func setFileField(field reflect.Value, fieldType reflect.Type, fileHeaders []*multipart.FileHeader) error {
-	// Sanitize filenames
+	// Apply security sanitization to prevent path traversal attacks
 	for _, fh := range fileHeaders {
 		fh.Filename = sanitizeFilename(fh.Filename)
 	}
@@ -224,20 +223,19 @@ func setFileField(field reflect.Value, fieldType reflect.Type, fileHeaders []*mu
 	return fmt.Errorf("unsupported type for file field: %v (expected *multipart.FileHeader or []*multipart.FileHeader)", fieldType)
 }
 
-// sanitizeFilename removes any path components and dangerous characters from a filename
-// to prevent path traversal attacks and other security issues.
+// sanitizeFilename removes path components and dangerous characters from uploaded filenames.
+// This prevents path traversal attacks and ensures safe filename handling.
 func sanitizeFilename(filename string) string {
-	// Replace backslashes with forward slashes to normalize paths
-	// This ensures filepath.Base works correctly on Windows-style paths
+	// Normalize path separators for consistent processing across platforms
 	filename = strings.ReplaceAll(filename, "\\", "/")
 
-	// Remove any directory components - handles both Unix and Windows paths
+	// Extract filename component only, discarding directory paths
 	filename = filepath.Base(filename)
 
 	// Remove null bytes and other potentially dangerous characters
 	filename = strings.ReplaceAll(filename, "\x00", "")
 
-	// Ensure the filename is not empty or a special directory reference
+	// Provide fallback name for empty or special directory references
 	if filename == "." || filename == ".." || filename == "" || filename == "/" {
 		filename = "unnamed"
 	}

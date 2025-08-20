@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// Attribute helpers use the empty Attr pattern for nil safety.
-// This allows calls like log.Info("msg", logger.Error(err)) without explicit nil checks,
-// following the principle of making zero values useful.
-
 // Group creates a group of attributes under a single key.
 func Group(name string, attrs ...slog.Attr) slog.Attr {
 	return slog.Attr{Key: name, Value: slog.GroupValue(attrs...)}

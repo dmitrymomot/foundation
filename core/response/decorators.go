@@ -8,7 +8,7 @@ import (
 	"github.com/dmitrymomot/gokit/core/handler"
 )
 
-// WithHeaders wraps a func(w http.ResponseWriter, r *http.Request) errorwith custom HTTP headers.
+// WithHeaders wraps a response with custom HTTP headers.
 // Headers are set before the wrapped response is rendered.
 func WithHeaders(response func(w http.ResponseWriter, r *http.Request) error, headers map[string]string) handler.Response {
 	if response == nil {
@@ -18,7 +18,7 @@ func WithHeaders(response func(w http.ResponseWriter, r *http.Request) error, he
 		return response
 	}
 	return func(w http.ResponseWriter, r *http.Request) error {
-		// Set custom headers before rendering the wrapped response
+		// Apply headers before response rendering
 		for k, v := range headers {
 			w.Header().Set(k, v)
 		}
@@ -33,7 +33,7 @@ func WithCookie(response handler.Response, cookie *http.Cookie) handler.Response
 		return response
 	}
 	return func(w http.ResponseWriter, r *http.Request) error {
-		// Set cookie before rendering the wrapped response
+		// Apply cookie before response rendering
 		http.SetCookie(w, cookie)
 		return response(w, r)
 	}
@@ -47,15 +47,15 @@ func WithCache(response handler.Response, maxAge time.Duration) handler.Response
 		return nil
 	}
 	return func(w http.ResponseWriter, r *http.Request) error {
-		// Set cache control headers before rendering the wrapped response
+		// Configure caching headers based on maxAge parameter
 		if maxAge > 0 {
-			// Enable caching
+			// Set headers for browser and proxy caching
 			seconds := int(maxAge.Seconds())
 			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", seconds))
 			expires := time.Now().Add(maxAge)
 			w.Header().Set("Expires", expires.Format(http.TimeFormat))
 		} else {
-			// Disable caching
+			// Prevent any caching with comprehensive no-cache headers
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.Header().Set("Pragma", "no-cache")
 			w.Header().Set("Expires", "0")

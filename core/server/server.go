@@ -10,21 +10,25 @@ import (
 	"time"
 )
 
+// Server wraps http.Server with graceful shutdown and configuration options.
+// Safe for concurrent use.
 type Server struct {
-	mu        sync.RWMutex
-	addr      string
-	server    *http.Server
-	logger    *slog.Logger
-	shutdown  time.Duration
-	tlsConfig *tls.Config
-	running   bool
+	mu        sync.RWMutex  // Protects all fields
+	addr      string        // Listen address
+	server    *http.Server  // Underlying HTTP server
+	logger    *slog.Logger  // Server logger
+	shutdown  time.Duration // Graceful shutdown timeout
+	tlsConfig *tls.Config   // TLS configuration
+	running   bool          // Server state
 }
 
+// New creates a new Server with the given address and options.
+// Defaults to 30-second graceful shutdown timeout and the default logger.
 func New(addr string, opts ...Option) *Server {
 	s := &Server{
 		addr:     addr,
 		logger:   slog.Default(),
-		shutdown: 30 * time.Second,
+		shutdown: 30 * time.Second, // Reasonable default for graceful shutdown
 	}
 
 	for _, opt := range opts {
@@ -34,6 +38,8 @@ func New(addr string, opts ...Option) *Server {
 	return s
 }
 
+// Run starts the server and blocks until the context is canceled or an error occurs.
+// Automatically handles graceful shutdown when context is canceled.
 func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 	s.mu.Lock()
 	if s.running {
@@ -52,7 +58,7 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 		TLSConfig:      s.tlsConfig,
 	}
 
-	// Capture TLS config while holding the lock to avoid race
+	// Capture TLS config while holding the lock to avoid race conditions
 	hasTLS := s.tlsConfig != nil
 	s.mu.Unlock()
 
@@ -83,6 +89,8 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 	}
 }
 
+// Shutdown gracefully shuts down the server using the configured timeout.
+// Returns immediately if the server is not running.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,6 +116,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// Run is a convenience function that creates and runs a server with default settings.
 func Run(ctx context.Context, addr string, handler http.Handler) error {
 	server := New(addr)
 	return server.Run(ctx, handler)

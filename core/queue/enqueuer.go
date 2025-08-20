@@ -9,19 +9,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// EnqueuerRepository defines the interface for task creation
+// EnqueuerRepository defines the interface for task creation.
 type EnqueuerRepository interface {
 	CreateTask(ctx context.Context, task *Task) error
 }
 
-// Enqueuer handles task enqueueing
+// Enqueuer handles task enqueueing with configurable defaults.
 type Enqueuer struct {
 	repo            EnqueuerRepository
 	defaultQueue    string
 	defaultPriority Priority
 }
 
-// NewEnqueuer creates a new Enqueuer
+// NewEnqueuer creates a new Enqueuer with the given repository and options.
 func NewEnqueuer(repo EnqueuerRepository, opts ...EnqueuerOption) (*Enqueuer, error) {
 	if repo == nil {
 		return nil, ErrRepositoryNil
@@ -43,36 +43,36 @@ func NewEnqueuer(repo EnqueuerRepository, opts ...EnqueuerOption) (*Enqueuer, er
 	}, nil
 }
 
-// Enqueue adds a new task to the queue
+// Enqueue adds a new task to the queue with the given payload and options.
 func (e *Enqueuer) Enqueue(ctx context.Context, payload any, opts ...EnqueueOption) error {
 	if payload == nil {
 		return ErrPayloadNil
 	}
 
-	// Apply default options
+	// Apply default options from enqueuer configuration
 	options := &enqueueOptions{
 		queue:      e.defaultQueue,
 		priority:   e.defaultPriority,
 		maxRetries: 3,
 	}
 
-	// Apply user options
+	// Apply user-provided options to override defaults
 	for _, opt := range opts {
 		opt(options)
 	}
 
-	// Validate priority
+	// Validate priority is within allowed range
 	if !options.priority.Valid() {
 		return ErrInvalidPriority
 	}
 
-	// Build and store task
+	// Build task with payload and options
 	task, err := e.buildTask(payload, options)
 	if err != nil {
 		return err
 	}
 
-	// Store task
+	// Store task in repository
 	if err := e.repo.CreateTask(ctx, task); err != nil {
 		return fmt.Errorf("failed to create task %q in queue %q: %w", task.TaskName, task.Queue, err)
 	}
@@ -80,21 +80,22 @@ func (e *Enqueuer) Enqueue(ctx context.Context, payload any, opts ...EnqueueOpti
 	return nil
 }
 
-// buildTask constructs a Task from payload and options
+// buildTask constructs a Task from payload and options.
+// Marshals payload to JSON and generates UUID and timestamps.
 func (e *Enqueuer) buildTask(payload any, options *enqueueOptions) (*Task, error) {
-	// Marshal payload
+	// Marshal payload to JSON for storage
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload of type %T: %w", payload, err)
 	}
 
-	// Determine task name
+	// Determine task name from options or infer from payload type
 	taskName := options.taskName
 	if taskName == "" {
 		taskName = qualifiedStructName(payload)
 	}
 
-	// Calculate scheduled time
+	// Calculate scheduled time based on delay or explicit scheduling
 	scheduledAt := time.Now()
 	if options.scheduledAt != nil {
 		scheduledAt = *options.scheduledAt
