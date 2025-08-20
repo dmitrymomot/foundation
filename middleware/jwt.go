@@ -9,17 +9,28 @@ import (
 	"github.com/dmitrymomot/gokit/pkg/jwt"
 )
 
+// jwtClaimsContextKey is used as a key for storing JWT claims in request context.
 type jwtClaimsContextKey struct{}
 
+// JWTConfig configures the JWT authentication middleware.
 type JWTConfig struct {
-	Skip           func(ctx handler.Context) bool
-	Service        *jwt.Service
+	// Skip defines a function to skip middleware execution for specific requests
+	Skip func(ctx handler.Context) bool
+	// Service is the JWT service instance used for token parsing and validation
+	Service *jwt.Service
+	// TokenExtractor defines how to extract the token from the request (default: from Authorization header)
 	TokenExtractor func(ctx handler.Context) string
-	ErrorHandler   func(ctx handler.Context, err error) handler.Response
-	ClaimsFactory  func() any
+	// ErrorHandler defines how to handle authentication errors (default: returns 401 Unauthorized)
+	ErrorHandler func(ctx handler.Context, err error) handler.Response
+	// ClaimsFactory creates a new claims instance for token parsing (default: StandardClaims)
+	ClaimsFactory func() any
+	// StoreInContext determines whether to store parsed claims in request context
 	StoreInContext bool
 }
 
+// JWT creates a JWT authentication middleware with a signing key.
+// It uses standard claims and stores them in the request context by default.
+// Panics if the signing key is invalid.
 func JWT[C handler.Context](signingKey string) handler.Middleware[C] {
 	service, err := jwt.NewFromString(signingKey)
 	if err != nil {
@@ -35,6 +46,9 @@ func JWT[C handler.Context](signingKey string) handler.Middleware[C] {
 	})
 }
 
+// JWTWithConfig creates a JWT authentication middleware with custom configuration.
+// It validates JWT tokens and optionally stores parsed claims in the request context.
+// Panics if the JWT service is not provided.
 func JWTWithConfig[C handler.Context](cfg JWTConfig) handler.Middleware[C] {
 	if cfg.Service == nil {
 		panic("jwt middleware: service is required")
@@ -85,6 +99,8 @@ func JWTWithConfig[C handler.Context](cfg JWTConfig) handler.Middleware[C] {
 	}
 }
 
+// GetJWTClaims retrieves JWT claims of the specified type from the request context.
+// Returns the claims and a boolean indicating whether they were found and of the correct type.
 func GetJWTClaims[T any](ctx handler.Context) (T, bool) {
 	var zero T
 	claims, ok := ctx.Value(jwtClaimsContextKey{}).(T)
@@ -94,6 +110,9 @@ func GetJWTClaims[T any](ctx handler.Context) (T, bool) {
 	return claims, true
 }
 
+// GetStandardClaims retrieves standard JWT claims from the request context.
+// Returns the claims and a boolean indicating whether they were found.
+// This is a convenience function for the most common use case.
 func GetStandardClaims(ctx handler.Context) (*jwt.StandardClaims, bool) {
 	claims, ok := ctx.Value(jwtClaimsContextKey{}).(*jwt.StandardClaims)
 	if !ok {
@@ -103,6 +122,9 @@ func GetStandardClaims(ctx handler.Context) (*jwt.StandardClaims, bool) {
 }
 
 // Token Extractors
+//
+// The following functions provide various strategies for extracting JWT tokens
+// from HTTP requests. They can be used individually or combined using JWTFromMultiple.
 
 // JWTFromAuthHeader returns an extractor that looks for the token in the Authorization header
 // with Bearer scheme. It also accepts tokens without the Bearer prefix.
@@ -165,7 +187,7 @@ func JWTFromCookie(cookieName string) func(handler.Context) string {
 // This only works for POST/PUT/PATCH requests with appropriate content type.
 func JWTFromForm(fieldName string) func(handler.Context) string {
 	return func(ctx handler.Context) string {
-		// Only parse form for appropriate methods
+		// Only parse form for appropriate methods to avoid unnecessary work
 		method := ctx.Request().Method
 		if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
 			return ""
@@ -185,9 +207,9 @@ func JWTFromForm(fieldName string) func(handler.Context) string {
 // The paramName should match the parameter name defined in your route.
 func JWTFromPathParam(paramName string) func(handler.Context) string {
 	return func(ctx handler.Context) string {
-		// This is a generic implementation. Different routers may store params differently.
-		// For example, if using chi router, you might use chi.URLParam(ctx.Request(), paramName)
-		// Since we don't know the specific router, we'll check if the context has a Param method
+		// This is a generic implementation since different routers store params differently.
+		// For example, chi router uses chi.URLParam(ctx.Request(), paramName)
+		// We try to detect if the context implements a Param method
 		type paramGetter interface {
 			Param(string) string
 		}
@@ -196,8 +218,8 @@ func JWTFromPathParam(paramName string) func(handler.Context) string {
 			return pg.Param(paramName)
 		}
 
-		// Fallback: check if params are stored in context values
-		// This is router-specific and may need adjustment
+		// Fallback: params might be stored in context values (router-specific)
+		// This implementation may need adjustment based on your router
 		return ""
 	}
 }

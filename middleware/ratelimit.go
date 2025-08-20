@@ -10,19 +10,30 @@ import (
 	"github.com/dmitrymomot/gokit/pkg/ratelimiter"
 )
 
+// RateLimitConfig configures the rate limiting middleware.
 type RateLimitConfig struct {
-	Skip         func(ctx handler.Context) bool
-	Limiter      ratelimiter.RateLimiter
+	// Skip defines a function to skip middleware execution for specific requests
+	Skip func(ctx handler.Context) bool
+	// Limiter is the rate limiting implementation to use
+	Limiter ratelimiter.RateLimiter
+	// KeyExtractor defines how to extract the rate limiting key from requests (default: client IP)
 	KeyExtractor func(ctx handler.Context) string
+	// ErrorHandler defines how to handle rate limit violations (default: 429 Too Many Requests)
 	ErrorHandler func(ctx handler.Context, result *ratelimiter.Result) handler.Response
-	SetHeaders   bool
+	// SetHeaders determines whether to include rate limit information in response headers
+	SetHeaders bool
 }
 
+// RateLimit creates a rate limiting middleware with the provided configuration.
+// It enforces request rate limits based on configurable keys (typically client IP)
+// and returns appropriate HTTP responses when limits are exceeded.
+// Panics if no limiter is provided.
 func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 	if cfg.Limiter == nil {
 		panic("ratelimit middleware: limiter is required")
 	}
 
+	// Default to using client IP as the rate limiting key
 	if cfg.KeyExtractor == nil {
 		cfg.KeyExtractor = func(ctx handler.Context) string {
 			if ip, ok := GetClientIP(ctx); ok {
@@ -32,6 +43,7 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 		}
 	}
 
+	// Default error handler returns 429 with retry information
 	if cfg.ErrorHandler == nil {
 		cfg.ErrorHandler = func(ctx handler.Context, result *ratelimiter.Result) handler.Response {
 			err := response.ErrTooManyRequests
@@ -78,9 +90,12 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 	}
 }
 
+// wrapWithRateLimitHeaders adds standard rate limiting headers to the response.
+// Headers include current limit, remaining requests, reset time, and retry-after when applicable.
 func wrapWithRateLimitHeaders(resp handler.Response, result *ratelimiter.Result) handler.Response {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
+		// Ensure remaining count doesn't go below zero for cleaner API responses
 		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(max(0, result.Remaining)))
 		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.Unix(), 10))
 
@@ -92,6 +107,8 @@ func wrapWithRateLimitHeaders(resp handler.Response, result *ratelimiter.Result)
 	}
 }
 
+// max returns the larger of two integers.
+// Used to ensure remaining rate limit count doesn't go negative.
 func max(a, b int) int {
 	if a > b {
 		return a
