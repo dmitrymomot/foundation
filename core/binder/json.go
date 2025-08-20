@@ -28,7 +28,7 @@ const DefaultMaxJSONSize = 1 << 20 // 1 MB
 //	))
 func JSON() func(r *http.Request, v any) error {
 	return func(r *http.Request, v any) error {
-		// Check for context timeout
+		// Fail fast if request context is already cancelled to avoid processing doomed requests
 		ctx := r.Context()
 		if ctx != nil {
 			select {
@@ -43,7 +43,7 @@ func JSON() func(r *http.Request, v any) error {
 			return fmt.Errorf("%w: missing content-type header, expected application/json", ErrMissingContentType)
 		}
 
-		// Extract media type without parameters
+		// Strip charset and other parameters from Content-Type (e.g., "application/json; charset=utf-8")
 		mediaType := contentType
 		if idx := strings.Index(contentType, ";"); idx != -1 {
 			mediaType = strings.TrimSpace(contentType[:idx])
@@ -53,20 +53,20 @@ func JSON() func(r *http.Request, v any) error {
 			return fmt.Errorf("%w: got %s, expected application/json", ErrUnsupportedMediaType, mediaType)
 		}
 
-		// Read the entire body with size limit
+		// Read entire body with +1 byte to detect oversized requests efficiently
 		limitedReader := io.LimitReader(r.Body, DefaultMaxJSONSize+1)
 		body, err := io.ReadAll(limitedReader)
 		if err != nil {
 			return fmt.Errorf("%w: failed to read request body: %v", ErrFailedToParseJSON, err)
 		}
 
-		// Check if body exceeded size limit
+		// Reject requests exceeding size limit to prevent DoS attacks
 		if len(body) > DefaultMaxJSONSize {
 			return fmt.Errorf("%w: request body too large (max %d bytes)", ErrFailedToParseJSON, DefaultMaxJSONSize)
 		}
 
 		decoder := json.NewDecoder(strings.NewReader(string(body)))
-		decoder.DisallowUnknownFields() // Always use strict mode
+		decoder.DisallowUnknownFields() // Strict mode prevents typos and unexpected fields
 
 		if err := decoder.Decode(v); err != nil {
 			switch {
@@ -83,13 +83,13 @@ func JSON() func(r *http.Request, v any) error {
 			}
 		}
 
-		// Ensure entire body was consumed
+		// Verify no trailing data exists after valid JSON to prevent injection attacks
 		var extra json.RawMessage
 		if err := decoder.Decode(&extra); err != io.EOF {
 			return fmt.Errorf("%w: unexpected data after JSON object", ErrFailedToParseJSON)
 		}
 
-		// Sanitize all string fields in the decoded struct
+		// Apply security sanitization to prevent XSS and injection attacks
 		if err := sanitizeJSONStruct(v); err != nil {
 			return fmt.Errorf("%w: failed to sanitize input: %v", ErrFailedToParseJSON, err)
 		}

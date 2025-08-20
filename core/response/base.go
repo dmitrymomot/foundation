@@ -6,6 +6,14 @@ import (
 	"github.com/dmitrymomot/gokit/core/handler"
 )
 
+// Render executes the given response handler with the provided context.
+// If the response handler returns an error, it writes an HTTP 500 Internal Server Error response.
+func Render(ctx handler.Context, resp handler.Response) {
+	if err := resp(ctx.ResponseWriter(), ctx.Request()); err != nil {
+		http.Error(ctx.ResponseWriter(), err.Error(), http.StatusInternalServerError)
+	}
+}
+
 // String creates a text/plain response with 200 OK status.
 func String(content string) handler.Response {
 	return func(w http.ResponseWriter, r *http.Request) error {

@@ -19,7 +19,7 @@ type configCache struct {
 }
 
 var (
-	// globalCache is the singleton instance for caching configurations
+	// globalCache singleton prevents duplicate parsing of the same config types
 	globalCache = &configCache{
 		values: make(map[string]any),
 		onces:  make(map[string]*sync.Once),
@@ -54,7 +54,7 @@ var (
 //	}
 func Load[T any](v *T) error {
 	defaultEnvLoaded.Do(func() {
-		// Ignore errors - the .env file might not exist and that's ok
+		// Load .env file if present; ignore errors since it's optional
 		_ = godotenv.Load()
 	})
 	if v == nil {
@@ -81,7 +81,7 @@ func Load[T any](v *T) error {
 
 	var err error
 
-	// Use sync.Once to ensure the config is parsed only once per type
+	// Ensure thread-safe single-time parsing per configuration type
 	once.Do(func() {
 		if parseErr := env.Parse(v); parseErr != nil {
 			err = errors.Join(ErrParsingConfig, parseErr)
@@ -89,7 +89,7 @@ func Load[T any](v *T) error {
 		}
 
 		globalCache.mu.Lock()
-		globalCache.values[typeName] = *v // Store a copy to avoid external modifications
+		globalCache.values[typeName] = *v // Cache parsed config to prevent reprocessing
 		globalCache.mu.Unlock()
 	})
 
@@ -97,7 +97,7 @@ func Load[T any](v *T) error {
 		return err
 	}
 
-	// sync.Once guarantees the value is set if no error occurred
+	// sync.Once ensures config is cached after successful parsing
 	return nil
 }
 
@@ -119,7 +119,7 @@ func getTypeName[T any]() string {
 	var zero T
 	t := reflect.TypeOf(zero)
 	if t == nil {
-		// Handle interface types
+		// Fallback for interface types without concrete implementation
 		return fmt.Sprintf("%T", *new(T))
 	}
 	return t.String()

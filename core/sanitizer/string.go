@@ -6,18 +6,22 @@ import (
 	"unicode"
 )
 
+// Trim removes leading and trailing whitespace from the string.
 func Trim(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// ToLower converts the string to lowercase.
 func ToLower(s string) string {
 	return strings.ToLower(s)
 }
 
+// ToUpper converts the string to uppercase.
 func ToUpper(s string) string {
 	return strings.ToUpper(s)
 }
 
+// ToTitle converts the string to title case.
 func ToTitle(s string) string {
 	return strings.ToTitle(s)
 }
@@ -97,10 +101,12 @@ func ToCamelCase(s string) string {
 	return b.String()
 }
 
+// TrimToLower trims whitespace and converts to lowercase in one operation.
 func TrimToLower(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
 
+// TrimToUpper trims whitespace and converts to uppercase in one operation.
 func TrimToUpper(s string) string {
 	return strings.ToUpper(strings.TrimSpace(s))
 }
@@ -139,10 +145,11 @@ func RemoveControlChars(s string) string {
 func StripHTML(s string) string {
 	stripped := htmlTagRegex.ReplaceAllString(s, "")
 
-	// Decode entities like &amp; to &
+	// Decode HTML entities to their original characters
 	return html.UnescapeString(stripped)
 }
 
+// RemoveChars removes all occurrences of the specified characters from the string.
 func RemoveChars(s string, chars string) string {
 	for _, char := range chars {
 		s = strings.ReplaceAll(s, string(char), "")
@@ -150,6 +157,7 @@ func RemoveChars(s string, chars string) string {
 	return s
 }
 
+// ReplaceChars replaces all occurrences of any character in old with the new string.
 func ReplaceChars(s string, old string, new string) string {
 	for _, char := range old {
 		s = strings.ReplaceAll(s, string(char), new)
@@ -167,6 +175,7 @@ func KeepAlphanumeric(s string) string {
 	}, s)
 }
 
+// KeepAlpha keeps only letters and spaces, removing all other characters.
 func KeepAlpha(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsLetter(r) || unicode.IsSpace(r) {
@@ -176,6 +185,7 @@ func KeepAlpha(s string) string {
 	}, s)
 }
 
+// KeepDigits keeps only numeric digits, removing all other characters.
 func KeepDigits(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsDigit(r) {
@@ -185,7 +195,8 @@ func KeepDigits(s string) string {
 	}, s)
 }
 
-// SingleLine useful for form fields and log messages that need to be on one line.
+// SingleLine converts multi-line strings to single line by replacing line breaks with spaces.
+// Useful for form fields and log messages that need to be on one line.
 func SingleLine(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")

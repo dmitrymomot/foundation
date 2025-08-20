@@ -21,6 +21,7 @@ const (
 // Option configures logger creation.
 type Option func(*config)
 
+// WithLevel sets the minimum log level.
 func WithLevel(l slog.Level) Option {
 	return func(c *config) { c.level = l }
 }
@@ -39,12 +40,14 @@ func WithFormat(f Format) Option {
 	}
 }
 
+// WithTextFormatter configures text output format for development.
 func WithTextFormatter() Option {
 	return func(c *config) {
 		c.format = FormatText
 	}
 }
 
+// WithJSONFormatter configures JSON output format for production.
 func WithJSONFormatter() Option {
 	return func(c *config) {
 		c.format = FormatJSON
@@ -145,6 +148,8 @@ func WithProduction(service string) Option {
 	}
 }
 
+// WithStaging configures staging defaults.
+// Uses JSON format for structured logging and info level.
 func WithStaging(service string) Option {
 	return func(c *config) {
 		if service == "" {
@@ -161,6 +166,7 @@ func WithStaging(service string) Option {
 	}
 }
 
+// SetAsDefault sets the given logger as the global default logger.
 func SetAsDefault(l *slog.Logger) {
 	slog.SetDefault(l)
 }

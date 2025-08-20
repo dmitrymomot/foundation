@@ -23,8 +23,8 @@ type SendEmailParams struct {
 	Tag      string `json:"tag,omitempty"`
 }
 
-// emailRegex is a simple regex for validating email addresses.
-// This covers most common cases while avoiding overly complex validation.
+// emailRegex provides basic email validation suitable for most use cases.
+// It balances simplicity with practical validation needs.
 var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)
 
 // Validate checks that all required fields are present and valid.

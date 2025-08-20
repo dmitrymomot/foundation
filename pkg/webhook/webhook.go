@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-// TODO: Add metrics/telemetry integration hooks for monitoring webhook performance and reliability
-// TODO: Add structured logging support for better observability and debugging
-// TODO: Add request ID propagation for distributed tracing across webhook calls
-
 // Sender provides reliable webhook delivery with retries and circuit breaking.
 // Zero value is not usable; use NewSender to create instances.
 type Sender struct {

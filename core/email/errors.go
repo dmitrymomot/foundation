@@ -2,9 +2,8 @@ package email
 
 import "errors"
 
-// Domain errors for email operations.
-// These are designed to be wrapped with internal errors using errors.Join()
-// to provide both user-facing messages and detailed logging context.
+// Error variables define email operation failures that can be wrapped with
+// detailed context using errors.Join() for comprehensive error reporting.
 var (
 	ErrFailedToSendEmail = errors.New("failed to send email")
 	ErrInvalidConfig     = errors.New("invalid email configuration")

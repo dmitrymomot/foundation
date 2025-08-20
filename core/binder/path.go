@@ -79,7 +79,7 @@ func Path(extractor func(r *http.Request, fieldName string) string) func(r *http
 			field := rv.Field(i)
 			fieldType := rt.Field(i)
 
-			// Skip unexported fields
+			// Skip unexported fields that reflection cannot modify
 			if !field.CanSet() {
 				continue
 			}
@@ -91,7 +91,7 @@ func Path(extractor func(r *http.Request, fieldName string) string) func(r *http
 
 			value := extractor(r, paramName)
 			if value == "" {
-				continue // No value provided, leave as zero value
+				continue // Leave field as zero value when parameter is missing
 			}
 
 			if err := setFieldValue(field, fieldType.Type, []string{value}); err != nil {

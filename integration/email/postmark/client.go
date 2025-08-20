@@ -10,6 +10,8 @@ import (
 	"github.com/mrz1836/postmark"
 )
 
+// Client implements the EmailSender interface using Postmark's transactional email API.
+// Thread-safe and ready for concurrent use with automatic error classification.
 type Client struct {
 	client *postmark.Client
 	config Config
