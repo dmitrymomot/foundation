@@ -2,6 +2,8 @@ package pg
 
 import "time"
 
+// Config holds PostgreSQL connection parameters optimized for SaaS applications.
+// All fields are populated from environment variables for deployment convenience.
 type Config struct {
 	// PostgreSQL connection URL (postgres://user:pass@host:port/db)
 	ConnectionString string `env:"PG_CONN_URL,required"`

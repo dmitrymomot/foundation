@@ -54,7 +54,6 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, cfg Config, log *slog.Logg
 }
 
 // migrateSlogAdapter bridges goose's Printf-style logging to structured logging.
-// Maps goose's Fatalf to ErrorContext and Printf to InfoContext for consistency.
 type migrateSlogAdapter struct {
 	log *slog.Logger
 }
