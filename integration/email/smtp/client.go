@@ -15,6 +15,8 @@ import (
 	"github.com/dmitrymomot/gokit/core/email"
 )
 
+// Client implements the EmailSender interface using standard SMTP protocol.
+// Supports multiple TLS modes (STARTTLS, TLS, plain) and is thread-safe for concurrent use.
 type Client struct {
 	config Config
 	auth   smtp.Auth
