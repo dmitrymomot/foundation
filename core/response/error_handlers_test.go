@@ -82,37 +82,37 @@ func TestErrorHandler(t *testing.T) {
 			name:           "regular error returns 500",
 			error:          errors.New("internal error"),
 			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   "Internal Server Error\n\n\n", // Now returns HTTPError's message
+			expectedBody:   "Internal Server Error", // Now returns HTTPError's message
 		},
 		{
 			name:           "HTTPError with 401",
 			error:          response.ErrUnauthorized.WithMessage("invalid credentials"),
 			expectedStatus: http.StatusUnauthorized,
-			expectedBody:   "invalid credentials\n\n\n", // No trailing newline
+			expectedBody:   "invalid credentials", // No trailing newline
 		},
 		{
 			name:           "HTTPError with 404",
 			error:          response.ErrNotFound.WithMessage("resource not found"),
 			expectedStatus: http.StatusNotFound,
-			expectedBody:   "resource not found\n\n\n", // No trailing newline
+			expectedBody:   "resource not found", // No trailing newline
 		},
 		{
 			name:           "HTTPError with 400",
 			error:          response.ErrBadRequest.WithMessage("bad request"),
 			expectedStatus: http.StatusBadRequest,
-			expectedBody:   "bad request\n\n\n", // No trailing newline
+			expectedBody:   "bad request", // No trailing newline
 		},
 		{
 			name:           "custom error with StatusCode interface",
 			error:          customStatusError{message: "custom error", status: http.StatusTeapot},
 			expectedStatus: http.StatusTeapot,
-			expectedBody:   "I'm a teapot\n\n\n", // Now returns the HTTPError's message
+			expectedBody:   "I'm a teapot", // Now returns the HTTPError's message
 		},
 		{
 			name:           "HTTPError takes precedence over StatusCode interface",
 			error:          response.ErrForbidden.WithMessage("access denied"),
 			expectedStatus: http.StatusForbidden,
-			expectedBody:   "access denied\n\n\n", // No trailing newline
+			expectedBody:   "access denied", // No trailing newline
 		},
 	}
 
@@ -129,7 +129,7 @@ func TestErrorHandler(t *testing.T) {
 			// Check response
 			assert.Equal(t, tt.expectedStatus, w.Code)
 			assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
-			assert.Equal(t, tt.expectedBody+"\n", w.Body.String())
+			assert.Equal(t, tt.expectedBody, w.Body.String())
 		})
 	}
 }
@@ -283,7 +283,7 @@ func TestErrorHandlersWithRouter(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
-		assert.Equal(t, "need auth\n", w.Body.String())
+		assert.Equal(t, "need auth", w.Body.String())
 	})
 
 	t.Run("JSONErrorHandler with router", func(t *testing.T) {
@@ -363,19 +363,19 @@ func TestErrorHandlersContentNegotiation(t *testing.T) {
 			name:         "Plain text when Accept is empty",
 			acceptHeader: "",
 			contentType:  "text/plain; charset=utf-8",
-			bodyContains: "not found\n",
+			bodyContains: "not found",
 		},
 		{
 			name:         "Plain text when Accept is */*",
 			acceptHeader: "*/*",
 			contentType:  "text/plain; charset=utf-8",
-			bodyContains: "not found\n",
+			bodyContains: "not found",
 		},
 		{
 			name:         "Plain text for other Accept values",
 			acceptHeader: "text/html",
 			contentType:  "text/plain; charset=utf-8",
-			bodyContains: "not found\n",
+			bodyContains: "not found",
 		},
 	}
 
