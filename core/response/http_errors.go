@@ -25,6 +25,12 @@ func (e HTTPError) Error() string {
 	return e.Message
 }
 
+// StatusCode returns the HTTP status code for the error.
+// This allows HTTPError to work with the router's statusCode interface.
+func (e HTTPError) StatusCode() int {
+	return e.Status
+}
+
 // WithMessage returns a copy of the error with a custom message.
 func (e HTTPError) WithMessage(message string) HTTPError {
 	e.Message = message
@@ -291,3 +297,47 @@ var (
 		Message: http.StatusText(http.StatusNetworkAuthenticationRequired),
 	}
 )
+
+// httpErrorsByStatus maps HTTP status codes to their corresponding HTTPError values
+var httpErrorsByStatus = map[int]HTTPError{
+	http.StatusBadRequest:                    ErrBadRequest,
+	http.StatusUnauthorized:                  ErrUnauthorized,
+	http.StatusPaymentRequired:               ErrPaymentRequired,
+	http.StatusForbidden:                     ErrForbidden,
+	http.StatusNotFound:                      ErrNotFound,
+	http.StatusMethodNotAllowed:              ErrMethodNotAllowed,
+	http.StatusNotAcceptable:                 ErrNotAcceptable,
+	http.StatusProxyAuthRequired:             ErrProxyAuthRequired,
+	http.StatusRequestTimeout:                ErrRequestTimeout,
+	http.StatusConflict:                      ErrConflict,
+	http.StatusGone:                          ErrGone,
+	http.StatusLengthRequired:                ErrLengthRequired,
+	http.StatusPreconditionFailed:            ErrPreconditionFailed,
+	http.StatusRequestEntityTooLarge:         ErrRequestEntityTooLarge,
+	http.StatusRequestURITooLong:             ErrRequestURITooLong,
+	http.StatusUnsupportedMediaType:          ErrUnsupportedMediaType,
+	http.StatusRequestedRangeNotSatisfiable:  ErrRequestedRangeNotSatisfiable,
+	http.StatusExpectationFailed:             ErrExpectationFailed,
+	http.StatusTeapot:                        ErrTeapot,
+	http.StatusMisdirectedRequest:            ErrMisdirectedRequest,
+	http.StatusUnprocessableEntity:           ErrUnprocessableEntity,
+	http.StatusLocked:                        ErrLocked,
+	http.StatusFailedDependency:              ErrFailedDependency,
+	http.StatusTooEarly:                      ErrTooEarly,
+	http.StatusUpgradeRequired:               ErrUpgradeRequired,
+	http.StatusPreconditionRequired:          ErrPreconditionRequired,
+	http.StatusTooManyRequests:               ErrTooManyRequests,
+	http.StatusRequestHeaderFieldsTooLarge:   ErrRequestHeaderFieldsTooLarge,
+	http.StatusUnavailableForLegalReasons:    ErrUnavailableForLegalReasons,
+	http.StatusInternalServerError:           ErrInternalServerError,
+	http.StatusNotImplemented:                ErrNotImplemented,
+	http.StatusBadGateway:                    ErrBadGateway,
+	http.StatusServiceUnavailable:            ErrServiceUnavailable,
+	http.StatusGatewayTimeout:                ErrGatewayTimeout,
+	http.StatusHTTPVersionNotSupported:       ErrHTTPVersionNotSupported,
+	http.StatusVariantAlsoNegotiates:         ErrVariantAlsoNegotiates,
+	http.StatusInsufficientStorage:           ErrInsufficientStorage,
+	http.StatusLoopDetected:                  ErrLoopDetected,
+	http.StatusNotExtended:                   ErrNotExtended,
+	http.StatusNetworkAuthenticationRequired: ErrNetworkAuthenticationRequired,
+}
