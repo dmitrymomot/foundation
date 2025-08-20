@@ -2,6 +2,8 @@ package redis
 
 import "time"
 
+// Config holds Redis connection parameters with environment variable mapping.
+// Provides connection pooling, timeout, and retry configuration for reliable operation.
 type Config struct {
 	ConnectionURL  string        `env:"REDIS_URL,required" envDefault:"redis://localhost:6379/0"`
 	RetryAttempts  int           `env:"REDIS_RETRY_ATTEMPTS" envDefault:"3"`
