@@ -19,7 +19,7 @@ func TestRequestIDDefaultConfiguration(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{})
+	requestIDMiddleware := middleware.RequestID[*router.Context]()
 	r.Use(requestIDMiddleware)
 
 	var capturedID string
@@ -53,7 +53,7 @@ func TestRequestIDCustomGenerator(t *testing.T) {
 	r := router.New[*router.Context]()
 
 	customID := "custom-123-456"
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		Generator: func() string {
 			return customID
 		},
@@ -87,7 +87,7 @@ func TestRequestIDCustomHeaderName(t *testing.T) {
 	r := router.New[*router.Context]()
 
 	customHeaderName := "X-Trace-ID"
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		HeaderName: customHeaderName,
 	})
 	r.Use(requestIDMiddleware)
@@ -114,7 +114,7 @@ func TestRequestIDUseExisting(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		UseExisting: true,
 	})
 	r.Use(requestIDMiddleware)
@@ -159,7 +159,7 @@ func TestRequestIDSkipFunctionality(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		Skip: func(ctx handler.Context) bool {
 			// Skip middleware for health check endpoints
 			return strings.HasPrefix(ctx.Request().URL.Path, "/health")
@@ -213,7 +213,7 @@ func TestRequestIDMultipleRequests(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{})
+	requestIDMiddleware := middleware.RequestID[*router.Context]()
 	r.Use(requestIDMiddleware)
 
 	requestIDs := make([]string, 0, 3)
@@ -249,7 +249,7 @@ func TestRequestIDWithMultipleMiddleware(t *testing.T) {
 	executionOrder := []string{}
 	var requestIDInMiddleware2, requestIDInHandler string
 
-	middleware1 := middleware.RequestID[*router.Context](middleware.RequestIDConfig{})
+	middleware1 := middleware.RequestID[*router.Context]()
 
 	middleware2 := func(next handler.HandlerFunc[*router.Context]) handler.HandlerFunc[*router.Context] {
 		return func(ctx *router.Context) handler.Response {
@@ -290,7 +290,7 @@ func TestRequestIDEmptyExistingHeader(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		UseExisting: true,
 	})
 	r.Use(requestIDMiddleware)
@@ -347,7 +347,7 @@ func TestRequestIDIncrementing(t *testing.T) {
 	r := router.New[*router.Context]()
 
 	counter := 0
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		Generator: func() string {
 			counter++
 			return strings.Join([]string{"req", string(rune('0' + counter))}, "-")
@@ -384,7 +384,7 @@ func TestRequestIDIncrementing(t *testing.T) {
 func BenchmarkRequestIDDefault(b *testing.B) {
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{})
+	requestIDMiddleware := middleware.RequestID[*router.Context]()
 	r.Use(requestIDMiddleware)
 
 	r.Get("/test", func(ctx *router.Context) handler.Response {
@@ -406,7 +406,7 @@ func BenchmarkRequestIDDefault(b *testing.B) {
 func BenchmarkRequestIDWithExisting(b *testing.B) {
 	r := router.New[*router.Context]()
 
-	requestIDMiddleware := middleware.RequestID[*router.Context](middleware.RequestIDConfig{
+	requestIDMiddleware := middleware.RequestIDWithConfig[*router.Context](middleware.RequestIDConfig{
 		UseExisting: true,
 	})
 	r.Use(requestIDMiddleware)

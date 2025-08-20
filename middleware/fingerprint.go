@@ -18,7 +18,13 @@ type FingerprintConfig struct {
 	ValidateFunc   func(ctx handler.Context, fingerprint string) error
 }
 
-func Fingerprint[C handler.Context](cfg FingerprintConfig) handler.Middleware[C] {
+func Fingerprint[C handler.Context]() handler.Middleware[C] {
+	return FingerprintWithConfig[C](FingerprintConfig{
+		StoreInContext: true,
+	})
+}
+
+func FingerprintWithConfig[C handler.Context](cfg FingerprintConfig) handler.Middleware[C] {
 	if cfg.HeaderName == "" {
 		cfg.HeaderName = "X-Device-Fingerprint"
 	}
@@ -41,7 +47,7 @@ func Fingerprint[C handler.Context](cfg FingerprintConfig) handler.Middleware[C]
 
 			if cfg.ValidateFunc != nil {
 				if err := cfg.ValidateFunc(ctx, fp); err != nil {
-					return response.Error(response.ErrBadRequest.WithError(err))
+					return response.JSONWithStatus(response.ErrBadRequest.WithError(err), response.ErrBadRequest.Status)
 				}
 			}
 

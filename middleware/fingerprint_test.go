@@ -21,7 +21,7 @@ func TestFingerprintDefaultConfiguration(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{})
+	fingerprintMiddleware := middleware.Fingerprint[*router.Context]()
 	r.Use(fingerprintMiddleware)
 
 	var capturedFP string
@@ -54,7 +54,7 @@ func TestFingerprintStoreInHeader(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInHeader: true,
 	})
 	r.Use(fingerprintMiddleware)
@@ -84,7 +84,7 @@ func TestFingerprintCustomHeaderName(t *testing.T) {
 	r := router.New[*router.Context]()
 
 	customHeaderName := "X-Client-ID"
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		HeaderName:    customHeaderName,
 		StoreInHeader: true,
 	})
@@ -113,7 +113,7 @@ func TestFingerprintSkipFunctionality(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		Skip: func(ctx handler.Context) bool {
 			return strings.HasPrefix(ctx.Request().URL.Path, "/static")
 		},
@@ -171,7 +171,7 @@ func TestFingerprintValidateFunc(t *testing.T) {
 		r := router.New[*router.Context]()
 
 		var validatedFP string
-		fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+		fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 			ValidateFunc: func(ctx handler.Context, fp string) error {
 				validatedFP = fp
 				// Simulate successful validation
@@ -205,7 +205,7 @@ func TestFingerprintValidateFunc(t *testing.T) {
 		r := router.New[*router.Context]()
 
 		validationError := errors.New("fingerprint validation failed")
-		fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+		fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 			ValidateFunc: func(ctx handler.Context, fp string) error {
 				// Simulate validation failure
 				return validationError
@@ -228,8 +228,8 @@ func TestFingerprintValidateFunc(t *testing.T) {
 
 		r.ServeHTTP(w, req)
 
-		// Error should be handled by the router's error handler
-		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		// Error should be handled with BadRequest status
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 		assert.False(t, handlerExecuted, "Handler should not execute when validation fails")
 	})
 }
@@ -239,7 +239,7 @@ func TestFingerprintConsistency(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 	})
 	r.Use(fingerprintMiddleware)
@@ -276,7 +276,7 @@ func TestFingerprintDifferentRequests(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 	})
 	r.Use(fingerprintMiddleware)
@@ -316,7 +316,7 @@ func TestFingerprintWithMultipleMiddleware(t *testing.T) {
 
 	var fingerprintInMiddleware2, fingerprintInHandler string
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 	})
 
@@ -380,7 +380,7 @@ func TestFingerprintStoreInContextFalse(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: false,
 		StoreInHeader:  true, // Must do something with the fingerprint
 	})
@@ -414,7 +414,7 @@ func TestFingerprintSessionValidation(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 		ValidateFunc: func(ctx handler.Context, fp string) error {
 			// Get session ID from cookie (simulated)
@@ -467,7 +467,7 @@ func TestFingerprintSessionValidation(t *testing.T) {
 	req3.AddCookie(&http.Cookie{Name: "session", Value: "session123"})
 	w3 := httptest.NewRecorder()
 	r.ServeHTTP(w3, req3)
-	assert.Equal(t, http.StatusInternalServerError, w3.Code, "Should reject mismatched fingerprint")
+	assert.Equal(t, http.StatusBadRequest, w3.Code, "Should reject mismatched fingerprint")
 }
 
 func TestFingerprintIntegrationWithActualGenerate(t *testing.T) {
@@ -475,7 +475,7 @@ func TestFingerprintIntegrationWithActualGenerate(t *testing.T) {
 
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 	})
 	r.Use(fingerprintMiddleware)
@@ -508,7 +508,7 @@ func TestFingerprintIntegrationWithActualGenerate(t *testing.T) {
 func BenchmarkFingerprintDefault(b *testing.B) {
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 	})
 	r.Use(fingerprintMiddleware)
@@ -534,7 +534,7 @@ func BenchmarkFingerprintDefault(b *testing.B) {
 func BenchmarkFingerprintWithValidation(b *testing.B) {
 	r := router.New[*router.Context]()
 
-	fingerprintMiddleware := middleware.Fingerprint[*router.Context](middleware.FingerprintConfig{
+	fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
 		StoreInContext: true,
 		ValidateFunc: func(ctx handler.Context, fp string) error {
 			// Simple validation simulation

@@ -16,7 +16,11 @@ type RequestIDConfig struct {
 	UseExisting bool
 }
 
-func RequestID[C handler.Context](cfg RequestIDConfig) handler.Middleware[C] {
+func RequestID[C handler.Context]() handler.Middleware[C] {
+	return RequestIDWithConfig[C](RequestIDConfig{})
+}
+
+func RequestIDWithConfig[C handler.Context](cfg RequestIDConfig) handler.Middleware[C] {
 	if cfg.HeaderName == "" {
 		cfg.HeaderName = "X-Request-ID"
 	}
