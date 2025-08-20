@@ -283,7 +283,7 @@ func TestErrorHandlersWithRouter(t *testing.T) {
 
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
-		assert.Equal(t, "need auth", w.Body.String())
+		assert.Equal(t, "need auth\n", w.Body.String())
 	})
 
 	t.Run("JSONErrorHandler with router", func(t *testing.T) {
@@ -363,19 +363,19 @@ func TestErrorHandlersContentNegotiation(t *testing.T) {
 			name:         "Plain text when Accept is empty",
 			acceptHeader: "",
 			contentType:  "text/plain; charset=utf-8",
-			bodyContains: "not found", // No trailing newline
+			bodyContains: "not found\n",
 		},
 		{
 			name:         "Plain text when Accept is */*",
 			acceptHeader: "*/*",
 			contentType:  "text/plain; charset=utf-8",
-			bodyContains: "not found", // No trailing newline
+			bodyContains: "not found\n",
 		},
 		{
 			name:         "Plain text for other Accept values",
 			acceptHeader: "text/html",
 			contentType:  "text/plain; charset=utf-8",
-			bodyContains: "not found", // No trailing newline
+			bodyContains: "not found\n",
 		},
 	}
 
