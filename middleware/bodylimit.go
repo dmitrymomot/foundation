@@ -3,8 +3,8 @@ package middleware
 import (
 	"fmt"
 	"io"
+	"mime"
 	"strconv"
-	"strings"
 
 	"github.com/dmitrymomot/gokit/core/handler"
 	"github.com/dmitrymomot/gokit/core/response"
@@ -55,11 +55,15 @@ func BodyLimitWithConfig[C handler.Context](cfg BodyLimitConfig) handler.Middlew
 	if cfg.ErrorHandler == nil {
 		cfg.ErrorHandler = func(ctx handler.Context, contentLength int64, maxSize int64) handler.Response {
 			message := fmt.Sprintf("Request body too large. Maximum allowed: %s", formatBytes(maxSize))
+			details := map[string]any{
+				"limit": maxSize,
+			}
 			if contentLength > 0 {
 				message = fmt.Sprintf("Request body too large. Size: %s, Maximum allowed: %s",
 					formatBytes(contentLength), formatBytes(maxSize))
+				details["size"] = contentLength
 			}
-			return response.Error(response.ErrRequestEntityTooLarge.WithMessage(message))
+			return response.Error(response.ErrRequestEntityTooLarge.WithMessage(message).WithDetails(details))
 		}
 	}
 
@@ -75,12 +79,12 @@ func BodyLimitWithConfig[C handler.Context](cfg BodyLimitConfig) handler.Middlew
 			maxSize := cfg.MaxSize
 			if cfg.ContentTypeLimit != nil {
 				contentType := req.Header.Get("Content-Type")
-				// Extract the main content type (before any parameters)
-				if idx := strings.Index(contentType, ";"); idx != -1 {
-					contentType = strings.TrimSpace(contentType[:idx])
-				}
-				if limit, ok := cfg.ContentTypeLimit[contentType]; ok {
-					maxSize = limit
+				// Extract the main content type using mime.ParseMediaType
+				mediaType, _, err := mime.ParseMediaType(contentType)
+				if err == nil {
+					if limit, ok := cfg.ContentTypeLimit[mediaType]; ok {
+						maxSize = limit
+					}
 				}
 			}
 
@@ -123,7 +127,7 @@ type limitedReader struct {
 // Read implements io.Reader
 func (lr *limitedReader) Read(p []byte) (int, error) {
 	if lr.read >= lr.limit {
-		return 0, fmt.Errorf("request body size exceeds limit of %d bytes", lr.limit)
+		return 0, fmt.Errorf("request body size exceeds limit of %d bytes (read: %d)", lr.limit, lr.read)
 	}
 
 	// Calculate how much we can read without exceeding the limit
@@ -137,7 +141,7 @@ func (lr *limitedReader) Read(p []byte) (int, error) {
 
 	// Check if we've exceeded the limit after reading
 	if lr.read > lr.limit {
-		return n, fmt.Errorf("request body size exceeds limit of %d bytes", lr.limit)
+		return n, fmt.Errorf("request body size exceeds limit of %d bytes (read: %d)", lr.limit, lr.read)
 	}
 
 	return n, err

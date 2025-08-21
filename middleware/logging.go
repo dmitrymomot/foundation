@@ -1,3 +1,48 @@
+// Package middleware provides HTTP request/response logging middleware with flexible configuration.
+//
+// The logging middleware supports structured logging with fine-grained control over what gets logged,
+// including request/response details, body content, headers, and performance tracking.
+//
+// # Basic Usage
+//
+// Use the default logging middleware with minimal configuration:
+//
+//	handler := middleware.Logging[handler.Context]()
+//	wrappedHandler := handler(originalHandler)
+//
+// # Advanced Configuration Examples
+//
+// ## 1. Debugging Configuration (Request Body Logging)
+//
+//	loggingMiddleware := middleware.LoggingWithConfig[handler.Context](middleware.LoggingConfig{
+//		LogRequestBody:  true,   // Log request body for debugging
+//		LogResponseBody: true,   // Log response body for detailed tracing
+//		MaxBodyLogSize:  8192,   // Increase max body log size to 8KB
+//		LogLevel:        slog.LevelDebug,
+//	})
+//
+// ## 2. Production Configuration (Sensitive Header Redaction)
+//
+//	loggingMiddleware := middleware.LoggingWithConfig[handler.Context](middleware.LoggingConfig{
+//		LogHeaders:         true,
+//		SensitiveHeaders:   []string{"Authorization", "X-API-Key", "Cookie"},
+//		LogLevel:           slog.LevelInfo,
+//		SlowRequestThreshold: 2 * time.Second, // Log slow requests taking more than 2 seconds
+//	})
+//
+// ## 3. Skipping Health Check Endpoints
+//
+//	loggingMiddleware := middleware.LoggingWithConfig[handler.Context](middleware.LoggingConfig{
+//		Skip: func(ctx handler.Context) bool {
+//			return ctx.Request().URL.Path == "/health" ||
+//			       ctx.Request().URL.Path == "/metrics"
+//		},
+//	})
+//
+// ## 4. Customizing Logging Behavior
+//
+// The logging middleware is highly configurable. You can control log levels,
+// enable/disable specific logging features, and set performance thresholds.
 package middleware
 
 import (
