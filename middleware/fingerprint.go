@@ -60,7 +60,7 @@ func FingerprintWithConfig[C handler.Context](cfg FingerprintConfig) handler.Mid
 
 			if cfg.ValidateFunc != nil {
 				if err := cfg.ValidateFunc(ctx, fp); err != nil {
-					return response.JSONWithStatus(response.ErrBadRequest.WithError(err), response.ErrBadRequest.Status)
+					return response.Error(response.ErrBadRequest.WithError(err))
 				}
 			}
 

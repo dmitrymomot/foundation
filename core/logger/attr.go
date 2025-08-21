@@ -132,6 +132,19 @@ func UserAgent(ua string) slog.Attr {
 	return slog.String("user_agent", ua)
 }
 
+// RemoteAddr creates an attribute for remote addresses.
+func RemoteAddr(addr string) slog.Attr {
+	return slog.String("remote_addr", addr)
+}
+
+// Query creates an attribute for URL query strings.
+func Query(query string) slog.Attr {
+	if query == "" {
+		return slog.Attr{}
+	}
+	return slog.String("query", query)
+}
+
 // BytesIn creates an attribute for incoming bytes.
 func BytesIn(n int64) slog.Attr {
 	return slog.Int64("bytes_in", n)
