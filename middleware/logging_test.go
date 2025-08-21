@@ -89,8 +89,8 @@ func TestLoggingMiddleware(t *testing.T) {
 	assert.Equal(t, "HTTP request completed", respLog["msg"])
 	assert.Equal(t, "GET", respLog["method"])
 	assert.Equal(t, "/test", respLog["path"])
-	assert.Equal(t, int64(200), respLog["status"])
-	assert.Equal(t, int64(13), respLog["size"]) // "test response" = 13 bytes
+	assert.Equal(t, int64(200), respLog["status_code"])
+	assert.Equal(t, int64(13), respLog["bytes_out"]) // "test response" = 13 bytes
 	assert.NotNil(t, respLog["duration"])
 }
 
@@ -414,5 +414,5 @@ func TestLoggingResponseSize(t *testing.T) {
 	r.ServeHTTP(w, req)
 
 	respLog := logHandler.entries[1]
-	assert.Equal(t, int64(12), respLog["size"]) // "Hello World!" = 12 bytes
+	assert.Equal(t, int64(12), respLog["bytes_out"]) // "Hello World!" = 12 bytes
 }
