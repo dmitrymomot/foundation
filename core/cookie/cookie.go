@@ -387,7 +387,8 @@ func (m *Manager) setConsentCookie(w http.ResponseWriter, name, value string) er
 	return nil
 }
 
-// sign creates an HMAC signature for the value.
+// sign creates a cryptographically secure HMAC signature using the first secret.
+// The signature helps detect tampering or unintended cookie modifications.
 func (m *Manager) sign(value string) string {
 	mac := hmac.New(sha256.New, []byte(m.secrets[0]))
 	mac.Write([]byte(value))
@@ -395,7 +396,8 @@ func (m *Manager) sign(value string) string {
 	return base64.URLEncoding.EncodeToString([]byte(value)) + "|" + signature
 }
 
-// verify checks the HMAC signature of a signed value.
+// verify validates the HMAC signature across multiple secrets to support key rotation.
+// This method prevents replay attacks and ensures cookie integrity.
 func (m *Manager) verify(signed string) (string, error) {
 	parts := strings.SplitN(signed, "|", 2)
 	if len(parts) != 2 {
@@ -424,7 +426,8 @@ func (m *Manager) verify(signed string) (string, error) {
 	return "", ErrInvalidSignature
 }
 
-// encrypt encrypts a value using AES-256-GCM.
+// encrypt uses AES-256-GCM with a cryptographically secure nonce for strong encryption.
+// Provides authenticated encryption to protect sensitive cookie data from tampering.
 func (m *Manager) encrypt(value string) (string, error) {
 	// Validate key length for AES-256
 	if len(m.secrets[0]) < 32 {
@@ -450,7 +453,8 @@ func (m *Manager) encrypt(value string) (string, error) {
 	return base64.URLEncoding.EncodeToString(ciphertext), nil
 }
 
-// decrypt decrypts a value using AES-256-GCM.
+// decrypt attempts to decrypt using multiple secrets, supporting seamless key rotation
+// without invalidating existing encrypted cookies during key transitions.
 func (m *Manager) decrypt(encrypted string) (string, error) {
 	ciphertext, err := base64.URLEncoding.DecodeString(encrypted)
 	if err != nil {

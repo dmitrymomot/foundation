@@ -15,9 +15,13 @@ type Options struct {
 	Essential bool
 }
 
-// Option is a functional option for configuring cookie attributes.
-// Use Option to configure individual cookie properties like Path, Domain, MaxAge, etc.
-// These options affect how cookies are set and retrieved.
+// Option is a functional option pattern for flexible and composable cookie configuration.
+// It allows fine-grained control over individual cookie attributes without complex constructors.
+//
+// This pattern enables:
+// - Clean, readable configuration
+// - Partial configuration of cookie attributes
+// - Easily extensible without modifying existing code
 //
 // Example:
 //

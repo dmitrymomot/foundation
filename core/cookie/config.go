@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-// Config provides environment-based configuration for cookie manager.
+// Config provides environment-based configuration for cookie management with support for GDPR consent settings.
+// It allows granular control over cookie behavior through environment variables.
 type Config struct {
 	Secrets  string        `env:"COOKIE_SECRETS" envDefault:""`
 	Path     string        `env:"COOKIE_PATH" envDefault:"/"`
@@ -14,11 +15,13 @@ type Config struct {
 	Secure   bool          `env:"COOKIE_SECURE" envDefault:"false"`
 	HttpOnly bool          `env:"COOKIE_HTTP_ONLY" envDefault:"true"`
 	SameSite http.SameSite `env:"COOKIE_SAME_SITE" envDefault:"2"` // SameSiteLaxMode
-	MaxSize  int           `env:"COOKIE_MAX_SIZE" envDefault:"4096"`
-	// GDPR consent settings
+	// MaxSize limits cookie size to prevent browser rejection
+	MaxSize int `env:"COOKIE_MAX_SIZE" envDefault:"4096"`
+
+	// Consent settings for GDPR and privacy compliance
 	ConsentCookieName string `env:"COOKIE_CONSENT_NAME" envDefault:"__cookie_consent"`
 	ConsentVersion    string `env:"COOKIE_CONSENT_VERSION" envDefault:"1.0"`
-	ConsentMaxAge     int    `env:"COOKIE_CONSENT_MAX_AGE" envDefault:"31536000"` // 1 year
+	ConsentMaxAge     int    `env:"COOKIE_CONSENT_MAX_AGE" envDefault:"31536000"`
 }
 
 // DefaultConfig returns a Config with secure defaults.

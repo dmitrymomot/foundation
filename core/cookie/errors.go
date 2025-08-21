@@ -5,7 +5,8 @@ import (
 	"fmt"
 )
 
-// Error variables define common cookie operation failures.
+// Error variables define specific failure scenarios in cookie management,
+// providing clear, actionable error information for robust error handling.
 var (
 	// ErrNoSecret indicates no secret was provided for cookie encryption/signing.
 	ErrNoSecret = errors.New("no secret provided for cookie manager")
