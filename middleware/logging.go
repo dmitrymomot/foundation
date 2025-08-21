@@ -121,17 +121,17 @@ func LoggingWithConfig[C handler.Context](cfg LoggingConfig) handler.Middleware[
 			attrs := []slog.Attr{
 				logger.Component(cfg.Component),
 				logger.Event("request"),
-				slog.String("method", req.Method),
-				slog.String("path", req.URL.Path),
-				slog.String("remote_addr", req.RemoteAddr),
+				logger.Method(req.Method),
+				logger.Path(req.URL.Path),
+				logger.RemoteAddr(req.RemoteAddr),
 			}
 
 			if requestID != "" {
-				attrs = append(attrs, slog.String("request_id", requestID))
+				attrs = append(attrs, logger.RequestID(requestID))
 			}
 
 			if req.URL.RawQuery != "" {
-				attrs = append(attrs, slog.String("query", req.URL.RawQuery))
+				attrs = append(attrs, logger.Query(req.URL.RawQuery))
 			}
 
 			// Log request body if enabled
@@ -198,15 +198,15 @@ func LoggingWithConfig[C handler.Context](cfg LoggingConfig) handler.Middleware[
 				respAttrs := []slog.Attr{
 					logger.Component(cfg.Component),
 					logger.Event("response"),
-					slog.String("method", req.Method),
-					slog.String("path", req.URL.Path),
-					slog.Int("status", wrapped.statusCode),
-					slog.Int("size", wrapped.size),
-					slog.Duration("duration", duration),
+					logger.Method(req.Method),
+					logger.Path(req.URL.Path),
+					logger.StatusCode(wrapped.statusCode),
+					logger.BytesOut(int64(wrapped.size)),
+					logger.Duration(duration),
 				}
 
 				if requestID != "" {
-					respAttrs = append(respAttrs, slog.String("request_id", requestID))
+					respAttrs = append(respAttrs, logger.RequestID(requestID))
 				}
 
 				// Log response headers if enabled
