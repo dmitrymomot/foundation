@@ -428,7 +428,7 @@ func (m *Manager) verify(signed string) (string, error) {
 func (m *Manager) encrypt(value string) (string, error) {
 	// Validate key length for AES-256
 	if len(m.secrets[0]) < 32 {
-		return "", fmt.Errorf("%w: secret must be at least 32 bytes for AES-256", ErrSecretTooShort)
+		return "", ErrSecretTooShort
 	}
 
 	block, err := aes.NewCipher([]byte(m.secrets[0][:32]))
@@ -462,7 +462,7 @@ func (m *Manager) decrypt(encrypted string) (string, error) {
 	for _, secret := range m.secrets {
 		// Validate key length for AES-256
 		if len(secret) < 32 {
-			lastErr = fmt.Errorf("%w: secret must be at least 32 bytes for AES-256", ErrSecretTooShort)
+			lastErr = ErrSecretTooShort
 			continue
 		}
 
