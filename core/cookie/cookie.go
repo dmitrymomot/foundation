@@ -63,7 +63,17 @@ type Manager struct {
 	consentMaxAge  int
 }
 
-// ManagerOption configures the Manager.
+// ManagerOption configures the Manager itself (not individual cookies).
+// Use ManagerOption to configure manager-level settings like max cookie size,
+// consent cookie name, and consent duration.
+// These options affect the behavior of the entire cookie manager.
+//
+// Example:
+//
+//	manager, err := NewWithOptions(secrets, cookieOpts,
+//	  WithMaxSize(8192),
+//	  WithConsentCookie("gdpr_consent"),
+//	  WithConsentMaxAge(365*24*60*60))
 type ManagerOption func(*Manager)
 
 // WithMaxSize sets the maximum cookie size.
@@ -115,10 +125,10 @@ func New(secrets []string, opts ...Option) (*Manager, error) {
 	}
 
 	// Validate secret lengths
-	for i, s := range secrets {
-		if len(s) < minSecretLength {
+	for i := range len(secrets) {
+		if len(secrets[i]) < minSecretLength {
 			return nil, fmt.Errorf("%w: secret %d has %d chars, need at least %d",
-				ErrSecretTooShort, i, len(s), minSecretLength)
+				ErrSecretTooShort, i, len(secrets[i]), minSecretLength)
 		}
 	}
 
@@ -416,6 +426,11 @@ func (m *Manager) verify(signed string) (string, error) {
 
 // encrypt encrypts a value using AES-256-GCM.
 func (m *Manager) encrypt(value string) (string, error) {
+	// Validate key length for AES-256
+	if len(m.secrets[0]) < 32 {
+		return "", fmt.Errorf("%w: secret must be at least 32 bytes for AES-256", ErrSecretTooShort)
+	}
+
 	block, err := aes.NewCipher([]byte(m.secrets[0][:32]))
 	if err != nil {
 		return "", err
@@ -445,6 +460,12 @@ func (m *Manager) decrypt(encrypted string) (string, error) {
 	// Try all secrets for key rotation
 	var lastErr error
 	for _, secret := range m.secrets {
+		// Validate key length for AES-256
+		if len(secret) < 32 {
+			lastErr = fmt.Errorf("%w: secret must be at least 32 bytes for AES-256", ErrSecretTooShort)
+			continue
+		}
+
 		block, err := aes.NewCipher([]byte(secret[:32]))
 		if err != nil {
 			lastErr = err

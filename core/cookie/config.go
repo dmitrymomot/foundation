@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-const defaultOptionCapacity = 6 // Default capacity for options slice
-
 // Config provides environment-based configuration for cookie manager.
 type Config struct {
 	Secrets  string        `env:"COOKIE_SECRETS" envDefault:""`
@@ -65,7 +63,7 @@ func (c Config) parseSecrets() []string {
 func NewFromConfig(cfg Config, opts ...Option) (*Manager, error) {
 	secrets := cfg.parseSecrets()
 
-	configOpts := make([]Option, 0, defaultOptionCapacity)
+	configOpts := make([]Option, 0)
 
 	if cfg.Path != "" {
 		configOpts = append(configOpts, WithPath(cfg.Path))

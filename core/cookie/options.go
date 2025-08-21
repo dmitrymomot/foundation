@@ -15,7 +15,16 @@ type Options struct {
 	Essential bool
 }
 
-// Option is a functional option for configuring cookie options.
+// Option is a functional option for configuring cookie attributes.
+// Use Option to configure individual cookie properties like Path, Domain, MaxAge, etc.
+// These options affect how cookies are set and retrieved.
+//
+// Example:
+//
+//	manager.Set(w, r, "session", value,
+//	  WithPath("/api"),
+//	  WithMaxAge(3600),
+//	  WithSecure(true))
 type Option func(*Options)
 
 // WithPath sets the cookie path attribute.
