@@ -60,7 +60,7 @@ func ClientIPWithConfig[C handler.Context](cfg ClientIPConfig) handler.Middlewar
 
 			if cfg.ValidateFunc != nil {
 				if err := cfg.ValidateFunc(ctx, ip); err != nil {
-					return response.JSONWithStatus(response.ErrForbidden.WithError(err), response.ErrForbidden.Status)
+					return response.Error(response.ErrForbidden.WithError(err))
 				}
 			}
 

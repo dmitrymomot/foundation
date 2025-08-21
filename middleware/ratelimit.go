@@ -52,7 +52,7 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 					"retry_after": fmt.Sprintf("%.0f", result.RetryAfter().Seconds()),
 				})
 			}
-			return response.JSONWithStatus(err, err.Status)
+			return response.Error(err)
 		}
 	}
 
@@ -65,10 +65,7 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 			key := cfg.KeyExtractor(ctx)
 			result, err := cfg.Limiter.Allow(ctx.Request().Context(), key)
 			if err != nil {
-				return response.JSONWithStatus(
-					response.ErrInternalServerError.WithError(err),
-					response.ErrInternalServerError.Status,
-				)
+				return response.Error(response.ErrInternalServerError.WithError(err))
 			}
 
 			if !result.Allowed() {
