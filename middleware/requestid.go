@@ -3,8 +3,9 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
 	"github.com/google/uuid"
+
+	"github.com/dmitrymomot/gokit/core/handler"
 )
 
 // requestIDContextKey is used as a key for storing request ID in request context.

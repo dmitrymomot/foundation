@@ -6,8 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/core/response"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dmitrymomot/gokit/core/response"
 )
 
 func TestJSON(t *testing.T) {

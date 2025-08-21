@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/response"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/gokit/core/response"
 )
 
 // Tests for SSE Protocol Format Validation

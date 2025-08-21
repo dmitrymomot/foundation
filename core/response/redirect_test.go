@@ -6,9 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/dmitrymomot/gokit/core/handler"
 	"github.com/dmitrymomot/gokit/core/response"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestRedirect(t *testing.T) {

@@ -5,8 +5,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/handler"
 	"github.com/gorilla/websocket"
+
+	"github.com/dmitrymomot/gokit/core/handler"
 )
 
 type wsConfig struct {
