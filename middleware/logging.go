@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/dmitrymomot/gokit/core/handler"
@@ -154,7 +155,7 @@ func LoggingWithConfig[C handler.Context](cfg LoggingConfig) handler.Middleware[
 			if cfg.LogHeaders {
 				headers := make(map[string]any)
 				for key, values := range req.Header {
-					if !isSensitiveHeader(key, cfg.SensitiveHeaders) {
+					if !slices.Contains(cfg.SensitiveHeaders, key) {
 						if len(values) == 1 {
 							headers[key] = values[0]
 						} else {
@@ -213,7 +214,7 @@ func LoggingWithConfig[C handler.Context](cfg LoggingConfig) handler.Middleware[
 				if cfg.LogHeaders && wrapped.headerWritten {
 					headers := make(map[string]any)
 					for key, values := range w.Header() {
-						if !isSensitiveHeader(key, cfg.SensitiveHeaders) {
+						if !slices.Contains(cfg.SensitiveHeaders, key) {
 							if len(values) == 1 {
 								headers[key] = values[0]
 							} else {
@@ -276,14 +277,4 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 	size, err := rw.ResponseWriter.Write(b)
 	rw.size += size
 	return size, err
-}
-
-// isSensitiveHeader checks if a header name is in the sensitive list
-func isSensitiveHeader(header string, sensitiveHeaders []string) bool {
-	for _, sensitive := range sensitiveHeaders {
-		if header == sensitive {
-			return true
-		}
-	}
-	return false
 }
