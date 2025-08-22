@@ -54,6 +54,7 @@ type Transport interface {
 	// The request is provided for implementations that need it (e.g., cookie consent checking).
 	Embed(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) error
 
-	// Clear removes the session token from the response.
-	Clear(w http.ResponseWriter) error
+	// Revoke removes the session token from the response and invalidates it.
+	// The request is provided to allow implementations to extract the token for revocation.
+	Revoke(w http.ResponseWriter, r *http.Request) error
 }

@@ -265,10 +265,10 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			// Already deleted, clear transport
-			return m.transport.Clear(w)
+			return m.transport.Revoke(w, r)
 		}
 		// Other error, still try to clear transport
-		_ = m.transport.Clear(w)
+		_ = m.transport.Revoke(w, r)
 		return err
 	}
 
@@ -278,7 +278,7 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
-	return m.transport.Clear(w)
+	return m.transport.Revoke(w, r)
 }
 
 // createNew creates a new anonymous session.

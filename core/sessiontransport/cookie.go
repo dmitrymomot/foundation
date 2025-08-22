@@ -95,8 +95,9 @@ func (t *CookieTransport) Embed(w http.ResponseWriter, r *http.Request, token st
 	return nil
 }
 
-// Clear removes the session cookie.
-func (t *CookieTransport) Clear(w http.ResponseWriter) error {
+// Revoke removes the session cookie.
+// The request parameter is unused but required by the Transport interface.
+func (t *CookieTransport) Revoke(w http.ResponseWriter, r *http.Request) error {
 	t.manager.Delete(w, t.cookieName)
 	return nil // Always succeed - idempotent operation
 }
