@@ -51,7 +51,8 @@ type Transport interface {
 	Extract(r *http.Request) (token string, err error)
 
 	// Embed adds the session token to the response.
-	Embed(w http.ResponseWriter, token string, ttl time.Duration) error
+	// The request is provided for implementations that need it (e.g., cookie consent checking).
+	Embed(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) error
 
 	// Clear removes the session token from the response.
 	Clear(w http.ResponseWriter) error

@@ -1,7 +1,6 @@
 package session
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -94,7 +93,7 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[D
 
 	// Auto-touch if enabled
 	if m.config.TouchInterval > 0 {
-		_ = m.touch(r.Context(), w, session) // Best effort, ignore errors
+		_ = m.touch(w, r, session) // Best effort, ignore errors
 	}
 
 	return session, nil
@@ -110,7 +109,7 @@ func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session *Se
 
 	// Embed token in response (use existing token, don't regenerate)
 	ttl := time.Until(session.ExpiresAt)
-	return m.transport.Embed(w, session.Token, ttl)
+	return m.transport.Embed(w, r, session.Token, ttl)
 }
 
 // Touch extends session expiration on user activity.
@@ -128,12 +127,12 @@ func (m *Manager[Data]) Touch(w http.ResponseWriter, r *http.Request) error {
 		return nil // Best effort - don't fail
 	}
 
-	return m.touch(r.Context(), w, session)
+	return m.touch(w, r, session)
 }
 
 // touch is the internal implementation for extending session expiration.
 // It updates both storage and transport to keep them in sync.
-func (m *Manager[Data]) touch(ctx context.Context, w http.ResponseWriter, session *Session[Data]) error {
+func (m *Manager[Data]) touch(w http.ResponseWriter, r *http.Request, session *Session[Data]) error {
 	now := time.Now()
 
 	// Check throttling - prevent excessive updates
@@ -144,15 +143,15 @@ func (m *Manager[Data]) touch(ctx context.Context, w http.ResponseWriter, sessio
 	session.UpdatedAt = now
 	session.ExpiresAt = now.Add(m.config.TTL)
 
-	// Update storage (use provided context)
-	if err := m.store.Store(ctx, session); err != nil {
+	// Update storage
+	if err := m.store.Store(r.Context(), session); err != nil {
 		// Could log error but continue - best effort
 		return nil
 	}
 
 	// Update transport (refreshes cookie MaxAge) - use existing token
 	ttl := time.Until(session.ExpiresAt)
-	return m.transport.Embed(w, session.Token, ttl)
+	return m.transport.Embed(w, r, session.Token, ttl)
 }
 
 // Auth authenticates a session with the given user ID.
@@ -269,7 +268,7 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 			return m.transport.Clear(w)
 		}
 		// Other error, still try to clear transport
-		m.transport.Clear(w)
+		_ = m.transport.Clear(w)
 		return err
 	}
 
