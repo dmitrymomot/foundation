@@ -6,20 +6,16 @@ import (
 
 // Config holds session manager configuration.
 type Config struct {
-	// Token generation
-	TokenLength int    // Length of random suffix for tokens (0 = UUID only)
-	TokenPrefix string // Optional prefix for tokens (e.g., "sess_")
-
 	// Timing
-	TTL time.Duration // Session time-to-live
+	TTL           time.Duration // Session time-to-live (idle timeout)
+	TouchInterval time.Duration // Min time between activity updates (0 = disabled)
 }
 
 // defaultConfig returns default configuration.
 func defaultConfig() *Config {
 	return &Config{
-		TokenLength: 0,  // UUID only by default
-		TokenPrefix: "", // No prefix by default
-		TTL:         24 * time.Hour,
+		TTL:           24 * time.Hour,  // Default idle timeout
+		TouchInterval: 5 * time.Minute, // Default throttle for activity updates
 	}
 }
 
@@ -33,18 +29,11 @@ func WithTTL(ttl time.Duration) Option {
 	}
 }
 
-// WithTokenLength sets the length of random suffix for tokens.
-// Set to 0 to use UUID only (default).
-func WithTokenLength(length int) Option {
+// WithTouchInterval sets the minimum time between session activity updates.
+// This prevents excessive storage writes (DDoS protection).
+// Set to 0 to disable auto-touch functionality.
+func WithTouchInterval(interval time.Duration) Option {
 	return func(c *Config) {
-		c.TokenLength = length
-	}
-}
-
-// WithTokenPrefix sets the prefix for session tokens.
-// Useful for identifying token types (e.g., "sess_", "sid_").
-func WithTokenPrefix(prefix string) Option {
-	return func(c *Config) {
-		c.TokenPrefix = prefix
+		c.TouchInterval = interval
 	}
 }
