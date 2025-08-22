@@ -74,7 +74,7 @@
 //
 //		// Use for session management
 //		sessionID := "sess_abc123"
-//		sessionData := map[string]interface{}{
+//		sessionData := map[string]any{
 //			"user_id": 123,
 //			"role":    "admin",
 //		}
@@ -166,7 +166,7 @@
 //	err = client.SetNX(ctx, "lock_key", "process_id", time.Minute).Err()
 //
 //	// Hash-based caching for structured data
-//	err = client.HMSet(ctx, "user:profile:123", map[string]interface{}{
+//	err = client.HMSet(ctx, "user:profile:123", map[string]any{
 //		"name":  "Alice",
 //		"email": "alice@example.com",
 //		"role":  "admin",
@@ -182,7 +182,7 @@
 //
 //	// Store session data
 //	sessionKey := "session:" + sessionID
-//	err = client.HMSet(ctx, sessionKey, map[string]interface{}{
+//	err = client.HMSet(ctx, sessionKey, map[string]any{
 //		"user_id":    userID,
 //		"role":       userRole,
 //		"created_at": time.Now().Unix(),
