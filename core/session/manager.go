@@ -1,11 +1,12 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -68,7 +69,8 @@ func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 
 // Load retrieves an existing session or creates a new anonymous one.
 // New sessions automatically get a DeviceID and have UserID set to uuid.Nil.
-func (m *Manager[Data]) Load(r *http.Request) (*Session[Data], error) {
+// If TouchInterval > 0, sessions are automatically extended on activity.
+func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[Data], error) {
 	// Try to extract token from request
 	token, err := m.transport.Extract(r)
 	if err != nil || token == "" {
@@ -76,15 +78,8 @@ func (m *Manager[Data]) Load(r *http.Request) (*Session[Data], error) {
 		return m.createNew()
 	}
 
-	// Parse token to get session ID
-	id, err := m.parseToken(token)
-	if err != nil {
-		// Invalid token, create new session
-		return m.createNew()
-	}
-
-	// Load session from store
-	session, err := m.store.Get(r.Context(), id)
+	// Load session from store by token
+	session, err := m.store.Get(r.Context(), token)
 	if err != nil {
 		// Check if it's a "not found" error vs other errors
 		if errors.Is(err, ErrSessionNotFound) {
@@ -106,6 +101,11 @@ func (m *Manager[Data]) Load(r *http.Request) (*Session[Data], error) {
 		return newSession, nil
 	}
 
+	// Auto-touch if enabled
+	if m.config.TouchInterval > 0 {
+		_ = m.touch(w, session) // Best effort, ignore errors
+	}
+
 	return session, nil
 }
 
@@ -119,33 +119,73 @@ func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session *Se
 		return err
 	}
 
-	// Generate token
-	token, err := m.generateToken(session.ID)
-	if err != nil {
-		return err
+	// Embed token in response (use existing token, don't regenerate)
+	ttl := time.Until(session.ExpiresAt)
+	return m.transport.Embed(w, session.Token, ttl)
+}
+
+// Touch extends session expiration on user activity.
+// Safe to call frequently - internally throttled by TouchInterval.
+func (m *Manager[Data]) Touch(w http.ResponseWriter, r *http.Request) error {
+	// Extract token to get existing session (without auto-touch from Load)
+	token, err := m.transport.Extract(r)
+	if err != nil || token == "" {
+		return nil // No session to touch
 	}
 
-	// Embed token in response
+	// Get session directly
+	session, err := m.store.Get(r.Context(), token)
+	if err != nil {
+		return nil // Best effort - don't fail
+	}
+
+	return m.touch(w, session)
+}
+
+// touch is the internal implementation for extending session expiration.
+// It updates both storage and transport to keep them in sync.
+func (m *Manager[Data]) touch(w http.ResponseWriter, session *Session[Data]) error {
+	now := time.Now()
+
+	// Check throttling - prevent excessive updates
+	if m.config.TouchInterval > 0 && now.Sub(session.UpdatedAt) < m.config.TouchInterval {
+		return nil // Too soon, skip
+	}
+
+	// Update timestamps
+	session.UpdatedAt = now
+	session.ExpiresAt = now.Add(m.config.TTL)
+
+	// Update storage (use background context for best-effort)
+	ctx := context.Background()
+	if err := m.store.Store(ctx, session); err != nil {
+		// Could log error but continue - best effort
+		return nil
+	}
+
+	// Update transport (refreshes cookie MaxAge) - use existing token
 	ttl := time.Until(session.ExpiresAt)
-	return m.transport.Embed(w, token, ttl)
+	return m.transport.Embed(w, session.Token, ttl)
 }
 
 // Auth authenticates a session with the given user ID.
-// It rotates the session ID for security while preserving DeviceID.
+// It rotates the token for security while preserving session ID and DeviceID.
 func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid.UUID) error {
-	// Get current session
-	session, err := m.Load(r)
+	// Get current session (Load will auto-touch if configured, but we'll update anyway)
+	session, err := m.Load(w, r)
 	if err != nil {
 		return err
 	}
 
-	// Preserve device tracking
-	deviceID := session.DeviceID
+	// Rotate token for security
+	newToken, err := generateToken()
+	if err != nil {
+		return err
+	}
 
-	// Rotate session ID for security
-	session.ID = uuid.New()
+	// Update session
+	session.Token = newToken
 	session.UserID = userID
-	session.DeviceID = deviceID
 	session.UpdatedAt = time.Now()
 	session.ExpiresAt = time.Now().Add(m.config.TTL)
 
@@ -178,11 +218,11 @@ func PreserveData[Data any](fn func(old Data) Data) LogoutOption[Data] {
 }
 
 // Logout returns the session to anonymous state.
-// It rotates the session ID and clears the user ID while preserving DeviceID.
+// It creates a new session with new ID and token while preserving DeviceID.
 // Optionally preserves non-sensitive data using PreserveData option.
 func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...LogoutOption[Data]) error {
-	// Get current session
-	session, err := m.Load(r)
+	// Get current session (don't need auto-touch since we're logging out)
+	session, err := m.Load(w, r)
 	if err != nil {
 		return err
 	}
@@ -193,7 +233,7 @@ func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...L
 		opt(cfg)
 	}
 
-	// Ignore error if session not found
+	// Delete the old session
 	_ = m.store.Delete(r.Context(), session.ID)
 
 	// Create new anonymous session
@@ -232,21 +272,24 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	// Parse token to get session ID
-	id, err := m.parseToken(token)
+	// Get session by token to find ID
+	session, err := m.store.Get(r.Context(), token)
 	if err != nil {
-		// Invalid token, nothing to delete
-		return nil
-	}
-
-	// Delete from store
-	if err := m.store.Delete(r.Context(), id); err != nil {
-		// Check if it's a "not found" error
 		if errors.Is(err, ErrSessionNotFound) {
 			// Already deleted, clear transport
 			return m.transport.Clear(w)
 		}
+		// Other error, still try to clear transport
+		m.transport.Clear(w)
 		return err
+	}
+
+	// Delete from store by ID
+	if err := m.store.Delete(r.Context(), session.ID); err != nil {
+		// Check if it's a "not found" error
+		if !errors.Is(err, ErrSessionNotFound) {
+			return err
+		}
 	}
 
 	// Clear from transport
@@ -258,8 +301,15 @@ func (m *Manager[Data]) createNew() (*Session[Data], error) {
 	now := time.Now()
 	var data Data // Zero value of generic type
 
+	// Generate secure token
+	token, err := generateToken()
+	if err != nil {
+		return nil, err
+	}
+
 	session := &Session[Data]{
 		ID:        uuid.New(),
+		Token:     token,
 		DeviceID:  uuid.New(),
 		UserID:    uuid.Nil, // Anonymous
 		Data:      data,
@@ -271,38 +321,11 @@ func (m *Manager[Data]) createNew() (*Session[Data], error) {
 	return session, nil
 }
 
-// generateToken creates a secure token from session ID.
-func (m *Manager[Data]) generateToken(id uuid.UUID) (string, error) {
-	// Add prefix if configured
-	token := id.String()
-	if m.config.TokenPrefix != "" {
-		token = m.config.TokenPrefix + token
+// generateToken creates a cryptographically secure token.
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate token: %w", err)
 	}
-
-	// Add random suffix for additional entropy if configured
-	if m.config.TokenLength > 0 {
-		suffix := make([]byte, m.config.TokenLength)
-		if _, err := rand.Read(suffix); err != nil {
-			return "", err
-		}
-		token = token + "." + base64.RawURLEncoding.EncodeToString(suffix)
-	}
-
-	return token, nil
-}
-
-// parseToken extracts session ID from token.
-func (m *Manager[Data]) parseToken(token string) (uuid.UUID, error) {
-	// Remove prefix if present
-	if m.config.TokenPrefix != "" {
-		token = strings.TrimPrefix(token, m.config.TokenPrefix)
-	}
-
-	// Remove suffix if present
-	if idx := strings.Index(token, "."); idx > 0 {
-		token = token[:idx]
-	}
-
-	// Parse UUID
-	return uuid.Parse(token)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
