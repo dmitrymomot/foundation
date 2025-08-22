@@ -22,23 +22,26 @@ type Session[Data any] struct {
 }
 
 // IsAuthenticated returns true if the session has a valid user ID.
-func (s *Session[Data]) IsAuthenticated() bool {
+func (s Session[Data]) IsAuthenticated() bool {
 	return s.UserID != uuid.Nil
 }
 
 // IsExpired returns true if the session has expired.
-func (s *Session[Data]) IsExpired() bool {
+func (s Session[Data]) IsExpired() bool {
 	return time.Now().After(s.ExpiresAt)
 }
 
 // Store defines the interface for session persistence.
 // Implementations can use cookies, Redis, databases, etc.
+// All methods use value semantics to ensure thread safety.
 type Store[Data any] interface {
 	// Get retrieves a session by its token.
-	Get(ctx context.Context, token string) (*Session[Data], error)
+	// Returns a copy of the session to ensure thread safety.
+	Get(ctx context.Context, token string) (Session[Data], error)
 
 	// Store saves or updates a session.
-	Store(ctx context.Context, session *Session[Data]) error
+	// Takes a copy of the session to ensure thread safety.
+	Store(ctx context.Context, session Session[Data]) error
 
 	// Delete removes a session by its ID.
 	Delete(ctx context.Context, id uuid.UUID) error

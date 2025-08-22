@@ -67,7 +67,7 @@ func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 // Load retrieves an existing session or creates a new anonymous one.
 // New sessions automatically get a DeviceID and have UserID set to uuid.Nil.
 // If TouchInterval > 0, sessions are automatically extended on activity.
-func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[Data], error) {
+func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (Session[Data], error) {
 	token, err := m.transport.Extract(r)
 	if err != nil || token == "" {
 		return m.createNew()
@@ -78,14 +78,14 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[D
 		if errors.Is(err, ErrSessionNotFound) {
 			return m.createNew()
 		}
-		return nil, err
+		return Session[Data]{}, err
 	}
 
 	if session.IsExpired() {
 		// Create new but preserve DeviceID for analytics continuity
 		newSession, err := m.createNew()
 		if err != nil {
-			return nil, err
+			return Session[Data]{}, err
 		}
 		newSession.DeviceID = session.DeviceID
 		return newSession, nil
@@ -100,7 +100,7 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[D
 }
 
 // Save persists session changes to store and updates the response.
-func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session *Session[Data]) error {
+func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session Session[Data]) error {
 	session.UpdatedAt = time.Now()
 
 	if err := m.store.Store(r.Context(), session); err != nil {
@@ -132,7 +132,7 @@ func (m *Manager[Data]) Touch(w http.ResponseWriter, r *http.Request) error {
 
 // touch is the internal implementation for extending session expiration.
 // It updates both storage and transport to keep them in sync.
-func (m *Manager[Data]) touch(w http.ResponseWriter, r *http.Request, session *Session[Data]) error {
+func (m *Manager[Data]) touch(w http.ResponseWriter, r *http.Request, session Session[Data]) error {
 	now := time.Now()
 
 	// Check throttling - prevent excessive updates
@@ -282,17 +282,17 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 }
 
 // createNew creates a new anonymous session.
-func (m *Manager[Data]) createNew() (*Session[Data], error) {
+func (m *Manager[Data]) createNew() (Session[Data], error) {
 	now := time.Now()
 	var data Data // Zero value of generic type
 
 	// Generate secure token
 	token, err := generateToken()
 	if err != nil {
-		return nil, err
+		return Session[Data]{}, err
 	}
 
-	session := &Session[Data]{
+	session := Session[Data]{
 		ID:        uuid.New(),
 		Token:     token,
 		DeviceID:  uuid.New(),
