@@ -9,7 +9,6 @@ import (
 
 	"github.com/dmitrymomot/gokit/core/session"
 	"github.com/dmitrymomot/gokit/pkg/jwt"
-	"github.com/google/uuid"
 )
 
 // JWTTransport implements session.Transport using JWT tokens.
@@ -21,12 +20,6 @@ type JWTTransport struct {
 	bearerPrefix bool
 	issuer       string
 	audience     string
-}
-
-// SessionClaims represents JWT claims for session tokens.
-type SessionClaims struct {
-	jwt.StandardClaims
-	SessionToken string `json:"session_token"`
 }
 
 // JWTOption configures the JWT transport.
@@ -109,7 +102,7 @@ func (t *JWTTransport) Extract(r *http.Request) (string, error) {
 	}
 
 	// Parse and validate JWT
-	var claims SessionClaims
+	var claims jwt.StandardClaims
 	err := t.service.Parse(tokenString, &claims)
 	if err != nil {
 		// Map JWT errors to session errors
@@ -122,7 +115,7 @@ func (t *JWTTransport) Extract(r *http.Request) (string, error) {
 		return "", session.ErrTransportFailed
 	}
 
-	// Check if JWT ID is revoked (if revoker is configured)
+	// Check if session token (stored as JWT ID) is revoked
 	if t.revoker != nil && claims.ID != "" {
 		ctx := r.Context()
 		revoked, err := t.revoker.IsRevoked(ctx, claims.ID)
@@ -134,27 +127,24 @@ func (t *JWTTransport) Extract(r *http.Request) (string, error) {
 		}
 	}
 
-	// Return the session token from claims
-	if claims.SessionToken == "" {
+	// Return the JWT ID which IS the session token
+	if claims.ID == "" {
 		return "", session.ErrInvalidToken
 	}
 
-	return claims.SessionToken, nil
+	return claims.ID, nil
 }
 
 // Embed creates a JWT containing the session token and adds it to the response header.
 func (t *JWTTransport) Embed(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) error {
-	// Create claims with session token and unique JWT ID
+	// Create claims with session token as JWT ID
 	now := time.Now()
-	claims := SessionClaims{
-		StandardClaims: jwt.StandardClaims{
-			ID:        uuid.New().String(), // Generate unique JWT ID
-			IssuedAt:  now.Unix(),
-			ExpiresAt: now.Add(ttl).Unix(),
-			Issuer:    t.issuer,
-			Audience:  t.audience,
-		},
-		SessionToken: token,
+	claims := jwt.StandardClaims{
+		ID:        token, // Session token IS the JWT ID
+		IssuedAt:  now.Unix(),
+		ExpiresAt: now.Add(ttl).Unix(),
+		Issuer:    t.issuer,
+		Audience:  t.audience,
 	}
 
 	// Generate JWT
@@ -173,7 +163,7 @@ func (t *JWTTransport) Embed(w http.ResponseWriter, r *http.Request, token strin
 	return nil
 }
 
-// Revoke removes the JWT from the response header and revokes its JWT ID if configured.
+// Revoke removes the JWT from the response header and revokes the session token if configured.
 func (t *JWTTransport) Revoke(w http.ResponseWriter, r *http.Request) error {
 	// Remove the header from response
 	w.Header().Del(t.headerName)
@@ -203,15 +193,15 @@ func (t *JWTTransport) Revoke(w http.ResponseWriter, r *http.Request) error {
 		return nil // No token to revoke
 	}
 
-	// Parse JWT to get the JWT ID
-	var claims SessionClaims
+	// Parse JWT to get the session token (stored as JWT ID)
+	var claims jwt.StandardClaims
 	err := t.service.Parse(tokenString, &claims)
 	if err != nil {
 		// Invalid token, skip revocation
 		return nil
 	}
 
-	// Revoke the JWT ID if present
+	// Revoke the session token if present
 	if claims.ID != "" {
 		ctx := r.Context()
 		return t.revoker.Revoke(ctx, claims.ID)

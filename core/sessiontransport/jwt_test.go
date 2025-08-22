@@ -252,30 +252,28 @@ func TestJWTTransport_WithRevoker(t *testing.T) {
 	})
 }
 
-func TestJWTTransport_JWTIDGeneration(t *testing.T) {
+func TestJWTTransport_SessionTokenAsJWTID(t *testing.T) {
 	transport, err := sessiontransport.NewJWT(testSigningKey, nil)
 	require.NoError(t, err)
 
 	// Embed a token
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("GET", "/", nil)
-	sessionToken := "test-session-token"
+	sessionToken := "test-session-token-as-jti"
 	err = transport.Embed(w, r, sessionToken, time.Hour)
 	require.NoError(t, err)
 
-	// Extract and verify JWT ID is present
+	// Extract and verify session token is returned
 	jwtToken := w.Header().Get("Authorization")
 	require.NotEmpty(t, jwtToken)
 
-	// Parse the JWT to check for JWT ID
-	// Note: This is testing internal behavior, but important for revocation
 	r2 := httptest.NewRequest("GET", "/", nil)
 	r2.Header.Set("Authorization", jwtToken)
 
 	extractedToken, err := transport.Extract(r2)
 	assert.NoError(t, err)
 	assert.Equal(t, sessionToken, extractedToken)
-	// JWT ID presence is verified implicitly by successful extraction
+	// The session token is now used as JWT ID internally
 }
 
 func TestJWTTransport_ExpiredToken(t *testing.T) {

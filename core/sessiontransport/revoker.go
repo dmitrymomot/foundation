@@ -2,15 +2,15 @@ package sessiontransport
 
 import "context"
 
-// Revoker handles JWT token revocation and blacklisting using JWT IDs (jti claims).
+// Revoker handles JWT token revocation using session tokens as JWT IDs.
 // Implementations can use Redis, databases, or in-memory storage.
 type Revoker interface {
-	// IsRevoked checks if a JWT ID has been revoked.
-	// Returns true if the JWT ID is in the revocation list.
+	// IsRevoked checks if a session token (used as JWT ID) has been revoked.
+	// Returns true if the session token is in the revocation list.
 	IsRevoked(ctx context.Context, jti string) (bool, error)
 
-	// Revoke marks a JWT ID as revoked.
-	// The JWT ID should remain revoked until the token's natural expiration.
+	// Revoke marks a session token (used as JWT ID) as revoked.
+	// The session token should remain revoked until the JWT's natural expiration.
 	Revoke(ctx context.Context, jti string) error
 }
 
