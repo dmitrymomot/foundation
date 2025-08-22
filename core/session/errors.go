@@ -23,4 +23,11 @@ var (
 
 	// ErrInvalidUserID is returned when attempting to authenticate with an invalid user ID.
 	ErrInvalidUserID = errors.New("invalid user ID for authentication")
+
+	// Transport errors
+	// ErrNoToken is returned when no token is found in the transport (e.g., no cookie, no header).
+	ErrNoToken = errors.New("no token in transport")
+
+	// ErrTransportFailed is returned when a transport operation fails due to infrastructure issues.
+	ErrTransportFailed = errors.New("transport operation failed")
 )
