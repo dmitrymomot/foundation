@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -103,7 +102,7 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[D
 
 	// Auto-touch if enabled
 	if m.config.TouchInterval > 0 {
-		_ = m.touch(w, session) // Best effort, ignore errors
+		_ = m.touch(r.Context(), w, session) // Best effort, ignore errors
 	}
 
 	return session, nil
@@ -139,12 +138,12 @@ func (m *Manager[Data]) Touch(w http.ResponseWriter, r *http.Request) error {
 		return nil // Best effort - don't fail
 	}
 
-	return m.touch(w, session)
+	return m.touch(r.Context(), w, session)
 }
 
 // touch is the internal implementation for extending session expiration.
 // It updates both storage and transport to keep them in sync.
-func (m *Manager[Data]) touch(w http.ResponseWriter, session *Session[Data]) error {
+func (m *Manager[Data]) touch(ctx context.Context, w http.ResponseWriter, session *Session[Data]) error {
 	now := time.Now()
 
 	// Check throttling - prevent excessive updates
@@ -156,8 +155,7 @@ func (m *Manager[Data]) touch(w http.ResponseWriter, session *Session[Data]) err
 	session.UpdatedAt = now
 	session.ExpiresAt = now.Add(m.config.TTL)
 
-	// Update storage (use background context for best-effort)
-	ctx := context.Background()
+	// Update storage (use provided context)
 	if err := m.store.Store(ctx, session); err != nil {
 		// Could log error but continue - best effort
 		return nil
@@ -171,6 +169,11 @@ func (m *Manager[Data]) touch(w http.ResponseWriter, session *Session[Data]) err
 // Auth authenticates a session with the given user ID.
 // It rotates the token for security while preserving session ID and DeviceID.
 func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid.UUID) error {
+	// Validate user ID
+	if userID == uuid.Nil {
+		return ErrInvalidUserID
+	}
+
 	// Get current session (Load will auto-touch if configured, but we'll update anyway)
 	session, err := m.Load(w, r)
 	if err != nil {
@@ -255,6 +258,9 @@ func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...L
 }
 
 // Delete removes a session completely from both store and client.
+// This operation is idempotent - it will not return an error if the session
+// is already deleted or doesn't exist.
+//
 // Use this when you want to:
 //   - Completely terminate a session without creating a new one
 //   - Clean up sessions on security events (e.g., password change)
@@ -325,7 +331,7 @@ func (m *Manager[Data]) createNew() (*Session[Data], error) {
 func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("generate token: %w", err)
+		return "", ErrTokenGeneration
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
 }

@@ -20,4 +20,7 @@ var (
 
 	// ErrTokenGeneration is returned when token generation fails.
 	ErrTokenGeneration = errors.New("failed to generate token")
+
+	// ErrInvalidUserID is returned when attempting to authenticate with an invalid user ID.
+	ErrInvalidUserID = errors.New("invalid user ID for authentication")
 )
