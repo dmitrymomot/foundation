@@ -11,7 +11,8 @@ import (
 // Session represents a user session with generic data type.
 // Supports both anonymous and authenticated states.
 type Session[Data any] struct {
-	ID        uuid.UUID `json:"id"`         // Session token identifier
+	ID        uuid.UUID `json:"id"`         // Stable session identifier
+	Token     string    `json:"token"`      // Rotatable secure token
 	DeviceID  uuid.UUID `json:"device_id"`  // Persistent device/browser ID
 	UserID    uuid.UUID `json:"user_id"`    // User ID (uuid.Nil for anonymous)
 	Data      Data      `json:"data"`       // Application-defined data
@@ -33,13 +34,13 @@ func (s *Session[Data]) IsExpired() bool {
 // Store defines the interface for session persistence.
 // Implementations can use cookies, Redis, databases, etc.
 type Store[Data any] interface {
-	// Get retrieves a session by ID.
-	Get(ctx context.Context, id uuid.UUID) (*Session[Data], error)
+	// Get retrieves a session by its token.
+	Get(ctx context.Context, token string) (*Session[Data], error)
 
 	// Store saves or updates a session.
 	Store(ctx context.Context, session *Session[Data]) error
 
-	// Delete removes a session.
+	// Delete removes a session by its ID.
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 

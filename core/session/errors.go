@@ -17,4 +17,7 @@ var (
 
 	// ErrNoStore is returned when no store is configured.
 	ErrNoStore = errors.New("no store configured")
+
+	// ErrTokenGeneration is returned when token generation fails.
+	ErrTokenGeneration = errors.New("failed to generate token")
 )
