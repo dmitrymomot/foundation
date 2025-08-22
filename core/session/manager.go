@@ -153,34 +153,62 @@ func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid
 	return m.Save(w, r, session)
 }
 
+// LogoutOption is a functional option for logout behavior.
+type LogoutOption[Data any] func(*logoutConfig[Data])
+
+type logoutConfig[Data any] struct {
+	preserveData func(old Data) Data
+}
+
+// PreserveData allows preserving non-sensitive data during logout.
+// The function receives the old session data and returns data to preserve.
+// Example:
+//
+//	manager.Logout(w, r, session.PreserveData(func(old MyData) MyData {
+//	    return MyData{
+//	        Theme:  old.Theme,
+//	        Locale: old.Locale,
+//	        // UserID, Permissions, etc. are zeroed out
+//	    }
+//	}))
+func PreserveData[Data any](fn func(old Data) Data) LogoutOption[Data] {
+	return func(c *logoutConfig[Data]) {
+		c.preserveData = fn
+	}
+}
+
 // Logout returns the session to anonymous state.
 // It rotates the session ID and clears the user ID while preserving DeviceID.
-func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request) error {
+// Optionally preserves non-sensitive data using PreserveData option.
+func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...LogoutOption[Data]) error {
 	// Get current session
 	session, err := m.Load(r)
 	if err != nil {
 		return err
 	}
 
-	// Delete the old session from store
-	oldID := session.ID
-	if err := m.store.Delete(r.Context(), oldID); err != nil {
-		// Log error but continue - we still want to create new session
-		// In production, you might want to handle this differently
+	// Process options
+	cfg := &logoutConfig[Data]{}
+	for _, opt := range opts {
+		opt(cfg)
 	}
 
-	// Preserve device tracking
-	deviceID := session.DeviceID
+	// Ignore error if session not found
+	_ = m.store.Delete(r.Context(), session.ID)
 
-	// Create new anonymous session with same device
+	// Create new anonymous session
 	newSession, err := m.createNew()
 	if err != nil {
 		return err
 	}
-	newSession.DeviceID = deviceID
 
-	// Preserve non-sensitive data if needed
-	// This is application-specific and could be configured
+	// Always preserve DeviceID for analytics continuity
+	newSession.DeviceID = session.DeviceID
+
+	// Preserve custom data if specified
+	if cfg.preserveData != nil {
+		newSession.Data = cfg.preserveData(session.Data)
+	}
 
 	// Save anonymous session
 	return m.Save(w, r, newSession)

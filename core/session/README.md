@@ -371,7 +371,48 @@ func LoginWithMergeHandler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### 5. JWT with Refresh Tokens
+### 5. Logout with Data Preservation
+
+```go
+// Simple logout - clears everything except DeviceID
+func LogoutHandler(w http.ResponseWriter, r *http.Request) {
+    sessionManager.Logout(w, r)
+}
+
+// Logout preserving user preferences
+func SmartLogoutHandler(w http.ResponseWriter, r *http.Request) {
+    sessionManager.Logout(w, r, session.PreserveData(func(old MyAppData) MyAppData {
+        return MyAppData{
+            Theme:  old.Theme,   // Keep theme preference
+            Locale: old.Locale,  // Keep language setting
+            // All other fields (UserID, OrgID, Permissions) are zeroed
+        }
+    }))
+}
+
+// Define reusable logout behavior
+var PreservePreferences = session.PreserveData(func(old MyAppData) MyAppData {
+    return MyAppData{
+        Theme:    old.Theme,
+        Locale:   old.Locale,
+        Timezone: old.Timezone,
+    }
+})
+
+// Use anywhere in your app
+sessionManager.Logout(w, r, PreservePreferences)
+
+// E-commerce example - preserve shopping cart
+var PreserveCart = session.PreserveData(func(old ShopData) ShopData {
+    return ShopData{
+        CartItems: old.CartItems,  // Keep shopping cart
+        Currency:  old.Currency,   // Keep currency preference
+        // Clear: UserID, PaymentMethods, OrderHistory
+    }
+})
+```
+
+### 6. JWT with Refresh Tokens
 
 ```go
 // JWT transport with refresh capability
