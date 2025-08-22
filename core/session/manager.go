@@ -55,7 +55,6 @@ func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 		opt(m)
 	}
 
-	// Validate required dependencies
 	if m.store == nil {
 		return nil, ErrNoStore
 	}
@@ -70,28 +69,21 @@ func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 // New sessions automatically get a DeviceID and have UserID set to uuid.Nil.
 // If TouchInterval > 0, sessions are automatically extended on activity.
 func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[Data], error) {
-	// Try to extract token from request
 	token, err := m.transport.Extract(r)
 	if err != nil || token == "" {
-		// No token found, create new anonymous session
 		return m.createNew()
 	}
 
-	// Load session from store by token
 	session, err := m.store.Get(r.Context(), token)
 	if err != nil {
-		// Check if it's a "not found" error vs other errors
 		if errors.Is(err, ErrSessionNotFound) {
-			// Session not found, create new
 			return m.createNew()
 		}
-		// Propagate other errors (network, storage issues)
 		return nil, err
 	}
 
-	// Check expiration
 	if session.IsExpired() {
-		// Session expired, create new but preserve DeviceID
+		// Create new but preserve DeviceID for analytics continuity
 		newSession, err := m.createNew()
 		if err != nil {
 			return nil, err
@@ -110,10 +102,8 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (*Session[D
 
 // Save persists session changes to store and updates the response.
 func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session *Session[Data]) error {
-	// Update timestamp
 	session.UpdatedAt = time.Now()
 
-	// Save to store
 	if err := m.store.Store(r.Context(), session); err != nil {
 		return err
 	}
@@ -151,7 +141,6 @@ func (m *Manager[Data]) touch(ctx context.Context, w http.ResponseWriter, sessio
 		return nil // Too soon, skip
 	}
 
-	// Update timestamps
 	session.UpdatedAt = now
 	session.ExpiresAt = now.Add(m.config.TTL)
 
@@ -169,7 +158,6 @@ func (m *Manager[Data]) touch(ctx context.Context, w http.ResponseWriter, sessio
 // Auth authenticates a session with the given user ID.
 // It rotates the token for security while preserving session ID and DeviceID.
 func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid.UUID) error {
-	// Validate user ID
 	if userID == uuid.Nil {
 		return ErrInvalidUserID
 	}
@@ -186,7 +174,6 @@ func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid
 		return err
 	}
 
-	// Update session
 	session.Token = newToken
 	session.UserID = userID
 	session.UpdatedAt = time.Now()
@@ -236,7 +223,6 @@ func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...L
 		opt(cfg)
 	}
 
-	// Delete the old session
 	_ = m.store.Delete(r.Context(), session.ID)
 
 	// Create new anonymous session
@@ -271,14 +257,11 @@ func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...L
 //   - Maintains analytics continuity
 //   - Keeps the user on the site but unauthenticated
 func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
-	// Try to extract token from request
 	token, err := m.transport.Extract(r)
 	if err != nil || token == "" {
-		// No token found, nothing to delete
 		return nil
 	}
 
-	// Get session by token to find ID
 	session, err := m.store.Get(r.Context(), token)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -290,15 +273,12 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	// Delete from store by ID
 	if err := m.store.Delete(r.Context(), session.ID); err != nil {
-		// Check if it's a "not found" error
 		if !errors.Is(err, ErrSessionNotFound) {
 			return err
 		}
 	}
 
-	// Clear from transport
 	return m.transport.Clear(w)
 }
 
@@ -328,6 +308,7 @@ func (m *Manager[Data]) createNew() (*Session[Data], error) {
 }
 
 // generateToken creates a cryptographically secure token.
+// Uses 32 bytes (256 bits) for strong entropy, encoded as base64url without padding.
 func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

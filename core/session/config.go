@@ -11,11 +11,10 @@ type Config struct {
 	TouchInterval time.Duration // Min time between activity updates (0 = disabled)
 }
 
-// defaultConfig returns default configuration.
 func defaultConfig() *Config {
 	return &Config{
-		TTL:           24 * time.Hour,  // Default idle timeout
-		TouchInterval: 5 * time.Minute, // Default throttle for activity updates
+		TTL:           24 * time.Hour,
+		TouchInterval: 5 * time.Minute,
 	}
 }
 
