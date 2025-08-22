@@ -328,7 +328,7 @@
 //				// Validate data
 //				if err := v.Struct(data); err != nil {
 //					errors := handleValidationErrors(err)
-//					response := map[string]interface{}{
+//					response := map[string]any{
 //						"error": "Validation failed",
 //						"details": errors,
 //					}

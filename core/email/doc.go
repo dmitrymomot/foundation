@@ -270,7 +270,7 @@
 //		UserEmail string
 //		UserName  string
 //		Template  string
-//		Data      map[string]interface{}
+//		Data      map[string]any
 //	}
 //
 //	func processBatchEmails(sender email.EmailSender, jobs []EmailJob) error {
