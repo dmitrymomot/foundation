@@ -2,7 +2,17 @@
 
 ## Status
 
-Proposed
+Active
+
+## Implementation Progress
+
+- [x] Type definitions (`M` type for placeholder maps)
+- [x] Helper functions (Accept-Language parsing, placeholder replacement)
+- [x] Plural rule implementations (CLDR-compliant)
+- [x] Comprehensive tests for helpers and plural rules
+- [ ] Core I18n struct and constructor
+- [ ] Translation methods (T, Tn)
+- [ ] Integration tests
 
 ## Context
 
@@ -18,7 +28,7 @@ We need a simple, efficient internationalization (i18n) package for Go applicati
 
 ### Core Design Principles
 
-1. **Immutability After Initialization**: All translations must be loaded during setup phase. After calling `Init()`, the translator becomes immutable and thread-safe.
+1. **Immutable by Construction**: All translations loaded via constructor options, making the instance immutable and thread-safe from creation.
 2. **Namespace-Based Organization**: Translations are organized by language and namespace to allow logical grouping and prevent key collisions.
 3. **Simple API**: Minimal method surface with clear semantics - `T()` for translations, `Tn()` for plurals.
 4. **No External Dependencies**: Use only Go standard library for maximum portability.
@@ -32,7 +42,6 @@ type I18n struct {
     translations map[string]map[string]map[string]any  // lang -> namespace -> key -> value
     pluralRules  map[string]PluralRule                 // lang -> rule function
     defaultLang  string                                // fallback language
-    frozen       bool                                   // true after Init()
 }
 ```
 
@@ -44,23 +53,23 @@ type M map[string]any
 
 // PluralRule determines which plural form to use for a given count
 type PluralRule func(n int) string
+
+// Option function type
+type Option func(*I18n) error
 ```
 
 #### Core API
 
 ```go
-// Constructor with options
-func New(opts ...Option) *I18n
+// Constructor with options - returns error if configuration is invalid
+func New(opts ...Option) (*I18n, error)
 
-// Options
+// Options for configuration
 func WithDefaultLanguage(lang string) Option
 func WithPluralRule(lang string, rule PluralRule) Option
+func WithTranslations(lang, namespace string, translations map[string]any) Option
 
-// Setup phase (before Init)
-func (i *I18n) Load(lang, namespace string, translations map[string]any) error
-func (i *I18n) Init() error
-
-// Runtime phase (after Init)
+// Runtime methods (available immediately after construction)
 func (i *I18n) T(lang, namespace, key string, placeholders ...M) string
 func (i *I18n) Tn(lang, namespace, key string, n int, placeholders ...M) string
 ```
@@ -185,46 +194,43 @@ i18n.T("en", "general", "welcome", i18n.M{
 
 ### Thread Safety
 
-- **Setup Phase**: Not thread-safe, single-threaded loading expected
-- **After Init()**: Fully thread-safe, read-only operations
-- No locks needed during runtime translation
+- **Fully thread-safe from creation**: All data is immutable after constructor returns
+- **No locks needed**: Read-only operations throughout lifetime
+- **No setup phase**: Constructor handles all initialization atomically
 
 ### Usage Example
 
 ```go
-// Setup
-i18n := i18n.New(
+// All configuration happens in constructor
+i18n, err := i18n.New(
     i18n.WithDefaultLanguage("en"),
     i18n.WithPluralRule("en", i18n.EnglishPlural),
     i18n.WithPluralRule("pl", i18n.SlavicPlural),
+    i18n.WithTranslations("en", "general", map[string]any{
+        "hello":   "Hello",
+        "welcome": "Welcome, %{name}!",
+        "items": map[string]any{
+            "zero":  "No items",
+            "one":   "%{count} item",
+            "other": "%{count} items",
+        },
+    }),
+    i18n.WithTranslations("pl", "general", map[string]any{
+        "hello":   "Cześć",
+        "welcome": "Witaj, %{name}!",
+        "items": map[string]any{
+            "zero":  "Brak elementów",
+            "one":   "%{count} element",
+            "few":   "%{count} elementy",
+            "many":  "%{count} elementów",
+        },
+    }),
 )
+if err != nil {
+    log.Fatal(err)
+}
 
-// Load translations
-i18n.Load("en", "general", map[string]any{
-    "hello":   "Hello",
-    "welcome": "Welcome, %{name}!",
-    "items": map[string]any{
-        "zero":  "No items",
-        "one":   "%{count} item",
-        "other": "%{count} items",
-    },
-})
-
-i18n.Load("pl", "general", map[string]any{
-    "hello":   "Cześć",
-    "welcome": "Witaj, %{name}!",
-    "items": map[string]any{
-        "zero":  "Brak elementów",
-        "one":   "%{count} element",
-        "few":   "%{count} elementy",
-        "many":  "%{count} elementów",
-    },
-})
-
-// Initialize (freeze)
-i18n.Init()
-
-// Runtime usage
+// Ready to use immediately
 greeting := i18n.T("en", "general", "hello")
 // "Hello"
 
@@ -239,10 +245,11 @@ items := i18n.Tn("pl", "general", "items", 3)
 
 ### Positive
 
-- **Thread-safe by design**: No synchronization needed after initialization
-- **Simple API**: Only two main methods for translation
+- **Thread-safe by design**: Immutable from creation, no synchronization ever needed
+- **Simpler API**: No separate loading phase, just constructor and runtime methods
+- **Fail-fast**: Configuration errors caught at startup
 - **Predictable behavior**: All translations known at startup
-- **Fast runtime**: No locks, no dynamic loading
+- **Fast runtime**: No locks, no state checks, no dynamic loading
 - **Type-safe**: Compile-time type checking for placeholders
 - **Flexible organization**: Namespace support for large applications
 - **Language-specific pluralization**: Proper support for different language rules
@@ -259,13 +266,6 @@ items := i18n.Tn("pl", "general", "items", 3)
 - **Simplicity over features**: No advanced features like gender, context, or number formatting
 - **Memory over complexity**: Keep all in memory rather than implement caching
 - **Explicit over magic**: Require explicit namespace and key parameters
-
-## Alternatives Considered
-
-1. **Builder Pattern**: Rejected in favor of simple `Load()` method for clearer initialization
-2. **File-based loading**: Rejected to keep package focused on logic, not I/O
-3. **Interface-based storage**: Rejected to maintain simplicity
-4. **Context-based API**: Rejected to avoid complexity and maintain clear method signatures
 
 ## References
 
