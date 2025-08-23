@@ -10,9 +10,9 @@ Active
 - [x] Helper functions (Accept-Language parsing, placeholder replacement)
 - [x] Plural rule implementations (CLDR-compliant)
 - [x] Comprehensive tests for helpers and plural rules
-- [ ] Core I18n struct and constructor
-- [ ] Translation methods (T, Tn)
-- [ ] Integration tests
+- [x] Core I18n struct and constructor (with key flattening optimization)
+- [x] Translation methods (T, Tn)
+- [x] Integration tests (95.3% test coverage)
 
 ## Context
 
@@ -35,15 +35,17 @@ We need a simple, efficient internationalization (i18n) package for Go applicati
 
 ### Architecture
 
-#### Data Structure
+#### Data Structure (Optimized Implementation)
 
 ```go
 type I18n struct {
-    translations map[string]map[string]map[string]any  // lang -> namespace -> key -> value
-    pluralRules  map[string]PluralRule                 // lang -> rule function
-    defaultLang  string                                // fallback language
+    translations map[string]string      // Flattened: "lang:namespace:key.path" -> value
+    pluralRules  map[string]PluralRule  // lang -> rule function
+    defaultLang  string                  // fallback language
 }
 ```
+
+**Key Flattening Optimization**: While the API accepts nested translation maps for developer convenience, internally all keys are flattened during initialization to enable O(1) lookups. For example, a nested structure like `{"errors": {"validation": {"required": "Field required"}}}` is stored as `"en:general:errors.validation.required" -> "Field required"`.
 
 #### Type Definitions
 
