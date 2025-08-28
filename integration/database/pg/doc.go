@@ -44,10 +44,10 @@
 //		"context"
 //		"log"
 //		"log/slog"
+//		"os"
 //		"time"
 //
 //		"github.com/dmitrymomot/foundation/integration/database/pg"
-//		"github.com/jackc/pgx/v5"
 //	)
 //
 //	func main() {
@@ -93,7 +93,7 @@
 //	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 //	if err := pg.Migrate(ctx, pool, cfg, logger); err != nil {
 //		if errors.Is(err, pg.ErrMigrationsDirNotFound) {
-//			log.Info("No migrations directory found, skipping migration")
+//			log.Println("No migrations directory found, skipping migration")
 //		} else {
 //			log.Fatal("Migration failed:", err)
 //		}
@@ -107,21 +107,32 @@
 // The package provides a health check function suitable for Kubernetes readiness/liveness probes
 // or HTTP health endpoints:
 //
-//	pool, err := pg.Connect(ctx, cfg)
-//	if err != nil {
-//		log.Fatal(err)
-//	}
+//	package main
 //
-//	healthCheck := pg.Healthcheck(pool)
+//	import (
+//		"net/http"
 //
-//	// Use in HTTP handler
-//	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-//		if err := healthCheck(r.Context()); err != nil {
-//			http.Error(w, "Database unhealthy", http.StatusServiceUnavailable)
-//			return
+//		"github.com/dmitrymomot/foundation/integration/database/pg"
+//	)
+//
+//	func main() {
+//		// ... connection setup ...
+//		pool, err := pg.Connect(ctx, cfg)
+//		if err != nil {
+//			log.Fatal(err)
 //		}
-//		w.WriteHeader(http.StatusOK)
-//	})
+//
+//		healthCheck := pg.Healthcheck(pool)
+//
+//		// Use in HTTP handler
+//		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+//			if err := healthCheck(r.Context()); err != nil {
+//				http.Error(w, "Database unhealthy", http.StatusServiceUnavailable)
+//				return
+//			}
+//			w.WriteHeader(http.StatusOK)
+//		})
+//	}
 //
 // The health check performs a lightweight ping operation that verifies PostgreSQL connectivity
 // without impacting database performance.
@@ -168,27 +179,31 @@
 //
 // The package works seamlessly with pgx transaction management:
 //
-//	tx, err := pool.Begin(ctx)
-//	if err != nil {
-//		return err
-//	}
-//	defer tx.Rollback(ctx) // Safe to call even after commit
-//
-//	// Perform multiple operations
-//	_, err = tx.Exec(ctx, "INSERT INTO users (name) VALUES ($1)", "Alice")
-//	if err != nil {
-//		return err
-//	}
-//
-//	_, err = tx.Exec(ctx, "INSERT INTO profiles (user_id, bio) VALUES ($1, $2)", userID, "Bio")
-//	if err != nil {
-//		if pg.IsTxClosedError(err) {
-//			log.Error("Transaction was already closed")
+//	func createUserWithProfile(ctx context.Context, pool *pgxpool.Pool, name, bio string) error {
+//		tx, err := pool.Begin(ctx)
+//		if err != nil {
+//			return err
 //		}
-//		return err
-//	}
+//		defer tx.Rollback(ctx) // Safe to call even after commit
 //
-//	return tx.Commit(ctx)
+//		// Insert user and get ID
+//		var userID int64
+//		err = tx.QueryRow(ctx, "INSERT INTO users (name) VALUES ($1) RETURNING id", name).Scan(&userID)
+//		if err != nil {
+//			return err
+//		}
+//
+//		// Insert profile with user ID
+//		_, err = tx.Exec(ctx, "INSERT INTO profiles (user_id, bio) VALUES ($1, $2)", userID, bio)
+//		if err != nil {
+//			if pg.IsTxClosedError(err) {
+//				log.Printf("Transaction was already closed")
+//			}
+//			return err
+//		}
+//
+//		return tx.Commit(ctx)
+//	}
 //
 // Use the provided error classification functions to handle transaction-specific errors
 // and implement appropriate retry or recovery logic.
