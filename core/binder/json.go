@@ -16,16 +16,17 @@ const DefaultMaxJSONSize = 1 << 20 // 1 MB
 //
 // Example:
 //
-//	handler := saaskit.HandlerFunc[saaskit.Context, CreateUserRequest](
-//		func(ctx saaskit.Context, req CreateUserRequest) saaskit.Response {
-//			// req is populated from JSON body
-//			return saaskit.JSONResponse(user)
-//		},
-//	)
+//	func createUserHandler(w http.ResponseWriter, r *http.Request) {
+//		var req CreateUserRequest
+//		if err := binder.JSON()(r, &req); err != nil {
+//			http.Error(w, err.Error(), http.StatusBadRequest)
+//			return
+//		}
+//		// req is populated from JSON body
+//		// Process req and return response...
+//	}
 //
-//	http.HandleFunc("/users", saaskit.Wrap(handler,
-//		saaskit.WithBinder(binder.JSON()),
-//	))
+//	http.HandleFunc("/users", createUserHandler)
 func JSON() func(r *http.Request, v any) error {
 	return func(r *http.Request, v any) error {
 		// Fail fast if request context is already cancelled to avoid processing doomed requests

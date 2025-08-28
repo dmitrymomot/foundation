@@ -26,21 +26,31 @@ import (
 //		Expand   bool   `query:"expand"`  // From query string
 //	}
 //
-//	handler := saaskit.HandlerFunc[saaskit.Context, ProfileRequest](
-//		func(ctx saaskit.Context, req ProfileRequest) saaskit.Response {
-//			// req.UserID and req.Username are populated from path
-//			return saaskit.JSONResponse(profile)
-//		},
-//	)
+//	func profileHandler(w http.ResponseWriter, r *http.Request) {
+//		var req ProfileRequest
 //
-//	r := chi.NewRouter()
-//	r.Get("/users/{id}/profile/{username}", saaskit.Wrap(handler,
-//		saaskit.WithBinders(
+//		// Apply multiple binders in sequence
+//		binders := []func(*http.Request, any) error{
 //			binder.Path(chi.URLParam),
 //			binder.Query(),
 //			binder.Form(),
-//		),
-//	))
+//		}
+//
+//		for _, bind := range binders {
+//			if err := bind(r, &req); err != nil {
+//				http.Error(w, err.Error(), http.StatusBadRequest)
+//				return
+//			}
+//		}
+//
+//		// req.UserID and req.Username are populated from path
+//		// req.Name is populated from form data
+//		// req.Expand is populated from query string
+//		// Process req and return response...
+//	}
+//
+//	r := chi.NewRouter()
+//	r.Get("/users/{id}/profile/{username}", profileHandler)
 //
 // Example with gorilla/mux:
 //
@@ -50,13 +60,14 @@ import (
 //	}
 //
 //	router := mux.NewRouter()
-//	router.HandleFunc("/users/{id}/profile/{username}", saaskit.Wrap(handler,
-//		saaskit.WithBinders(
-//			binder.Path(muxExtractor),
-//			binder.Query(),
-//			binder.Form(),
-//		),
-//	))
+//	router.HandleFunc("/users/{id}/profile/{username}", func(w http.ResponseWriter, r *http.Request) {
+//		var req ProfileRequest
+//		if err := binder.Path(muxExtractor)(r, &req); err != nil {
+//			http.Error(w, err.Error(), http.StatusBadRequest)
+//			return
+//		}
+//		// Process req...
+//	})
 func Path(extractor func(r *http.Request, fieldName string) string) func(r *http.Request, v any) error {
 	return func(r *http.Request, v any) error {
 		if extractor == nil {

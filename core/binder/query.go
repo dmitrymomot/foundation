@@ -27,16 +27,17 @@ import (
 //		Internal string   `query:"-"`        // Skipped
 //	}
 //
-//	handler := saaskit.HandlerFunc[saaskit.Context, SearchRequest](
-//		func(ctx saaskit.Context, req SearchRequest) saaskit.Response {
-//			// req is populated from query parameters
-//			return saaskit.JSONResponse(results)
-//		},
-//	)
+//	func searchHandler(w http.ResponseWriter, r *http.Request) {
+//		var req SearchRequest
+//		if err := binder.Query()(r, &req); err != nil {
+//			http.Error(w, err.Error(), http.StatusBadRequest)
+//			return
+//		}
+//		// req is populated from query parameters
+//		// Process req and return response...
+//	}
 //
-//	http.HandleFunc("/search", saaskit.Wrap(handler,
-//		saaskit.WithBinder(binder.Query()),
-//	))
+//	http.HandleFunc("/search", searchHandler)
 func Query() func(r *http.Request, v any) error {
 	return func(r *http.Request, v any) error {
 		return bindToStruct(v, "query", r.URL.Query(), ErrFailedToParseQuery)

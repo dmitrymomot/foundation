@@ -42,23 +42,25 @@ const DefaultMaxMemory = 10 << 20 // 10 MB
 //		Internal string                  `form:"-"`        // Skipped
 //	}
 //
-//	handler := saaskit.HandlerFunc[saaskit.Context, UploadRequest](
-//		func(ctx saaskit.Context, req UploadRequest) saaskit.Response {
-//			if req.Avatar != nil {
-//				file, err := req.Avatar.Open()
-//				if err != nil {
-//					return saaskit.Error(http.StatusBadRequest, "Failed to open file")
-//				}
-//				defer file.Close()
-//				// Process file...
-//			}
-//			return saaskit.JSONResponse(result)
-//		},
-//	)
+//	func uploadHandler(w http.ResponseWriter, r *http.Request) {
+//		var req UploadRequest
+//		if err := binder.Form()(r, &req); err != nil {
+//			http.Error(w, err.Error(), http.StatusBadRequest)
+//			return
+//		}
 //
-//	http.HandleFunc("/upload", saaskit.Wrap(handler,
-//		saaskit.WithBinder(binder.Form()),
-//	))
+//		if req.Avatar != nil {
+//			file, err := req.Avatar.Open()
+//			if err != nil {
+//				http.Error(w, "Failed to open file", http.StatusInternalServerError)
+//				return
+//			}
+//			defer file.Close()
+//			// Process file...
+//		}
+//	}
+//
+//	http.HandleFunc("/upload", uploadHandler)
 func Form() func(r *http.Request, v any) error {
 	return func(r *http.Request, v any) error {
 		contentType := r.Header.Get("Content-Type")
