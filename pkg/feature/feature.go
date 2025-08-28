@@ -54,21 +54,6 @@ type TargetCriteria struct {
 	DenyList []string `json:"deny_list,omitempty"`
 }
 
-// ContextKey is the type used for context keys.
-type ContextKey string
-
-// Context keys for accessing flag evaluation data.
-const (
-	// UserIDKey is the context key for user ID.
-	UserIDKey ContextKey = "user_id"
-
-	// UserGroupsKey is the context key for user groups.
-	UserGroupsKey ContextKey = "user_groups"
-
-	// EnvironmentKey is the context key for the environment.
-	EnvironmentKey ContextKey = "environment"
-)
-
 // Provider is the interface that all feature flag providers must implement.
 type Provider interface {
 	// IsEnabled checks if a feature flag is enabled for the given context.

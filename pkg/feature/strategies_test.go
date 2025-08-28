@@ -44,13 +44,13 @@ func TestTargetedStrategy(t *testing.T) {
 		strategy := feature.NewTargetedStrategy(criteria)
 
 		// Test with matching user ID
-		ctx := context.WithValue(context.Background(), feature.UserIDKey, "user2")
+		ctx := feature.WithUserID(context.Background(), "user2")
 		enabled, err := strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.True(t, enabled)
 
 		// Test with non-matching user ID
-		ctx = context.WithValue(context.Background(), feature.UserIDKey, "user4")
+		ctx = feature.WithUserID(context.Background(), "user4")
 		enabled, err = strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.False(t, enabled)
@@ -68,13 +68,13 @@ func TestTargetedStrategy(t *testing.T) {
 		strategy := feature.NewTargetedStrategy(criteria)
 
 		// Test with matching group
-		ctx := context.WithValue(context.Background(), feature.UserGroupsKey, []string{"user", "beta-testers"})
+		ctx := feature.WithUserGroups(context.Background(), []string{"user", "beta-testers"})
 		enabled, err := strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.True(t, enabled)
 
 		// Test with non-matching group
-		ctx = context.WithValue(context.Background(), feature.UserGroupsKey, []string{"user", "guest"})
+		ctx = feature.WithUserGroups(context.Background(), []string{"user", "guest"})
 		enabled, err = strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.False(t, enabled)
@@ -96,7 +96,7 @@ func TestTargetedStrategy(t *testing.T) {
 		// We can't test specific outcomes since it's based on hash values,
 		// but we can test that it works without error for different user IDs
 		for _, userID := range []string{"user1", "user2", "user3", "user4"} {
-			ctx := context.WithValue(context.Background(), feature.UserIDKey, userID)
+			ctx := feature.WithUserID(context.Background(), userID)
 			_, err := strategy.Evaluate(ctx)
 			require.NoError(t, err)
 		}
@@ -107,7 +107,8 @@ func TestTargetedStrategy(t *testing.T) {
 			Percentage: &invalidPercentage,
 		}
 		strategy = feature.NewTargetedStrategy(invalidCriteria)
-		_, err := strategy.Evaluate(context.WithValue(context.Background(), feature.UserIDKey, "user1"))
+		ctx := feature.WithUserID(context.Background(), "user1")
+		_, err := strategy.Evaluate(ctx)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "percentage must be between 0 and 100")
 
@@ -132,21 +133,21 @@ func TestTargetedStrategy(t *testing.T) {
 		strategy := feature.NewTargetedStrategy(criteria)
 
 		// Test with user on allow list
-		ctx := context.WithValue(context.Background(), feature.UserIDKey, "special-user")
+		ctx := feature.WithUserID(context.Background(), "special-user")
 		enabled, err := strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.True(t, enabled)
 
 		// Test with user on deny list (even if they'd be eligible by other criteria)
-		ctx = context.WithValue(context.Background(), feature.UserIDKey, "banned-user")
-		ctx = context.WithValue(ctx, feature.UserGroupsKey, []string{"beta-testers"})
+		ctx = feature.WithUserID(context.Background(), "banned-user")
+		ctx = feature.WithUserGroups(ctx, []string{"beta-testers"})
 		enabled, err = strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.False(t, enabled)
 
 		// Test with user eligible by criteria but not on allow or deny list
-		ctx = context.WithValue(context.Background(), feature.UserIDKey, "regular-user")
-		ctx = context.WithValue(ctx, feature.UserGroupsKey, []string{"beta-testers"})
+		ctx = feature.WithUserID(context.Background(), "regular-user")
+		ctx = feature.WithUserGroups(ctx, []string{"beta-testers"})
 		enabled, err = strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.True(t, enabled)
@@ -166,13 +167,13 @@ func TestEnvironmentStrategy(t *testing.T) {
 		strategy := feature.NewEnvironmentStrategy("dev", "staging")
 
 		// Test with matching environment
-		ctx := context.WithValue(context.Background(), feature.EnvironmentKey, "dev")
+		ctx := feature.WithEnvironment(context.Background(), "dev")
 		enabled, err := strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.True(t, enabled)
 
 		// Test with non-matching environment
-		ctx = context.WithValue(context.Background(), feature.EnvironmentKey, "production")
+		ctx = feature.WithEnvironment(context.Background(), "production")
 		enabled, err = strategy.Evaluate(ctx)
 		require.NoError(t, err)
 		assert.False(t, enabled)

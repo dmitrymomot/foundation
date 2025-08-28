@@ -50,8 +50,8 @@
 // Add user information to context for targeted rollouts:
 //
 //	ctx := context.Background()
-//	ctx = context.WithValue(ctx, feature.UserIDKey, "user-123")
-//	ctx = context.WithValue(ctx, feature.UserGroupsKey, []string{"beta-users"})
+//	ctx = feature.WithUserID(ctx, "user-123")
+//	ctx = feature.WithUserGroups(ctx, []string{"beta-users"})
 //
 //	// Check if beta features are enabled for this user
 //	betaEnabled, err := provider.IsEnabled(ctx, "beta-features")
@@ -117,13 +117,18 @@
 //	allFlags, _ := provider.ListFlags(ctx)
 //	uiFlags, _ := provider.ListFlags(ctx, "ui", "theme")
 //
-// # Context Keys
+// # Context Usage
 //
-// The package uses typed context keys for storing evaluation data:
+// The package provides type-safe context helpers for storing evaluation data:
 //
-//	feature.UserIDKey      // User identifier (string)
-//	feature.UserGroupsKey  // User groups ([]string)
-//	feature.EnvironmentKey // Environment name (string)
+//	ctx = feature.WithUserID(ctx, "user-123")           // Set user ID
+//	userID, ok := feature.GetUserID(ctx)                // Get user ID
+//
+//	ctx = feature.WithUserGroups(ctx, []string{"beta"}) // Set groups
+//	groups, ok := feature.GetUserGroups(ctx)            // Get groups
+//
+//	ctx = feature.WithEnvironment(ctx, "production")    // Set environment
+//	env, ok := feature.GetEnvironment(ctx)              // Get environment
 //
 // # Error Handling
 //
@@ -179,9 +184,9 @@
 //				userID := getUserID(r)
 //				groups := getUserGroups(r)
 //
-//				ctx = context.WithValue(ctx, feature.UserIDKey, userID)
-//				ctx = context.WithValue(ctx, feature.UserGroupsKey, groups)
-//				ctx = context.WithValue(ctx, feature.EnvironmentKey, os.Getenv("APP_ENV"))
+//				ctx = feature.WithUserID(ctx, userID)
+//				ctx = feature.WithUserGroups(ctx, groups)
+//				ctx = feature.WithEnvironment(ctx, os.Getenv("APP_ENV"))
 //
 //				next.ServeHTTP(w, r.WithContext(ctx))
 //			})

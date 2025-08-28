@@ -284,13 +284,13 @@ func TestMemoryProvider(t *testing.T) {
 		assert.False(t, enabled)
 
 		// Test targeted flag with matching user
-		userCtx := context.WithValue(ctx, feature.UserIDKey, "test-user")
+		userCtx := feature.WithUserID(ctx, "test-user")
 		enabled, err = provider.IsEnabled(userCtx, "targeted-flag")
 		require.NoError(t, err)
 		assert.True(t, enabled)
 
 		// Test targeted flag with non-matching user
-		userCtx = context.WithValue(ctx, feature.UserIDKey, "other-user")
+		userCtx = feature.WithUserID(ctx, "other-user")
 		enabled, err = provider.IsEnabled(userCtx, "targeted-flag")
 		require.NoError(t, err)
 		assert.False(t, enabled)

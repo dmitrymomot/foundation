@@ -3,6 +3,7 @@ package feature
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 )
@@ -46,6 +47,7 @@ func NewMemoryProvider(initialFlags ...*Flag) (*MemoryProvider, error) {
 		}
 
 		// Store the copy
+		// Note: Strategies are immutable after creation and don't require deep copying
 		provider.flags[flag.Name] = &flagCopy
 	}
 
@@ -72,7 +74,8 @@ func (m *MemoryProvider) IsEnabled(ctx context.Context, flagName string) (bool, 
 		return flag.Enabled, nil
 	}
 
-	// Evaluate the flag's strategy
+	// Evaluate the flag's strategy with flag name in context for consistent hashing
+	ctx = WithFlagName(ctx, flagName)
 	return flag.Strategy.Evaluate(ctx)
 }
 
@@ -93,6 +96,7 @@ func (m *MemoryProvider) GetFlag(ctx context.Context, flagName string) (*Flag, e
 		flagCopy.Tags = make([]string, len(flag.Tags))
 		copy(flagCopy.Tags, flag.Tags)
 	}
+	// Note: No need to deep copy Strategy as they're immutable by design
 	return &flagCopy, nil
 }
 
@@ -123,22 +127,16 @@ func (m *MemoryProvider) ListFlags(ctx context.Context, tags ...string) ([]*Flag
 	result = make([]*Flag, 0)
 	for _, flag := range m.flags {
 		// Check if flag has any of the specified tags
-		for _, tagToMatch := range tags {
-			for _, flagTag := range flag.Tags {
-				if tagToMatch == flagTag {
-					// Flag matches at least one tag, add it and move to next flag
-					flagCopy := *flag
-					// Create a copy of the Tags slice to prevent modification of the original
-					if flag.Tags != nil {
-						flagCopy.Tags = make([]string, len(flag.Tags))
-						copy(flagCopy.Tags, flag.Tags)
-					}
-					result = append(result, &flagCopy)
-					goto nextFlag
-				}
+		if hasAnyTag(flag.Tags, tags) {
+			// Flag matches at least one tag, add it
+			flagCopy := *flag
+			// Create a copy of the Tags slice to prevent modification of the original
+			if flag.Tags != nil {
+				flagCopy.Tags = make([]string, len(flag.Tags))
+				copy(flagCopy.Tags, flag.Tags)
 			}
+			result = append(result, &flagCopy)
 		}
-	nextFlag:
 	}
 
 	return result, nil
@@ -167,6 +165,7 @@ func (m *MemoryProvider) CreateFlag(ctx context.Context, flag *Flag) error {
 	flag.UpdatedAt = now
 
 	// Store a copy to prevent external modification
+	// Note: Strategy reference is safe to copy as strategies are immutable
 	flagCopy := *flag
 	m.flags[flag.Name] = &flagCopy
 
@@ -196,6 +195,7 @@ func (m *MemoryProvider) UpdateFlag(ctx context.Context, flag *Flag) error {
 	flag.UpdatedAt = time.Now()
 
 	// Store a copy to prevent external modification
+	// Note: Strategy reference is safe to copy as strategies are immutable
 	flagCopy := *flag
 	m.flags[flag.Name] = &flagCopy
 
@@ -222,4 +222,15 @@ func (m *MemoryProvider) DeleteFlag(ctx context.Context, flagName string) error 
 func (m *MemoryProvider) Close() error {
 	// No resources to release for memory provider
 	return nil
+}
+
+// hasAnyTag checks if any search tag exists in flag tags.
+// This is a helper function to improve readability of the tag matching logic.
+func hasAnyTag(flagTags, searchTags []string) bool {
+	for _, search := range searchTags {
+		if slices.Contains(flagTags, search) {
+			return true
+		}
+	}
+	return false
 }

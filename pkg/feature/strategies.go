@@ -44,7 +44,7 @@ func (s *TargetedStrategy) Evaluate(ctx context.Context) (bool, error) {
 
 	// Check deny list first (always takes precedence)
 	if len(s.Criteria.DenyList) > 0 {
-		userID, ok := ctx.Value(UserIDKey).(string)
+		userID, ok := GetUserID(ctx)
 		if !ok || userID == "" {
 			// If we can't determine the user ID and there's a deny list, fail safe
 			return false, nil
@@ -57,7 +57,7 @@ func (s *TargetedStrategy) Evaluate(ctx context.Context) (bool, error) {
 
 	// Check allow list (if a user is on the allow list, they get the feature)
 	if len(s.Criteria.AllowList) > 0 {
-		userID, ok := ctx.Value(UserIDKey).(string)
+		userID, ok := GetUserID(ctx)
 		if ok && userID != "" && slices.Contains(s.Criteria.AllowList, userID) {
 			return true, nil
 		}
@@ -65,7 +65,7 @@ func (s *TargetedStrategy) Evaluate(ctx context.Context) (bool, error) {
 
 	// Check for specific user IDs
 	if len(s.Criteria.UserIDs) > 0 {
-		userID, ok := ctx.Value(UserIDKey).(string)
+		userID, ok := GetUserID(ctx)
 		if ok && userID != "" && slices.Contains(s.Criteria.UserIDs, userID) {
 			return true, nil
 		}
@@ -73,7 +73,7 @@ func (s *TargetedStrategy) Evaluate(ctx context.Context) (bool, error) {
 
 	// Check for groups
 	if len(s.Criteria.Groups) > 0 {
-		userGroups, ok := ctx.Value(UserGroupsKey).([]string)
+		userGroups, ok := GetUserGroups(ctx)
 		if ok && len(userGroups) > 0 {
 			// Check if any user group is in the targeted groups
 			for _, userGroup := range userGroups {
@@ -103,14 +103,16 @@ func (s *TargetedStrategy) Evaluate(ctx context.Context) (bool, error) {
 		}
 
 		// We need a user ID for percentage-based rollouts
-		userID, ok := ctx.Value(UserIDKey).(string)
+		userID, ok := GetUserID(ctx)
 		if !ok || userID == "" {
 			return false, nil
 		}
 
 		// Determine if this user is within the percentage
+		// Include flag name for independent rollouts per feature
+		flagName, _ := GetFlagName(ctx) // Safe to ignore if missing
 		hash := fnv.New32a()
-		hash.Write([]byte(userID))
+		hash.Write([]byte(userID + ":" + flagName))
 		hashValue := hash.Sum32() % 100
 		return int(hashValue) < percentage, nil
 	}
@@ -139,7 +141,7 @@ func (s *EnvironmentStrategy) Evaluate(ctx context.Context) (bool, error) {
 	}
 
 	// Extract environment from context
-	env, ok := ctx.Value(EnvironmentKey).(string)
+	env, ok := GetEnvironment(ctx)
 	if !ok || env == "" {
 		return false, nil
 	}
