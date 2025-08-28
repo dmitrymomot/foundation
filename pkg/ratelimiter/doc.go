@@ -21,11 +21,19 @@
 //   - Allow(ctx, key): consume 1 token
 //   - AllowN(ctx, key, n): consume n tokens
 //
-// Bucket implements RateLimiter with:
+// Bucket implements RateLimiter with additional methods:
+//   - Status(ctx, key): check current state without consuming tokens
+//   - Reset(ctx, key): reset bucket for administrative overrides
 //   - Configurable capacity and refill parameters
-//   - Pluggable storage backends (memory, Redis, etc.)
-//   - Status checking without token consumption
-//   - Reset capability for administrative overrides
+//   - Pluggable storage backends via Store interface
+//
+// Store interface defines the storage backend contract:
+//   - ConsumeTokens(): atomic token consumption with state update
+//   - Reset(): clear bucket state for a key
+//
+// MemoryStore provides in-memory storage with:
+//   - Configurable cleanup interval via WithCleanupInterval()
+//   - Close() method to stop background cleanup goroutine
 //
 // # Usage
 //
@@ -33,6 +41,7 @@
 //
 //	// Create in-memory storage
 //	store := ratelimiter.NewMemoryStore()
+//	defer store.Close() // Stop cleanup goroutine
 //
 //	// Configure bucket: 100 tokens capacity, refill 10 per second
 //	config := ratelimiter.Config{
@@ -82,7 +91,7 @@
 //		return func(next http.Handler) http.Handler {
 //			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 //				// Use client IP as rate limit key
-//				key := clientip.GetIP(r)
+//				key := r.RemoteAddr
 //
 //				result, err := limiter.Allow(r.Context(), key)
 //				if err != nil {
@@ -137,6 +146,11 @@
 // Memory Store (single instance):
 //
 //	store := ratelimiter.NewMemoryStore()
+//	// With custom cleanup interval
+//	store := ratelimiter.NewMemoryStore(
+//		ratelimiter.WithCleanupInterval(10 * time.Minute),
+//	)
+//	defer store.Close() // Stop cleanup goroutine
 //	// Pros: Fast, no external dependencies
 //	// Cons: Not shared across instances, lost on restart
 //
@@ -186,6 +200,9 @@
 // The package defines specific error types:
 //   - ErrInvalidConfig: Invalid rate limiting parameters
 //   - ErrInvalidTokenCount: Invalid token count (must be positive)
+//   - ErrContextCancelled: Context was cancelled during operation
+//   - ErrStoreUnavailable: Storage backend is unavailable
+//   - ErrRateLimitExceeded: Rate limit has been exceeded
 //
 // Storage backend errors are propagated as-is for handling by the application.
 //

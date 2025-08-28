@@ -79,11 +79,13 @@
 //
 // # Error Handling
 //
-// The package defines two main errors:
-//   - ErrBroadcasterClosed: returned when operating on a closed broadcaster
-//   - ErrSubscriberClosed: returned when operating on a closed subscriber
+// The package defines two errors for future extensibility:
+//   - ErrBroadcasterClosed: for indicating closed broadcaster state
+//   - ErrSubscriberClosed: for indicating closed subscriber state
 //
-// Operations on closed resources are safe and will not panic.
+// Operations on closed resources are safe and will not panic. The current
+// in-memory implementation returns nil for all operations rather than these
+// specific errors, but they are available for custom implementations.
 //
 // # Thread Safety
 //

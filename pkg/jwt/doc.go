@@ -152,11 +152,14 @@
 // # Error Handling
 //
 // The package provides specific error types for different failure modes:
-//   - ErrInvalidToken: Malformed token structure
+//   - ErrInvalidToken: Malformed token structure or nbf validation failure
 //   - ErrExpiredToken: Token past expiration time
 //   - ErrInvalidSignature: Signature verification failed
 //   - ErrUnexpectedSigningMethod: Algorithm mismatch (security)
+//   - ErrInvalidSigningMethod: Invalid signing method (legacy)
 //   - ErrMissingSigningKey: Service created without key
+//   - ErrInvalidSigningKey: Invalid signing key (available)
+//   - ErrInvalidClaims: Invalid claims (available)
 //   - ErrMissingClaims: Generate called with nil claims
 //
 // # Performance Characteristics

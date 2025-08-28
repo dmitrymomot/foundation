@@ -1,83 +1,88 @@
 // Package async provides utilities for asynchronous programming with Go generics.
 //
-// This package implements a Future pattern for non-blocking operations with timeout support
-// and coordination utilities for managing multiple asynchronous computations.
+// This package implements a Future pattern that allows executing functions
+// asynchronously with support for waiting, timeouts, and coordination utilities
+// for managing multiple concurrent operations.
 //
-// # Core Types
+// Basic usage:
 //
-// Future[U] represents the result of an asynchronous computation. It provides methods
-// to wait for completion (Await), check status without blocking (IsComplete), and
-// handle timeouts (AwaitWithTimeout).
+//	import (
+//		"context"
+//		"fmt"
+//		"log"
+//		"time"
 //
-// # Usage
+//		"github.com/dmitrymomot/foundation/pkg/async"
+//	)
 //
-// Basic asynchronous operation:
-//
-//	func fetchUser(ctx context.Context, userID int) (User, error) {
+//	func fetchUserData(ctx context.Context, userID int) (string, error) {
 //		// Simulate database call
 //		time.Sleep(100 * time.Millisecond)
-//		return User{ID: userID, Name: "John"}, nil
+//		return fmt.Sprintf("User data for ID %d", userID), nil
 //	}
 //
-//	// Execute asynchronously
-//	future := async.Async(ctx, 123, fetchUser)
+//	func main() {
+//		ctx := context.Background()
 //
-//	// Do other work...
+//		// Execute function asynchronously
+//		future := async.Async(ctx, 123, fetchUserData)
 //
-//	// Wait for result
-//	user, err := future.Await()
-//	if err != nil {
-//		log.Fatal(err)
+//		// Do other work while function executes...
+//
+//		// Wait for result
+//		result, err := future.Await()
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//		fmt.Println(result) // "User data for ID 123"
 //	}
 //
-// Using timeout:
+// # Timeout handling
 //
-//	user, err := future.AwaitWithTimeout(50 * time.Millisecond)
+//	// Wait with timeout
+//	result, err := future.AwaitWithTimeout(50 * time.Millisecond)
 //	if errors.Is(err, async.ErrTimeout) {
 //		log.Println("Operation timed out")
 //	}
 //
-// # Coordination Utilities
-//
-// WaitAll waits for all futures to complete and returns their results:
-//
-//	futures := []*async.Future[User]{
-//		async.Async(ctx, 1, fetchUser),
-//		async.Async(ctx, 2, fetchUser),
-//		async.Async(ctx, 3, fetchUser),
+//	// Check completion without blocking
+//	if future.IsComplete() {
+//		result, err := future.Await() // Returns immediately
 //	}
 //
-//	users, err := async.WaitAll(futures...)
+// # Coordinating multiple futures
+//
+// WaitAll waits for all futures to complete and returns all results:
+//
+//	futures := []*async.Future[string]{
+//		async.Async(ctx, 1, fetchUserData),
+//		async.Async(ctx, 2, fetchUserData),
+//		async.Async(ctx, 3, fetchUserData),
+//	}
+//
+//	results, err := async.WaitAll(futures...)
 //	if err != nil {
-//		log.Printf("One or more operations failed: %v", err)
+//		// First error encountered stops and returns
+//		log.Printf("One operation failed: %v", err)
 //	}
 //
-// WaitAny returns as soon as any future completes:
+// WaitAny returns as soon as the first future completes:
 //
-//	index, user, err := async.WaitAny(futures...)
-//	log.Printf("Future %d completed first with result: %+v", index, user)
+//	index, result, err := async.WaitAny(futures...)
+//	fmt.Printf("Future %d completed first with: %s", index, result)
 //
-// # Error Handling
+// # Error handling
 //
-// The package defines two main errors:
+// The package defines standard errors:
 //   - ErrTimeout: returned when AwaitWithTimeout exceeds its duration
-//   - ErrNoFutures: returned when WaitAny is called with no futures
+//   - ErrNoFutures: returned when WaitAny is called with empty slice
 //
-// # Concurrency Safety
+// Functions executed via Async can return errors normally, which are propagated
+// through the Future's Await methods.
 //
-// All operations are safe for concurrent use. The Future type uses sync.Once
-// internally to prevent race conditions on completion.
+// # Context cancellation
 //
-// # Performance Considerations
-//
-// - Futures spawn exactly one goroutine per Async call
-// - WaitAny spawns additional goroutines (one per future) for coordination
-// - Context cancellation is checked before execution to prevent goroutine leaks
-// - The package uses minimal allocations through careful struct design
-//
-// # Context Support
-//
-// All asynchronous operations respect context cancellation. If a context is
-// cancelled before the async function begins execution, it returns immediately
-// with the context's error.
+// All asynchronous operations respect context cancellation. If the context is
+// cancelled before execution begins, the Future returns immediately with the
+// context's error without starting a goroutine.
 package async
