@@ -51,7 +51,7 @@ func New(opts ...Option) (*I18n, error) {
 		return nil, fmt.Errorf("default language cannot be empty")
 	}
 
-	// Build the pre-computed languages list
+	// Build pre-computed language list for O(1) access during requests
 	i.languages = i.buildLanguagesList()
 
 	return i, nil
@@ -328,7 +328,9 @@ func replacePlaceholdersWithMerge(template string, placeholders ...M) string {
 	return ReplacePlaceholders(template, merged)
 }
 
-// getPluralFallbackForms returns the fallback order for a given plural form.
+// getPluralFallbackForms returns the fallback hierarchy for a given plural form.
+// This ensures graceful degradation when specific plural forms are missing,
+// following Unicode CLDR recommendations for fallback order.
 func getPluralFallbackForms(form string) []string {
 	switch form {
 	case PluralZero:
