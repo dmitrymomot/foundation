@@ -46,6 +46,34 @@ type CORSConfig struct {
 
 // CORS returns a CORS middleware with default configuration.
 // Default behavior allows all origins (*), common HTTP methods, and standard headers.
+//
+// Cross-Origin Resource Sharing (CORS) enables web applications running at one
+// domain to access resources from another domain. This middleware handles CORS
+// preflight requests and adds appropriate headers to responses.
+//
+// Usage:
+//
+//	// Allow all origins (development only)
+//	r.Use(middleware.CORS[*MyContext]())
+//
+//	// Production usage with specific configuration
+//	r.Use(middleware.CORSWithConfig[*MyContext](middleware.CORSConfig{
+//		AllowOrigins: []string{"https://myapp.com", "https://api.myapp.com"},
+//		AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
+//		AllowHeaders: []string{"Content-Type", "Authorization"},
+//		AllowCredentials: true,
+//		MaxAge: 86400, // 24 hours
+//	}))
+//
+// Default configuration:
+// - AllowOrigins: ["*"] (all origins)
+// - AllowMethods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE"]
+// - AllowHeaders: ["Accept", "Content-Type", "Authorization", ...]
+// - AllowCredentials: false (not compatible with wildcard origins)
+// - MaxAge: 0 (no caching of preflight requests)
+//
+// SECURITY NOTE: The default wildcard (*) origin should only be used in
+// development. Production applications should specify exact allowed origins.
 func CORS[C handler.Context]() handler.Middleware[C] {
 	return CORSWithConfig[C](CORSConfig{})
 }
@@ -53,6 +81,70 @@ func CORS[C handler.Context]() handler.Middleware[C] {
 // CORSWithConfig returns a CORS middleware with custom configuration.
 // Handles both preflight OPTIONS requests and actual CORS requests.
 // For security, credentials are only allowed with specific origins (not wildcards).
+//
+// Advanced Usage Examples:
+//
+//	// Production API with specific origins and credentials
+//	cfg := middleware.CORSConfig{
+//		AllowOrigins: []string{
+//			"https://myapp.com",
+//			"https://admin.myapp.com",
+//			"https://mobile.myapp.com",
+//		},
+//		AllowMethods: []string{"GET", "POST", "PUT", "DELETE"},
+//		AllowHeaders: []string{
+//			"Content-Type",
+//			"Authorization",
+//			"X-Requested-With",
+//			"X-API-Key",
+//		},
+//		ExposeHeaders: []string{
+//			"X-Total-Count",
+//			"X-Request-ID",
+//		},
+//		AllowCredentials: true,
+//		MaxAge:          86400, // Cache preflight for 24 hours
+//	}
+//	r.Use(middleware.CORSWithConfig[*MyContext](cfg))
+//
+//	// Dynamic origin validation with custom logic
+//	cfg := middleware.CORSConfig{
+//		AllowOriginFunc: func(origin string) (string, bool) {
+//			// Parse origin URL
+//			u, err := url.Parse(origin)
+//			if err != nil {
+//				return "", false
+//			}
+//
+//			// Allow all subdomains of myapp.com
+//			if strings.HasSuffix(u.Host, ".myapp.com") || u.Host == "myapp.com" {
+//				return origin, true
+//			}
+//
+//			// Allow localhost for development
+//			if strings.HasPrefix(u.Host, "localhost:") {
+//				return origin, true
+//			}
+//
+//			return "", false
+//		},
+//		AllowCredentials: true,
+//	}
+//
+//	// Skip CORS for same-origin requests
+//	cfg := middleware.CORSConfig{
+//		Skip: func(ctx handler.Context) bool {
+//			// Skip if no Origin header (same-origin request)
+//			return ctx.Request().Header.Get("Origin") == ""
+//		},
+//		AllowOrigins: []string{"https://api.myapp.com"},
+//	}
+//
+// Common patterns:
+// - Microservices: Allow specific service origins with credentials
+// - Public APIs: Use wildcard origins without credentials
+// - Development: Allow localhost with any port
+// - Mobile apps: Include custom headers for app identification
 func CORSWithConfig[C handler.Context](cfg CORSConfig) handler.Middleware[C] {
 	if len(cfg.AllowMethods) == 0 {
 		cfg.AllowMethods = []string{
@@ -81,7 +173,7 @@ func CORSWithConfig[C handler.Context](cfg CORSConfig) handler.Middleware[C] {
 	allowHeaders := strings.Join(cfg.AllowHeaders, ",")
 	exposeHeaders := strings.Join(cfg.ExposeHeaders, ",")
 
-	// Pre-build origin lookup map for O(1) origin validation instead of O(n) slice search
+	// Pre-build origin lookup map for O(1) validation to avoid O(n) slice search on each request
 	allowOriginsMap := make(map[string]bool, len(cfg.AllowOrigins))
 	for _, origin := range cfg.AllowOrigins {
 		allowOriginsMap[origin] = true
@@ -135,7 +227,8 @@ func CORSWithConfig[C handler.Context](cfg CORSConfig) handler.Middleware[C] {
 						headers.Set("Access-Control-Allow-Headers", allowHeaders)
 					}
 
-					// Credentials only allowed with specific origins for security (not with wildcards)
+					// Security requirement: credentials must not be allowed with wildcard origins
+					// per CORS spec to prevent credential leakage to any origin
 					if cfg.AllowCredentials && allowedOrigin != "*" {
 						headers.Set("Access-Control-Allow-Credentials", "true")
 					}
@@ -164,7 +257,8 @@ func CORSWithConfig[C handler.Context](cfg CORSConfig) handler.Middleware[C] {
 				headers := w.Header()
 				headers.Set("Access-Control-Allow-Origin", allowedOrigin)
 
-				// Credentials only allowed with specific origins for security (not with wildcards)
+				// Security requirement: credentials must not be allowed with wildcard origins
+				// per CORS spec to prevent credential leakage to any origin
 				if cfg.AllowCredentials && allowedOrigin != "*" {
 					headers.Set("Access-Control-Allow-Credentials", "true")
 				}

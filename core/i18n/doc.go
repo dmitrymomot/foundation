@@ -236,4 +236,103 @@
 //	uiMsg := i18nInstance.T("en", "ui", "save")     // "Save"
 //	emailMsg := i18nInstance.T("en", "email", "save") // "Your changes have been saved"
 //	apiMsg := i18nInstance.T("en", "api", "save")   // "Failed to save data"
+//
+// # Simplified Translation with Translator
+//
+// The Translator type provides a simplified interface for translations by fixing
+// the language and namespace context. This is especially useful in web applications
+// where you want to translate content for a specific user's language and context.
+//
+//	// Create a translator for a specific user language and namespace
+//	translator := i18n.NewTranslator(i18nInstance, "es", "ui")
+//
+//	// Use simplified methods without specifying language/namespace
+//	saveButton := translator.T("buttons.save")
+//	// Output: "Guardar"
+//
+//	cancelButton := translator.T("buttons.cancel")
+//	// Output: "Cancelar"
+//
+//	// Pluralization with simplified interface
+//	itemCount := translator.Tn("items.count", 5)
+//	// Output: "5 elementos"
+//
+//	// Access the translator's context
+//	currentLang := translator.Language()  // Returns: "es"
+//	namespace := translator.Namespace()   // Returns: "ui"
+//
+// The Translator is particularly useful in web handlers where the language is
+// determined once per request but used multiple times:
+//
+//	func handleUserProfile(translator *i18n.Translator) {
+//		title := translator.T("profile.title")
+//		description := translator.T("profile.description", i18n.M{
+//			"username": user.Name,
+//		})
+//		saveBtn := translator.T("buttons.save")
+//		// No need to repeat language and namespace for each translation
+//	}
+//
+// # Missing Key Handler
+//
+// Use WithMissingKeyHandler to track missing translations during development.
+// The handler is called only when a translation key is not found in any language:
+//
+//	i18nInstance, err := i18n.New(
+//		i18n.WithMissingKeyHandler(func(lang, namespace, key string) {
+//			log.Printf("Missing translation: %s:%s:%s", lang, namespace, key)
+//			// Could also send to error tracking service
+//		}),
+//		i18n.WithTranslations("en", "app", map[string]any{
+//			"hello": "Hello",
+//		}),
+//	)
+//
+//	// Handler is called for missing keys
+//	msg := i18nInstance.T("en", "app", "missing.key")
+//	// Logs: "Missing translation: en:app:missing.key"
+//	// Returns: "missing.key"
+//
+// # Locale-Aware Formatting
+//
+// The Translator provides convenient methods for formatting numbers, currencies,
+// dates, and percentages. By default, it uses US English formatting, but you can
+// customize the formatting using LocaleFormat:
+//
+//	// Default English formatting
+//	translator := i18n.NewTranslator(i18nInstance, "en", "app")
+//	fmt.Println(translator.FormatCurrency(1234.50))  // "$1,234.50"
+//	fmt.Println(translator.FormatNumber(1234.5))     // "1,234.5"
+//	fmt.Println(translator.FormatDate(now))          // "01/02/2006"
+//
+//	// Custom formatting with LocaleFormat
+//	euroFormat := i18n.NewLocaleFormat(
+//		i18n.WithDecimalSeparator(","),
+//		i18n.WithThousandSeparator("."),
+//		i18n.WithCurrencySymbol("€"),
+//		i18n.WithCurrencyPosition("after"),
+//		i18n.WithDateFormat("02.01.2006"),
+//		i18n.WithTimeFormat("15:04"),
+//	)
+//	translator := i18n.NewTranslatorWithFormat(i18nInstance, "en", "app", euroFormat)
+//	fmt.Println(translator.FormatCurrency(1234.50))  // "1.234,50 €"
+//	fmt.Println(translator.FormatNumber(1234.5))     // "1.234,5"
+//	fmt.Println(translator.FormatDate(now))          // "02.01.2006"
+//
+// You can also create and reuse LocaleFormat instances for consistency:
+//
+//	// Create a reusable format for your application
+//	myFormat := i18n.NewLocaleFormat(
+//		i18n.WithDecimalSeparator(","),
+//		i18n.WithThousandSeparator(" "),
+//		i18n.WithCurrencySymbol("USD"),
+//		i18n.WithCurrencyPosition("after"),
+//	)
+//
+//	// Use the same format across multiple translators
+//	translator1 := i18n.NewTranslatorWithFormat(i18n1, "en", "app", myFormat)
+//	translator2 := i18n.NewTranslatorWithFormat(i18n2, "es", "app", myFormat)
+//
+// The LocaleFormat struct is immutable and thread-safe, making it safe to share
+// across multiple translators and goroutines.
 package i18n

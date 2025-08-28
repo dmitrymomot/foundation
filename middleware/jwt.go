@@ -31,6 +31,42 @@ type JWTConfig struct {
 // JWT creates a JWT authentication middleware with a signing key.
 // It uses standard claims and stores them in the request context by default.
 // Panics if the signing key is invalid.
+//
+// This is the most common way to add JWT authentication to your application.
+// Use this when you have a simple authentication setup with standard JWT claims.
+//
+// Usage:
+//
+//	// Apply JWT middleware to protected routes
+//	r.Use(middleware.JWT[*MyContext]("your-secret-signing-key"))
+//
+//	// Or apply to specific route groups
+//	protected := r.Group("/protected")
+//	protected.Use(middleware.JWT[*MyContext]("your-secret-signing-key"))
+//	protected.GET("/profile", handleProfile)
+//
+//	// Use claims in handlers
+//	func handleProfile(ctx *MyContext) handler.Response {
+//		claims, ok := middleware.GetStandardClaims(ctx)
+//		if !ok {
+//			return response.Error(response.ErrUnauthorized)
+//		}
+//
+//		userID := claims.Subject
+//		expiresAt := claims.ExpiresAt
+//
+//		return response.JSON(map[string]any{
+//			"user_id": userID,
+//			"expires": expiresAt,
+//		})
+//	}
+//
+// The middleware automatically:
+// - Extracts JWT token from Authorization header (Bearer scheme)
+// - Validates token signature and expiration
+// - Parses standard claims (subject, issued at, expires at, etc.)
+// - Stores claims in request context for handler access
+// - Returns 401 Unauthorized for invalid or missing tokens
 func JWT[C handler.Context](signingKey string) handler.Middleware[C] {
 	service, err := jwt.NewFromString(signingKey)
 	if err != nil {
@@ -49,6 +85,64 @@ func JWT[C handler.Context](signingKey string) handler.Middleware[C] {
 // JWTWithConfig creates a JWT authentication middleware with custom configuration.
 // It validates JWT tokens and optionally stores parsed claims in the request context.
 // Panics if the JWT service is not provided.
+//
+// Use this for advanced JWT configurations: custom claims, multiple token sources,
+// custom error handling, or when you need to skip authentication for certain requests.
+//
+// Advanced Usage Examples:
+//
+//	// Custom claims structure
+//	type CustomClaims struct {
+//		jwt.StandardClaims
+//		Role     string `json:"role"`
+//		TenantID string `json:"tenant_id"`
+//	}
+//
+//	cfg := middleware.JWTConfig{
+//		Service: jwtService,
+//		ClaimsFactory: func() any {
+//			return &CustomClaims{}
+//		},
+//		StoreInContext: true,
+//	}
+//	r.Use(middleware.JWTWithConfig[*MyContext](cfg))
+//
+//	// Multiple token sources (header, cookie, query param)
+//	cfg := middleware.JWTConfig{
+//		Service: jwtService,
+//		TokenExtractor: middleware.JWTFromMultiple(
+//			middleware.JWTFromAuthHeader(),
+//			middleware.JWTFromCookie("auth_token"),
+//			middleware.JWTFromQuery("token"),
+//		),
+//	}
+//
+//	// Skip authentication for public endpoints
+//	cfg := middleware.JWTConfig{
+//		Service: jwtService,
+//		Skip: func(ctx handler.Context) bool {
+//			path := ctx.Request().URL.Path
+//			return path == "/health" || strings.HasPrefix(path, "/public/")
+//		},
+//	}
+//
+//	// Custom error handling
+//	cfg := middleware.JWTConfig{
+//		Service: jwtService,
+//		ErrorHandler: func(ctx handler.Context, err error) handler.Response {
+//			// Log authentication failures
+//			log.Printf("JWT auth failed: %v", err)
+//
+//			// Return custom error response
+//			return response.Error(response.ErrUnauthorized.WithMessage("Please log in"))
+//		},
+//	}
+//
+// Common patterns:
+// - API keys in custom headers: TokenExtractor: JWTFromHeader("X-API-Key")
+// - Mobile apps with refresh tokens: Store refresh logic in ErrorHandler
+// - Multi-tenant apps: Use custom claims with tenant information
+// - Development mode: Skip authentication with environment-based Skip function
 func JWTWithConfig[C handler.Context](cfg JWTConfig) handler.Middleware[C] {
 	if cfg.Service == nil {
 		panic("jwt middleware: service is required")
@@ -101,6 +195,30 @@ func JWTWithConfig[C handler.Context](cfg JWTConfig) handler.Middleware[C] {
 
 // GetJWTClaims retrieves JWT claims of the specified type from the request context.
 // Returns the claims and a boolean indicating whether they were found and of the correct type.
+//
+// Use this function with custom claims types:
+//
+//	type CustomClaims struct {
+//		jwt.StandardClaims
+//		Role     string `json:"role"`
+//		TenantID string `json:"tenant_id"`
+//	}
+//
+//	func handleAdmin(ctx *MyContext) handler.Response {
+//		claims, ok := middleware.GetJWTClaims[*CustomClaims](ctx)
+//		if !ok {
+//			return response.Error(response.ErrUnauthorized)
+//		}
+//
+//		if claims.Role != "admin" {
+//			return response.Error(response.ErrForbidden)
+//		}
+//
+//		return response.JSON(map[string]string{
+//			"tenant_id": claims.TenantID,
+//			"role":      claims.Role,
+//		})
+//	}
 func GetJWTClaims[T any](ctx handler.Context) (T, bool) {
 	var zero T
 	claims, ok := ctx.Value(jwtClaimsContextKey{}).(T)
@@ -113,6 +231,34 @@ func GetJWTClaims[T any](ctx handler.Context) (T, bool) {
 // GetStandardClaims retrieves standard JWT claims from the request context.
 // Returns the claims and a boolean indicating whether they were found.
 // This is a convenience function for the most common use case.
+//
+// Standard claims include:
+// - Subject: User ID or identifier
+// - ExpiresAt: Token expiration timestamp
+// - IssuedAt: Token creation timestamp
+// - NotBefore: Token valid-from timestamp
+// - Issuer: Token issuer
+// - Audience: Intended token audience
+//
+// Usage:
+//
+//	func handleProtected(ctx *MyContext) handler.Response {
+//		claims, ok := middleware.GetStandardClaims(ctx)
+//		if !ok {
+//			return response.Error(response.ErrUnauthorized)
+//		}
+//
+//		// Access standard claim fields
+//		userID := claims.Subject
+//		expires := time.Unix(claims.ExpiresAt, 0)
+//		issuer := claims.Issuer
+//
+//		return response.JSON(map[string]any{
+//			"user_id": userID,
+//			"expires": expires.Format(time.RFC3339),
+//			"issuer":  issuer,
+//		})
+//	}
 func GetStandardClaims(ctx handler.Context) (*jwt.StandardClaims, bool) {
 	claims, ok := ctx.Value(jwtClaimsContextKey{}).(*jwt.StandardClaims)
 	if !ok {

@@ -1,6 +1,7 @@
 package i18n_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/dmitrymomot/gokit/core/i18n"
@@ -29,6 +30,31 @@ func TestNew(t *testing.T) {
 		)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "language cannot be empty")
+	})
+
+	t.Run("sets missing key handler", func(t *testing.T) {
+		var missingKeys []string
+		handler := func(lang, namespace, key string) {
+			missingKeys = append(missingKeys, fmt.Sprintf("%s:%s:%s", lang, namespace, key))
+		}
+
+		i18nInstance, err := i18n.New(
+			i18n.WithMissingKeyHandler(handler),
+			i18n.WithTranslations("en", "test", map[string]any{
+				"existing": "Exists",
+			}),
+		)
+		require.NoError(t, err)
+
+		// Should not call handler for existing key
+		result := i18nInstance.T("en", "test", "existing")
+		assert.Equal(t, "Exists", result)
+		assert.Empty(t, missingKeys)
+
+		// Should call handler for missing key
+		result = i18nInstance.T("en", "test", "missing")
+		assert.Equal(t, "missing", result)
+		assert.Equal(t, []string{"en:test:missing"}, missingKeys)
 	})
 
 	t.Run("loads translations", func(t *testing.T) {
@@ -217,6 +243,36 @@ func TestT(t *testing.T) {
 		i18nInstance := setup()
 		result := i18nInstance.T("en", "general", "welcome", nil)
 		assert.Equal(t, "Welcome, %{name}!", result)
+	})
+}
+
+func TestMissingKeyHandlerForTn(t *testing.T) {
+	t.Run("calls missing key handler for plural translations", func(t *testing.T) {
+		var missingKeys []string
+		handler := func(lang, namespace, key string) {
+			missingKeys = append(missingKeys, fmt.Sprintf("%s:%s:%s", lang, namespace, key))
+		}
+
+		i18nInstance, err := i18n.New(
+			i18n.WithMissingKeyHandler(handler),
+			i18n.WithTranslations("en", "test", map[string]any{
+				"items": map[string]any{
+					"one":   "1 item",
+					"other": "%{count} items",
+				},
+			}),
+		)
+		require.NoError(t, err)
+
+		// Should not call handler for existing plural key
+		result := i18nInstance.Tn("en", "test", "items", 5)
+		assert.Equal(t, "5 items", result)
+		assert.Empty(t, missingKeys)
+
+		// Should call handler for missing plural key
+		result = i18nInstance.Tn("en", "test", "missing_plural", 5)
+		assert.Equal(t, "missing_plural", result)
+		assert.Equal(t, []string{"en:test:missing_plural"}, missingKeys)
 	})
 }
 

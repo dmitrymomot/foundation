@@ -27,6 +27,41 @@ type FingerprintConfig struct {
 
 // Fingerprint creates a device fingerprinting middleware with default configuration.
 // By default, it stores the generated fingerprint in the request context.
+//
+// Device fingerprinting creates a unique identifier based on request characteristics
+// like User-Agent, Accept headers, IP address, and other browser/device properties.
+// This helps identify devices for security, analytics, and user experience purposes.
+//
+// Usage:
+//
+//	// Apply to all routes for device tracking
+//	r.Use(middleware.Fingerprint[*MyContext]())
+//
+//	// Use fingerprint in handlers
+//	func handleSession(ctx *MyContext) handler.Response {
+//		fingerprint, ok := middleware.GetFingerprint(ctx)
+//		if !ok {
+//			return response.Error(response.ErrInternalServerError)
+//		}
+//
+//		// Track device for security
+//		log.Printf("Request from device: %s", fingerprint)
+//
+//		// Check if device is known/trusted
+//		if !deviceRepo.IsTrusted(userID, fingerprint) {
+//			// Require additional verification for new device
+//			return requireTwoFactorAuth(ctx)
+//		}
+//
+//		return response.JSON(map[string]string{"device": fingerprint})
+//	}
+//
+// Common use cases:
+// - Fraud detection: Identify suspicious device patterns
+// - Session security: Detect session hijacking across devices
+// - User experience: Remember device preferences
+// - Analytics: Track unique devices/visitors
+// - Two-factor authentication: Require 2FA for new devices
 func Fingerprint[C handler.Context]() handler.Middleware[C] {
 	return FingerprintWithConfig[C](FingerprintConfig{
 		StoreInContext: true,
@@ -36,6 +71,70 @@ func Fingerprint[C handler.Context]() handler.Middleware[C] {
 // FingerprintWithConfig creates a device fingerprinting middleware with custom configuration.
 // It generates a unique fingerprint based on request headers, IP address, and other characteristics
 // to help identify devices and detect suspicious activity.
+//
+// Advanced Usage Examples:
+//
+//	// Include fingerprint in response headers for debugging
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//		StoreInHeader:  true,
+//		HeaderName:     "X-Device-Fingerprint",
+//	}
+//	r.Use(middleware.FingerprintWithConfig[*MyContext](cfg))
+//
+//	// Validate device fingerprints for security
+//	suspiciousDevices := map[string]bool{
+//		"abc123suspicious": true,
+//		"def456blocked":    true,
+//	}
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//		ValidateFunc: func(ctx handler.Context, fp string) error {
+//			if suspiciousDevices[fp] {
+//				return fmt.Errorf("device %s is blocked", fp)
+//			}
+//			return nil
+//		},
+//	}
+//	r.Use(middleware.FingerprintWithConfig[*MyContext](cfg))
+//
+//	// Skip fingerprinting for API endpoints
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//		Skip: func(ctx handler.Context) bool {
+//			return strings.HasPrefix(ctx.Request().URL.Path, "/api/")
+//		},
+//	}
+//
+//	// Custom device validation with database lookup
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//		ValidateFunc: func(ctx handler.Context, fp string) error {
+//			// Check against known malicious device patterns
+//			if deviceRepo.IsBlacklisted(fp) {
+//				return fmt.Errorf("device blocked for security")
+//			}
+//
+//			// Rate limit by device fingerprint
+//			if rateLimiter.ExceededLimit(fp) {
+//				return fmt.Errorf("too many requests from this device")
+//			}
+//
+//			return nil
+//		},
+//	}
+//
+// Configuration options:
+// - StoreInContext: Store fingerprint in request context for handler access
+// - StoreInHeader: Include fingerprint in response headers (debugging)
+// - ValidateFunc: Custom fingerprint validation (security, rate limiting)
+// - Skip: Skip processing for specific requests (API endpoints, etc.)
+//
+// Fingerprint characteristics include:
+// - User-Agent string (browser, OS, device info)
+// - Accept headers (language, encoding, content types)
+// - Client IP address (when available)
+// - Connection characteristics (HTTP version, etc.)
 func FingerprintWithConfig[C handler.Context](cfg FingerprintConfig) handler.Middleware[C] {
 	if cfg.HeaderName == "" {
 		cfg.HeaderName = "X-Device-Fingerprint"
@@ -80,6 +179,53 @@ func FingerprintWithConfig[C handler.Context](cfg FingerprintConfig) handler.Mid
 
 // GetFingerprint retrieves the device fingerprint from the request context.
 // Returns the fingerprint and a boolean indicating whether it was found.
+//
+// Usage in handlers:
+//
+//	func handleUserLogin(ctx *MyContext) handler.Response {
+//		fingerprint, ok := middleware.GetFingerprint(ctx)
+//		if !ok {
+//			return response.Error(response.ErrInternalServerError.WithMessage("Device fingerprinting failed"))
+//		}
+//
+//		// Security: Check if this is a known device for the user
+//		userDevices, err := deviceRepo.GetUserDevices(userID)
+//		if err != nil {
+//			return response.Error(response.ErrInternalServerError)
+//		}
+//
+//		isKnownDevice := false
+//		for _, device := range userDevices {
+//			if device.Fingerprint == fingerprint {
+//				isKnownDevice = true
+//				break
+//			}
+//		}
+//
+//		if !isKnownDevice {
+//			// Save new device and require additional verification
+//			deviceRepo.SaveDevice(userID, fingerprint, ctx.Request().UserAgent())
+//
+//			// Send security notification
+//			notificationService.SendNewDeviceAlert(userID, fingerprint)
+//
+//			// Require 2FA for new device
+//			return response.JSON(map[string]any{
+//				"status":           "new_device_detected",
+//				"requires_2fa":     true,
+//				"device_fingerprint": fingerprint,
+//			})
+//		}
+//
+//		return response.JSON(map[string]any{
+//			"status": "login_successful",
+//			"device": fingerprint,
+//		})
+//	}
+//
+// The fingerprint is a hash-based identifier that remains consistent
+// for the same device/browser combination while being privacy-friendly.
+// It cannot be used to identify users across different websites.
 func GetFingerprint(ctx handler.Context) (string, bool) {
 	fp, ok := ctx.Value(fingerprintContextKey{}).(string)
 	return fp, ok

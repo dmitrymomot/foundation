@@ -44,8 +44,8 @@ func ParseAcceptLanguage(header string, available []string) string {
 	var bestQuality float64 = -1
 	var bestIsExact bool
 
-	// Check each available language and find the one with best quality
-	// This respects server preference order when qualities are equal
+	// Iterate through server-preferred language order to respect server priorities
+	// when client quality values are equal (RFC 7231 section 5.3.1)
 	for _, avail := range available {
 		availNorm := normalizeLanguageTag(avail)
 
@@ -61,11 +61,10 @@ func ParseAcceptLanguage(header string, available []string) string {
 				break // Found best possible match for this available language
 			}
 
-			// Check for partial match
+			// Check for partial match (e.g., "en" matches "en-US")
 			if matchesLanguage(tag.tag, avail) {
-				// Only take partial match if:
-				// 1. We have no match yet, OR
-				// 2. This quality is strictly better than what we have
+				// Prioritize exact matches over partial matches, but accept better quality partial matches
+				// when no exact match exists or when quality significantly improves
 				if bestMatch == "" || (!bestIsExact && tag.quality > bestQuality) || (bestIsExact && tag.quality > bestQuality) {
 					if !bestIsExact || tag.quality > bestQuality {
 						bestMatch = avail
@@ -73,7 +72,7 @@ func ParseAcceptLanguage(header string, available []string) string {
 						bestIsExact = false
 					}
 				}
-				break // Found best possible match for this available language
+				break
 			}
 		}
 	}
