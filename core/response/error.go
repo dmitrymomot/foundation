@@ -3,7 +3,7 @@ package response
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // Error returns a handler response that propagates the given error.

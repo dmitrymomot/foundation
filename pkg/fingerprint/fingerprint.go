@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dmitrymomot/gokit/pkg/clientip"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
 )
 
 // Generate creates a device fingerprint from the HTTP request.

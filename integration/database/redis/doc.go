@@ -38,7 +38,7 @@
 //		"log"
 //		"time"
 //
-//		"github.com/dmitrymomot/gokit/integration/database/redis"
+//		"github.com/dmitrymomot/foundation/integration/database/redis"
 //	)
 //
 //	func main() {

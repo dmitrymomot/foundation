@@ -37,8 +37,8 @@
 //		"context"
 //		"log"
 //
-//		"github.com/dmitrymomot/gokit/core/email"
-//		"github.com/dmitrymomot/gokit/integration/email/postmark"
+//		"github.com/dmitrymomot/foundation/core/email"
+//		"github.com/dmitrymomot/foundation/integration/email/postmark"
 //	)
 //
 //	func main() {

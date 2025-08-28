@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // Option configures a Router during creation.

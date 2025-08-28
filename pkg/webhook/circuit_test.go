@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/pkg/webhook"
+	"github.com/dmitrymomot/foundation/pkg/webhook"
 )
 
 func TestCircuitBreaker_StateTransitions(t *testing.T) {

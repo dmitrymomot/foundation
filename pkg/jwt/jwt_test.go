@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/jwt"
+	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
 // Custom claims type for testing

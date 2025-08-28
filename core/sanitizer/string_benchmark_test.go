@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/core/sanitizer"
+	"github.com/dmitrymomot/foundation/core/sanitizer"
 )
 
 var testStrings = []string{

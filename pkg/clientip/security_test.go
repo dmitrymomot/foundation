@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/pkg/clientip"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
 )
 
 func TestSecurityAttackVectors(t *testing.T) {

@@ -1,6 +1,6 @@
 package router
 
-import "github.com/dmitrymomot/gokit/core/handler"
+import "github.com/dmitrymomot/foundation/core/handler"
 
 // chain builds a single handler from a middleware stack and endpoint.
 func chain[C handler.Context](middlewares []handler.Middleware[C], endpoint handler.HandlerFunc[C]) handler.HandlerFunc[C] {

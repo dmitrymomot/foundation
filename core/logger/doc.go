@@ -18,7 +18,7 @@
 //
 // Create loggers using the factory function with various configuration options:
 //
-//	import "github.com/dmitrymomot/gokit/core/logger"
+//	import "github.com/dmitrymomot/foundation/core/logger"
 //
 //	// Create a development logger
 //	log := logger.New(

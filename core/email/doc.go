@@ -17,7 +17,7 @@
 // The package centers around the EmailSender interface, which can be implemented
 // by different email providers:
 //
-//	import "github.com/dmitrymomot/gokit/core/email"
+//	import "github.com/dmitrymomot/foundation/core/email"
 //
 //	// For development
 //	sender := email.NewDevSender("./dev_emails")
@@ -108,8 +108,8 @@
 // Use the templates subpackage for rendering templ components to HTML:
 //
 //	import (
-//		"github.com/dmitrymomot/gokit/core/email"
-//		"github.com/dmitrymomot/gokit/core/email/templates"
+//		"github.com/dmitrymomot/foundation/core/email"
+//		"github.com/dmitrymomot/foundation/core/email/templates"
 //	)
 //
 //	// Define your email template
@@ -145,7 +145,7 @@
 //
 // The package includes pre-built components for common email patterns:
 //
-//	import "github.com/dmitrymomot/gokit/core/email/templates"
+//	import "github.com/dmitrymomot/foundation/core/email/templates"
 //
 //	// Build email with components
 //	func buildNotificationEmail(title, message, actionURL string) templ.Component {

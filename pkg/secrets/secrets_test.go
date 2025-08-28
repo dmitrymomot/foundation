@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/pkg/secrets"
+	"github.com/dmitrymomot/foundation/pkg/secrets"
 
 	"github.com/stretchr/testify/require"
 )

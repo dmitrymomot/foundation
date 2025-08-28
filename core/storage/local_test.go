@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/storage"
+	"github.com/dmitrymomot/foundation/core/storage"
 )
 
 func TestLocalStorage_Save(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dmitrymomot/gokit/pkg/broadcast"
+	"github.com/dmitrymomot/foundation/pkg/broadcast"
 )
 
 func ExampleMemoryBroadcaster() {

@@ -14,7 +14,7 @@ import (
 	s3aws "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	"github.com/dmitrymomot/gokit/core/storage"
+	"github.com/dmitrymomot/foundation/core/storage"
 )
 
 // Compile-time check that S3Storage implements storage.Storage interface

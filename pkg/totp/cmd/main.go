@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dmitrymomot/gokit/pkg/totp"
+	"github.com/dmitrymomot/foundation/pkg/totp"
 )
 
 func main() {

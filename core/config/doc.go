@@ -17,7 +17,7 @@
 //
 // The package provides two main functions for loading configuration:
 //
-//	import "github.com/dmitrymomot/gokit/core/config"
+//	import "github.com/dmitrymomot/foundation/core/config"
 //
 //	// Load configuration with error handling
 //	err := config.Load(&myConfig)

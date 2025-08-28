@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/core/queue"
+	"github.com/dmitrymomot/foundation/core/queue"
 )
 
 func TestPriority_Valid(t *testing.T) {

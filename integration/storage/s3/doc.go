@@ -46,7 +46,7 @@
 //		"mime/multipart"
 //		"net/http"
 //
-//		"github.com/dmitrymomot/gokit/integration/storage/s3"
+//		"github.com/dmitrymomot/foundation/integration/storage/s3"
 //	)
 //
 //	func main() {

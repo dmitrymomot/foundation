@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/response"
-	"github.com/dmitrymomot/gokit/pkg/ratelimiter"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/response"
+	"github.com/dmitrymomot/foundation/pkg/ratelimiter"
 )
 
 // RateLimitConfig configures the rate limiting middleware.

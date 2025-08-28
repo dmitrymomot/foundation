@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/pkg/randomname"
+	"github.com/dmitrymomot/foundation/pkg/randomname"
 )
 
 func TestDefaultOptions(t *testing.T) {

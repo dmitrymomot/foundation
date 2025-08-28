@@ -18,7 +18,7 @@
 //
 // Use the storage interface for file operations:
 //
-//	import "github.com/dmitrymomot/gokit/core/storage"
+//	import "github.com/dmitrymomot/foundation/core/storage"
 //
 //	// Create local storage
 //	store := storage.NewLocalStorage("./uploads")

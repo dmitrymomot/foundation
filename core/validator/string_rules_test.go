@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/core/validator"
+	"github.com/dmitrymomot/foundation/core/validator"
 )
 
 func TestRequiredString(t *testing.T) {

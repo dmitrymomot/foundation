@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/pkg/ratelimiter"
+	"github.com/dmitrymomot/foundation/pkg/ratelimiter"
 )
 
 func TestResult_RetryAfter(t *testing.T) {

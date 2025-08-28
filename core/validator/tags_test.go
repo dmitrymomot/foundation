@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/core/validator"
+	"github.com/dmitrymomot/foundation/core/validator"
 )
 
 func TestValidateStruct_BasicFields(t *testing.T) {

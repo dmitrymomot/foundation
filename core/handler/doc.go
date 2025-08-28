@@ -17,7 +17,7 @@
 // The package defines several key types that work together to provide
 // a cohesive request processing framework:
 //
-//	import "github.com/dmitrymomot/gokit/core/handler"
+//	import "github.com/dmitrymomot/foundation/core/handler"
 //
 //	// Response function renders HTTP responses
 //	type Response func(w http.ResponseWriter, r *http.Request) error
@@ -49,7 +49,7 @@
 //
 //	import (
 //		"net/http"
-//		"github.com/dmitrymomot/gokit/core/handler"
+//		"github.com/dmitrymomot/foundation/core/handler"
 //	)
 //
 //	// Define a simple handler

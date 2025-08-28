@@ -18,7 +18,7 @@
 //
 // Create a router and define routes with handlers:
 //
-//	import "github.com/dmitrymomot/gokit/core/router"
+//	import "github.com/dmitrymomot/foundation/core/router"
 //
 //	// Create a new router
 //	r := router.New()

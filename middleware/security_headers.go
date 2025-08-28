@@ -3,7 +3,7 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // SecurityHeadersConfig configures the security headers middleware.

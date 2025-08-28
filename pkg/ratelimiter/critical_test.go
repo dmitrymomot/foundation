@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/ratelimiter"
+	"github.com/dmitrymomot/foundation/pkg/ratelimiter"
 )
 
 // TestBucket_ContextCancellation verifies proper context handling

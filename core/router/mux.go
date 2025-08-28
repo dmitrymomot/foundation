@@ -7,7 +7,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // mux is the private implementation of Router interface.
@@ -261,7 +261,7 @@ func (m *mux[C]) Method(pattern string, handler handler.HandlerFunc[C], methods 
 // Use appends middleware to the router.
 func (m *mux[C]) Use(middlewares ...handler.Middleware[C]) {
 	if m.handler != nil {
-		panic("gokit: all middlewares must be defined before routes on a mux")
+		panic("foundation: all middlewares must be defined before routes on a mux")
 	}
 	m.middlewares = append(m.middlewares, middlewares...)
 }
@@ -316,7 +316,7 @@ func (m *mux[C]) Mount(pattern string, sub Router[C]) {
 
 	subMux, ok := sub.(*mux[C])
 	if !ok {
-		panic("gokit: can only mount *mux[C] routers")
+		panic("foundation: can only mount *mux[C] routers")
 	}
 
 	// Always inherit parent's error handler and logger for consistency

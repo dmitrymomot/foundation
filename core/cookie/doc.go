@@ -18,7 +18,7 @@
 //
 // Create a manager with secret keys and use it to manage cookies:
 //
-//	import "github.com/dmitrymomot/gokit/core/cookie"
+//	import "github.com/dmitrymomot/foundation/core/cookie"
 //
 //	// Create manager with secret key(s)
 //	manager, err := cookie.New([]string{"your-32-char-secret-key-here!!!!"})

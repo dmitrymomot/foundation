@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // statusCode is an interface that errors can implement

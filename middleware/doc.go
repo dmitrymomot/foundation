@@ -1,6 +1,6 @@
 // Package middleware provides HTTP middleware components for common cross-cutting
 // concerns in web applications. It offers type-safe, composable middleware that
-// integrates with the gokit framework's handler.Context interface.
+// integrates with the foundation framework's handler.Context interface.
 //
 // # Available Middleware
 //
@@ -29,7 +29,7 @@
 //
 // Most middleware can be used with minimal configuration:
 //
-//	import "github.com/dmitrymomot/gokit/middleware"
+//	import "github.com/dmitrymomot/foundation/middleware"
 //
 //	// Basic usage with default configuration
 //	app.Use(middleware.RequestID[*YourContext]())
@@ -65,7 +65,7 @@
 // For detailed configuration options, examples, and API documentation for each
 // middleware, see the individual middleware source files or use go doc:
 //
-//	go doc github.com/dmitrymomot/gokit/middleware.JWT
-//	go doc github.com/dmitrymomot/gokit/middleware.RateLimit
-//	go doc -all github.com/dmitrymomot/gokit/middleware
+//	go doc github.com/dmitrymomot/foundation/middleware.JWT
+//	go doc github.com/dmitrymomot/foundation/middleware.RateLimit
+//	go doc -all github.com/dmitrymomot/foundation/middleware
 package middleware

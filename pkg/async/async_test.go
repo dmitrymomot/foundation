@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/pkg/async"
+	"github.com/dmitrymomot/foundation/pkg/async"
 )
 
 func TestAsyncFunctionality(t *testing.T) {

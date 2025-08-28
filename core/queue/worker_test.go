@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/queue"
+	"github.com/dmitrymomot/foundation/core/queue"
 )
 
 // MockWorkerRepository is a mock implementation of WorkerRepository

@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // Stream creates a streaming response that gives direct access to the response writer.

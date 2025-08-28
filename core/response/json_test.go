@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/core/response"
+	"github.com/dmitrymomot/foundation/core/response"
 )
 
 func TestJSON(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/pkg/async"
+	"github.com/dmitrymomot/foundation/pkg/async"
 )
 
 // BenchmarkAsyncOverhead measures async overhead with 1000 concurrent tasks.

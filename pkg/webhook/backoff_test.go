@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/webhook"
+	"github.com/dmitrymomot/foundation/pkg/webhook"
 )
 
 func TestExponentialBackoff(t *testing.T) {

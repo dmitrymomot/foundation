@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/randomname"
+	"github.com/dmitrymomot/foundation/pkg/randomname"
 )
 
 func TestGenerate(t *testing.T) {

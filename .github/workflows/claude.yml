@@ -54,7 +54,7 @@ jobs:
 
           # Optional: Add custom instructions for Claude to customize its behavior for your project
           custom_instructions: |
-            This is a Go web framework library called gokit.
+            This is a Go web framework library called foundation.
             Follow Go best practices and idioms.
             Ensure all new code has tests.
             Use Go 1.24 features when appropriate.

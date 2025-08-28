@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/dmitrymomot/gokit/core/storage"
+	"github.com/dmitrymomot/foundation/core/storage"
 )
 
 // classifyS3Error converts S3 errors to domain-specific errors.

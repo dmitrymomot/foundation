@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/pkg/qrcode"
+	"github.com/dmitrymomot/foundation/pkg/qrcode"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

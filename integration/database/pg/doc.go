@@ -46,7 +46,7 @@
 //		"log/slog"
 //		"time"
 //
-//		"github.com/dmitrymomot/gokit/integration/database/pg"
+//		"github.com/dmitrymomot/foundation/integration/database/pg"
 //		"github.com/jackc/pgx/v5"
 //	)
 //

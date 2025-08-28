@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // WithHeaders wraps a response with custom HTTP headers.

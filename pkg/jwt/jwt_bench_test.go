@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/jwt"
+	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
 // BenchmarkGenerate benchmarks JWT token generation

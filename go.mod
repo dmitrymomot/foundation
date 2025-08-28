@@ -1,4 +1,4 @@
-module github.com/dmitrymomot/gokit
+module github.com/dmitrymomot/foundation
 
 go 1.24
 

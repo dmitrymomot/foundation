@@ -3,9 +3,9 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/response"
-	"github.com/dmitrymomot/gokit/pkg/clientip"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/response"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
 )
 
 // clientIPContextKey is used as a key for storing client IP in request context.

@@ -19,7 +19,7 @@
 //
 // Clean and normalize string inputs:
 //
-//	import "github.com/dmitrymomot/gokit/core/sanitizer"
+//	import "github.com/dmitrymomot/foundation/core/sanitizer"
 //
 //	// Basic string cleaning
 //	clean := sanitizer.String(userInput)

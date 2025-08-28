@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/queue"
+	"github.com/dmitrymomot/foundation/core/queue"
 )
 
 // Example_oneTimeTask demonstrates enqueueing and processing a one-time task

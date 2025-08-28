@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/logger"
+	"github.com/dmitrymomot/foundation/core/logger"
 )
 
 func TestGroup(t *testing.T) {

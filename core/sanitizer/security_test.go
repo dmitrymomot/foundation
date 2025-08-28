@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/core/sanitizer"
+	"github.com/dmitrymomot/foundation/core/sanitizer"
 )
 
 func TestEscapeHTML(t *testing.T) {

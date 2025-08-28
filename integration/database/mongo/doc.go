@@ -42,7 +42,7 @@
 //		"log"
 //		"time"
 //
-//		"github.com/dmitrymomot/gokit/integration/database/mongo"
+//		"github.com/dmitrymomot/foundation/integration/database/mongo"
 //		"go.mongodb.org/mongo-driver/v2/bson"
 //	)
 //

@@ -17,7 +17,7 @@
 //
 // Create a queue system with enqueuer, worker, and scheduler:
 //
-//	import "github.com/dmitrymomot/gokit/core/queue"
+//	import "github.com/dmitrymomot/foundation/core/queue"
 //
 //	// Create storage (in-memory for development)
 //	storage := queue.NewMemoryStorage()

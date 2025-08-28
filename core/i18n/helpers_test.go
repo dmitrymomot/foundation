@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/core/i18n"
+	"github.com/dmitrymomot/foundation/core/i18n"
 	"github.com/stretchr/testify/assert"
 )
 

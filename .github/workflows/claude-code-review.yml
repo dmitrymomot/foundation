@@ -50,7 +50,7 @@ jobs:
             - API design and usability
             - Documentation completeness
             
-            Focus on the gokit framework's design principles:
+            Focus on the foundation framework's design principles:
             - Keep the API simple and intuitive
             - Follow Go conventions
             - Ensure type safety with generics

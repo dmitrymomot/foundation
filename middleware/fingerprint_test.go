@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/router"
-	"github.com/dmitrymomot/gokit/middleware"
-	"github.com/dmitrymomot/gokit/pkg/fingerprint"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/router"
+	"github.com/dmitrymomot/foundation/middleware"
+	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
 
 func TestFingerprintDefaultConfiguration(t *testing.T) {

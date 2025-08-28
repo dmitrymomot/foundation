@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/feature"
+	"github.com/dmitrymomot/foundation/pkg/feature"
 )
 
 func TestMemoryProvider(t *testing.T) {

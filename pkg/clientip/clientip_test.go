@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/pkg/clientip"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
 )
 
 func TestGetIP(t *testing.T) {

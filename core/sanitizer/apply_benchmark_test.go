@@ -3,7 +3,7 @@ package sanitizer_test
 import (
 	"testing"
 
-	"github.com/dmitrymomot/gokit/core/sanitizer"
+	"github.com/dmitrymomot/foundation/core/sanitizer"
 )
 
 func BenchmarkApply(b *testing.B) {

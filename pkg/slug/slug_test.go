@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/dmitrymomot/gokit/pkg/slug"
+	"github.com/dmitrymomot/foundation/pkg/slug"
 )
 
 func TestMake(t *testing.T) {

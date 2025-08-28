@@ -6,8 +6,8 @@ import (
 	"mime"
 	"strconv"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/response"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/response"
 )
 
 // BodyLimitConfig configures the request body limit middleware.

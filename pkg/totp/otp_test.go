@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/pkg/totp"
+	"github.com/dmitrymomot/foundation/pkg/totp"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

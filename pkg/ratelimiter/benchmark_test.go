@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/pkg/ratelimiter"
+	"github.com/dmitrymomot/foundation/pkg/ratelimiter"
 )
 
 // BenchmarkBucket_Allow benchmarks single token consumption

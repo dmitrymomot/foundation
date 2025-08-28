@@ -3,8 +3,8 @@ package middleware
 import (
 	"context"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/i18n"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/i18n"
 )
 
 // i18nTranslatorContextKey is used as a key for storing i18n translator in request context.

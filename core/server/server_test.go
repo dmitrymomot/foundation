@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/server"
+	"github.com/dmitrymomot/foundation/core/server"
 )
 
 // testHandler creates a simple test handler

@@ -17,7 +17,7 @@
 // The package provides four main binding functions that can be used individually
 // or combined in a middleware chain:
 //
-//	import "github.com/dmitrymomot/gokit/core/binder"
+//	import "github.com/dmitrymomot/foundation/core/binder"
 //
 //	// JSON binding
 //	jsonBinder := binder.JSON()

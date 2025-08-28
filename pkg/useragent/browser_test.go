@@ -3,7 +3,7 @@ package useragent_test
 import (
 	"testing"
 
-	"github.com/dmitrymomot/gokit/pkg/useragent"
+	"github.com/dmitrymomot/foundation/pkg/useragent"
 
 	"github.com/stretchr/testify/assert"
 )

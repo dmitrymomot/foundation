@@ -18,7 +18,7 @@
 //
 // Create a session manager with custom data type:
 //
-//	import "github.com/dmitrymomot/gokit/core/session"
+//	import "github.com/dmitrymomot/foundation/core/session"
 //
 //	type UserData struct {
 //		Theme    string `json:"theme"`

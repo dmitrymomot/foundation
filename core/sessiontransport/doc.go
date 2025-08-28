@@ -12,8 +12,8 @@
 // Basic cookie transport usage:
 //
 //	import (
-//		"github.com/dmitrymomot/gokit/core/cookie"
-//		"github.com/dmitrymomot/gokit/core/sessiontransport"
+//		"github.com/dmitrymomot/foundation/core/cookie"
+//		"github.com/dmitrymomot/foundation/core/sessiontransport"
 //	)
 //
 //	func main() {
@@ -43,7 +43,7 @@
 //
 // Basic JWT transport usage:
 //
-//	import "github.com/dmitrymomot/gokit/core/sessiontransport"
+//	import "github.com/dmitrymomot/foundation/core/sessiontransport"
 //
 //	func main() {
 //		// Create JWT transport without revocation

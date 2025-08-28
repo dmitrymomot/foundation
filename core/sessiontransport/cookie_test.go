@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/cookie"
-	"github.com/dmitrymomot/gokit/core/session"
-	"github.com/dmitrymomot/gokit/core/sessiontransport"
+	"github.com/dmitrymomot/foundation/core/cookie"
+	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

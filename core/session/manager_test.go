@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/session"
+	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"

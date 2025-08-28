@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/dmitrymomot/gokit/core/email"
+	"github.com/dmitrymomot/foundation/core/email"
 )
 
 // MockEmailSender is a mock implementation of EmailSender for testing

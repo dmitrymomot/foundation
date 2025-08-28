@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // templComponent interface for templ components that can be rendered.

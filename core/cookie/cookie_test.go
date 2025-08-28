@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/cookie"
+	"github.com/dmitrymomot/foundation/core/cookie"
 )
 
 const testSecret = "test-secret-key-32-characters!!!"

@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/queue"
+	"github.com/dmitrymomot/foundation/core/queue"
 )
 
 // Mock repository for scheduler tests

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/pkg/fingerprint"
+	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
 
 func TestGenerate(t *testing.T) {

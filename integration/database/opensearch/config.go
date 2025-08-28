@@ -1,7 +1,7 @@
 package opensearch
 
 // Config holds OpenSearch client connection parameters with environment variable mapping.
-// Uses struct tags compatible with github.com/dmitrymomot/gokit/core/config for
+// Uses struct tags compatible with github.com/dmitrymomot/foundation/core/config for
 // zero-config environment-based initialization.
 type Config struct {
 	Addresses    []string `env:"OPENSEARCH_ADDRESSES,required"`

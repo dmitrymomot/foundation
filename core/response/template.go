@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // executeTemplate runs the template with the appropriate method.

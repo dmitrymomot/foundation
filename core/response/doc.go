@@ -19,7 +19,7 @@
 //
 // The package provides functions that return handler.Response for use in HTTP handlers:
 //
-//	import "github.com/dmitrymomot/gokit/core/response"
+//	import "github.com/dmitrymomot/foundation/core/response"
 //
 //	// JSON responses
 //	func getUserHandler(ctx handler.Context) handler.Response {

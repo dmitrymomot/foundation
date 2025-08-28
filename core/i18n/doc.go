@@ -10,7 +10,7 @@
 //
 // Create an I18n instance with translations and retrieve localized text:
 //
-//	import "github.com/dmitrymomot/gokit/core/i18n"
+//	import "github.com/dmitrymomot/foundation/core/i18n"
 //
 //	// Create I18n instance with English and Spanish translations
 //	i18nInstance, err := i18n.New(

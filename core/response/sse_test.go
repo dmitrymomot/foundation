@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/response"
+	"github.com/dmitrymomot/foundation/core/response"
 )
 
 // Tests for SSE Protocol Format Validation

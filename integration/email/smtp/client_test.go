@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/email"
-	"github.com/dmitrymomot/gokit/integration/email/smtp"
+	"github.com/dmitrymomot/foundation/core/email"
+	"github.com/dmitrymomot/foundation/integration/email/smtp"
 )
 
 func TestNewClient_Validation(t *testing.T) {

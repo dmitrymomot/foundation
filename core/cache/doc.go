@@ -17,7 +17,7 @@
 // The primary cache implementation is LRUCache, which provides automatic eviction
 // of the least recently used items when capacity is reached:
 //
-//	import "github.com/dmitrymomot/gokit/core/cache"
+//	import "github.com/dmitrymomot/foundation/core/cache"
 //
 //	// Create a cache with capacity of 100 items
 //	c := cache.NewLRUCache[string, *User](100)

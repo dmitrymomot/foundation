@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/response"
-	"github.com/dmitrymomot/gokit/pkg/jwt"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/response"
+	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
 // jwtClaimsContextKey is used as a key for storing JWT claims in request context.

@@ -37,7 +37,7 @@
 //		"log"
 //		"strings"
 //
-//		"github.com/dmitrymomot/gokit/integration/database/opensearch"
+//		"github.com/dmitrymomot/foundation/integration/database/opensearch"
 //		"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 //	)
 //

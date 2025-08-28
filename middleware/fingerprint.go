@@ -3,9 +3,9 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/response"
-	"github.com/dmitrymomot/gokit/pkg/fingerprint"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/response"
+	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
 
 // fingerprintContextKey is used as a key for storing device fingerprint in request context.

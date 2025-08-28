@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Every package has comprehensive documentation accessible via `go doc`:**
 
 ```bash
-go doc github.com/dmitrymomot/gokit/core/session
-go doc github.com/dmitrymomot/gokit/middleware
-go doc -all github.com/dmitrymomot/gokit/core/binder  # Full docs
+go doc github.com/dmitrymomot/foundation/core/session
+go doc github.com/dmitrymomot/foundation/middleware
+go doc -all github.com/dmitrymomot/foundation/core/binder  # Full docs
 ```
 
 Each package contains a `doc.go` file with detailed usage examples and robust inline comments.
@@ -25,7 +25,7 @@ go test -run TestName ./path/to/package
 
 # Format and check
 go fmt ./...
-goimports -w -local github.com/dmitrymomot/gokit .
+goimports -w -local github.com/dmitrymomot/foundation .
 go vet ./...
 ```
 

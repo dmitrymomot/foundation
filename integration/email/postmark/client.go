@@ -8,7 +8,7 @@ import (
 
 	"github.com/mrz1836/postmark"
 
-	"github.com/dmitrymomot/gokit/core/email"
+	"github.com/dmitrymomot/foundation/core/email"
 )
 
 // Client implements the EmailSender interface using Postmark's transactional email API.

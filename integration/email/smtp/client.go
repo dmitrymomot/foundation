@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/email"
+	"github.com/dmitrymomot/foundation/core/email"
 )
 
 // Client implements the EmailSender interface using standard SMTP protocol.

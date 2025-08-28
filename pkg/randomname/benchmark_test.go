@@ -3,7 +3,7 @@ package randomname_test
 import (
 	"testing"
 
-	"github.com/dmitrymomot/gokit/pkg/randomname"
+	"github.com/dmitrymomot/foundation/pkg/randomname"
 )
 
 func BenchmarkGenerate(b *testing.B) {

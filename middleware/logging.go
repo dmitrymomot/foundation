@@ -53,8 +53,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/handler"
-	"github.com/dmitrymomot/gokit/core/logger"
+	"github.com/dmitrymomot/foundation/core/handler"
+	"github.com/dmitrymomot/foundation/core/logger"
 )
 
 // LoggingConfig configures the request/response logging middleware.

@@ -8,7 +8,7 @@ import (
 
 	"log/slog"
 
-	"github.com/dmitrymomot/gokit/core/logger"
+	"github.com/dmitrymomot/foundation/core/logger"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

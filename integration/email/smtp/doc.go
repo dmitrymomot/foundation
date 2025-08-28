@@ -40,8 +40,8 @@
 //		"context"
 //		"log"
 //
-//		"github.com/dmitrymomot/gokit/core/email"
-//		"github.com/dmitrymomot/gokit/integration/email/smtp"
+//		"github.com/dmitrymomot/foundation/core/email"
+//		"github.com/dmitrymomot/foundation/integration/email/smtp"
 //	)
 //
 //	func main() {

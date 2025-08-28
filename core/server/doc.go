@@ -18,7 +18,7 @@
 //
 // Create and start an HTTP server with default configuration:
 //
-//	import "github.com/dmitrymomot/gokit/core/server"
+//	import "github.com/dmitrymomot/foundation/core/server"
 //
 //	// Create server with router
 //	srv := server.New(

@@ -17,8 +17,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/storage"
-	"github.com/dmitrymomot/gokit/integration/storage/s3"
+	"github.com/dmitrymomot/foundation/core/storage"
+	"github.com/dmitrymomot/foundation/integration/storage/s3"
 )
 
 // MockS3Client is a mock implementation of the S3Client interface

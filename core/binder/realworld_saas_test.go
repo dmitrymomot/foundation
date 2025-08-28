@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/binder"
+	"github.com/dmitrymomot/foundation/core/binder"
 )
 
 func TestRealWorldSaaSQueryScenarios(t *testing.T) {

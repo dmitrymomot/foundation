@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/cookie"
-	"github.com/dmitrymomot/gokit/core/session"
+	"github.com/dmitrymomot/foundation/core/cookie"
+	"github.com/dmitrymomot/foundation/core/session"
 )
 
 // CookieTransport implements session.Transport using encrypted cookies.

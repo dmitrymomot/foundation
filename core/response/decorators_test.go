@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/response"
+	"github.com/dmitrymomot/foundation/core/response"
 )
 
 func TestWithHeaders(t *testing.T) {

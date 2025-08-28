@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitrymomot/gokit/pkg/useragent"
+	"github.com/dmitrymomot/foundation/pkg/useragent"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

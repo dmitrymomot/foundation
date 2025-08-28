@@ -3,7 +3,7 @@ package router
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // Router is the main routing interface for handling HTTP requests.

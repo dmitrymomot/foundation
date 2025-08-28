@@ -23,7 +23,7 @@
 //
 // Validate structs using tags:
 //
-//	import "github.com/dmitrymomot/gokit/core/validator"
+//	import "github.com/dmitrymomot/foundation/core/validator"
 //
 //	type User struct {
 //		Name  string `validate:"required,min=2,max=50"`

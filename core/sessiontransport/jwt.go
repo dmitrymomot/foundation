@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/session"
-	"github.com/dmitrymomot/gokit/pkg/jwt"
+	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
 // JWTTransport implements session.Transport using JWT tokens.

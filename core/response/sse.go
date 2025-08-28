@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // DefaultSSEKeepAlive is the default keep-alive interval for SSE connections.

@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/gokit/core/storage"
+	"github.com/dmitrymomot/foundation/core/storage"
 )
 
 func createFileHeader(filename string, content []byte) *multipart.FileHeader {

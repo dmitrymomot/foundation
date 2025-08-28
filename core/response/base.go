@@ -3,7 +3,7 @@ package response
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 // Render executes the given response handler with the provided context.

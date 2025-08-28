@@ -3,7 +3,7 @@ package feature
 import "context"
 
 // Unexported context key types for type-safe context values.
-// These follow the gokit middleware pattern of using empty structs
+// These follow the foundation middleware pattern of using empty structs
 // as context keys to prevent collisions and ensure type safety.
 
 type userIDCtxKey struct{}

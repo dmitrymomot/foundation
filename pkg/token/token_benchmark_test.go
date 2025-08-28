@@ -3,7 +3,7 @@ package token_test
 import (
 	"testing"
 
-	"github.com/dmitrymomot/gokit/pkg/token"
+	"github.com/dmitrymomot/foundation/pkg/token"
 )
 
 func BenchmarkGenerateToken(b *testing.B) {

@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/dmitrymomot/gokit/core/handler"
+	"github.com/dmitrymomot/foundation/core/handler"
 )
 
 type methodTyp uint
