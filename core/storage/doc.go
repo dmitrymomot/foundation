@@ -1,286 +1,179 @@
-// Package storage provides file storage abstraction with support for local filesystem
-// and cloud storage backends. It offers a unified interface for file operations
-// including upload, download, deletion, and metadata management across different
-// storage providers.
-//
-// # Features
-//
-//   - Unified interface for different storage backends
-//   - Local filesystem storage for development
-//   - Cloud storage support (extensible)
-//   - File metadata management
-//   - Path-based file organization
-//   - Error handling with detailed error types
-//   - Stream-based operations for large files
-//   - Configurable storage options
+// Package storage provides local filesystem storage for handling multipart file uploads
+// with security features including path traversal protection, MIME type validation,
+// and file type checking. Designed for web applications that need secure file storage.
 //
 // # Basic Usage
 //
-// Use the storage interface for file operations:
+// Create storage and save files from multipart uploads:
 //
-//	import "github.com/dmitrymomot/foundation/core/storage"
+//	import (
+//		"context"
+//		"log"
+//		"net/http"
 //
-//	// Create local storage
-//	store := storage.NewLocalStorage("./uploads")
-//
-//	// Upload file
-//	file, err := os.Open("document.pdf")
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//	defer file.Close()
-//
-//	err = store.Put("documents/doc1.pdf", file)
-//	if err != nil {
-//		log.Fatal("Upload failed:", err)
-//	}
-//
-//	// Download file
-//	reader, err := store.Get("documents/doc1.pdf")
-//	if err != nil {
-//		log.Fatal("Download failed:", err)
-//	}
-//	defer reader.Close()
-//
-//	// Copy to destination
-//	output, err := os.Create("downloaded.pdf")
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//	defer output.Close()
-//
-//	_, err = io.Copy(output, reader)
-//	if err != nil {
-//		log.Fatal("Copy failed:", err)
-//	}
-//
-// # Local Storage
-//
-// Configure local filesystem storage:
-//
-//	// Basic local storage
-//	store := storage.NewLocalStorage("/var/uploads")
-//
-//	// Local storage with options
-//	store := storage.NewLocalStorage("/var/uploads",
-//		storage.WithPermissions(0755),
-//		storage.WithCreateDirs(true),
+//		"github.com/dmitrymomot/foundation/core/storage"
 //	)
 //
-// # File Operations
-//
-// Perform various file operations:
-//
-//	// Check if file exists
-//	exists, err := store.Exists("path/to/file.txt")
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//
-//	if exists {
-//		// Get file info
-//		info, err := store.Stat("path/to/file.txt")
+//	func uploadHandler(w http.ResponseWriter, r *http.Request) {
+//		// Create local storage
+//		store, err := storage.New("/var/uploads", "/files/")
 //		if err != nil {
 //			log.Fatal(err)
 //		}
-//		fmt.Printf("File size: %d bytes\n", info.Size)
-//		fmt.Printf("Modified: %v\n", info.ModTime)
+//
+//		// Parse multipart form
+//		fh, err := r.FormFile("file")
+//		if err != nil {
+//			http.Error(w, "Failed to get file", http.StatusBadRequest)
+//			return
+//		}
+//		defer fh.Close()
+//
+//		// Validate file (optional)
+//		if err := storage.ValidateSize(fh, 5<<20); err != nil { // 5MB limit
+//			http.Error(w, "File too large", http.StatusBadRequest)
+//			return
+//		}
+//
+//		// Save file
+//		file, err := store.Save(r.Context(), fh, "uploads/document.pdf")
+//		if err != nil {
+//			log.Printf("Save error: %v", err)
+//			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+//			return
+//		}
+//
+//		// File saved successfully
+//		log.Printf("Saved %s (%d bytes) to %s",
+//			file.Filename, file.Size, file.RelativePath)
 //	}
 //
-//	// Delete file
-//	err = store.Delete("path/to/file.txt")
+// # Storage Operations
+//
+// The Storage interface provides file management operations:
+//
+//	store, _ := storage.New("/uploads", "/files/")
+//	ctx := context.Background()
+//
+//	// Check if file exists
+//	if store.Exists(ctx, "documents/report.pdf") {
+//		log.Println("File exists")
+//	}
+//
+//	// List directory contents
+//	entries, err := store.List(ctx, "documents/")
 //	if err != nil {
-//		log.Fatal("Delete failed:", err)
+//		log.Fatal(err)
 //	}
-//
-//	// List files in directory
-//	files, err := store.List("documents/")
-//	if err != nil {
-//		log.Fatal("List failed:", err)
-//	}
-//
-//	for _, file := range files {
-//		fmt.Printf("File: %s, Size: %d\n", file.Name, file.Size)
-//	}
-//
-// # File Upload Handler
-//
-// Create HTTP handler for file uploads:
-//
-//	func uploadHandler(store storage.Storage) http.HandlerFunc {
-//		return func(w http.ResponseWriter, r *http.Request) {
-//			file, header, err := r.FormFile("file")
-//			if err != nil {
-//				http.Error(w, "Failed to get file", http.StatusBadRequest)
-//				return
-//			}
-//			defer file.Close()
-//
-//			// Validate file type
-//			contentType := header.Header.Get("Content-Type")
-//			if !isAllowedContentType(contentType) {
-//				http.Error(w, "File type not allowed", http.StatusBadRequest)
-//				return
-//			}
-//
-//			// Generate unique filename
-//			filename := generateUniqueFilename(header.Filename)
-//			path := fmt.Sprintf("uploads/%s", filename)
-//
-//			// Store file
-//			err = store.Put(path, file)
-//			if err != nil {
-//				log.Printf("Storage error: %v", err)
-//				http.Error(w, "Failed to store file", http.StatusInternalServerError)
-//				return
-//			}
-//
-//			// Return success response
-//			response := map[string]string{
-//				"message": "File uploaded successfully",
-//				"path":    path,
-//			}
-//			w.Header().Set("Content-Type", "application/json")
-//			json.NewEncoder(w).Encode(response)
+//	for _, entry := range entries {
+//		if entry.IsDir {
+//			log.Printf("Directory: %s", entry.Name)
+//		} else {
+//			log.Printf("File: %s (%d bytes)", entry.Name, entry.Size)
 //		}
 //	}
 //
-// # File Download Handler
+//	// Delete a file
+//	err = store.Delete(ctx, "documents/old.pdf")
+//	if err != nil {
+//		log.Printf("Delete failed: %v", err)
+//	}
 //
-// Create HTTP handler for file downloads:
+//	// Delete entire directory
+//	err = store.DeleteDir(ctx, "temp/")
+//	if err != nil {
+//		log.Printf("DeleteDir failed: %v", err)
+//	}
 //
-//	func downloadHandler(store storage.Storage) http.HandlerFunc {
-//		return func(w http.ResponseWriter, r *http.Request) {
-//			path := r.URL.Query().Get("path")
-//			if path == "" {
-//				http.Error(w, "Path required", http.StatusBadRequest)
-//				return
-//			}
+//	// Get public URL for file
+//	url := store.URL("documents/report.pdf")
+//	log.Printf("File URL: %s", url) // "/files/documents/report.pdf"
 //
-//			// Check if file exists
-//			exists, err := store.Exists(path)
-//			if err != nil {
-//				log.Printf("Storage error: %v", err)
-//				http.Error(w, "Storage error", http.StatusInternalServerError)
-//				return
-//			}
+// # File Type Validation
 //
-//			if !exists {
-//				http.Error(w, "File not found", http.StatusNotFound)
-//				return
-//			}
+// Built-in functions for validating uploaded files:
 //
-//			// Get file info
-//			info, err := store.Stat(path)
-//			if err != nil {
-//				log.Printf("Stat error: %v", err)
-//				http.Error(w, "File info error", http.StatusInternalServerError)
-//				return
-//			}
+//	// Check file types
+//	if storage.IsImage(fh) {
+//		log.Println("Image file detected")
+//	}
+//	if storage.IsVideo(fh) {
+//		log.Println("Video file detected")
+//	}
+//	if storage.IsPDF(fh) {
+//		log.Println("PDF file detected")
+//	}
 //
-//			// Get file reader
-//			reader, err := store.Get(path)
-//			if err != nil {
-//				log.Printf("Get error: %v", err)
-//				http.Error(w, "Failed to get file", http.StatusInternalServerError)
-//				return
-//			}
-//			defer reader.Close()
+//	// Validate MIME types (prevents spoofing)
+//	err := storage.ValidateMIMEType(fh, "image/jpeg", "image/png")
+//	if err != nil {
+//		log.Printf("Invalid file type: %v", err)
+//		return
+//	}
 //
-//			// Set headers
-//			filename := filepath.Base(path)
-//			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
-//			w.Header().Set("Content-Type", getContentType(filename))
-//			w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size))
+//	// Get file extension and MIME type
+//	ext := storage.GetExtension(fh)           // ".jpg"
+//	mimeType, _ := storage.GetMIMEType(fh)    // "image/jpeg"
 //
-//			// Stream file
-//			_, err = io.Copy(w, reader)
-//			if err != nil {
-//				log.Printf("Stream error: %v", err)
-//			}
-//		}
+// # File Processing
+//
+// Additional utilities for file handling:
+//
+//	// Read entire file content (use cautiously with large files)
+//	data, err := storage.ReadAll(fh)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	// Calculate file hash for integrity/deduplication
+//	hash, err := storage.Hash(fh, nil) // Uses SHA256 by default
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	log.Printf("File hash: %s", hash)
+//
+//	// Sanitize filename to prevent path traversal attacks
+//	safe := storage.SanitizeFilename("../../../etc/passwd") // Returns "passwd"
+//
+// # Configuration Options
+//
+// Configure storage with options:
+//
+//	store, err := storage.New("/uploads", "/files/",
+//		storage.WithLocalUploadTimeout(30*time.Second),
+//	)
+//	if err != nil {
+//		log.Fatal(err)
 //	}
 //
 // # Error Handling
 //
-// Handle storage-specific errors:
+// Handle specific storage errors:
 //
-//	err := store.Put("path/to/file", reader)
+//	file, err := store.Save(ctx, fh, "documents/file.pdf")
 //	if err != nil {
 //		switch {
 //		case errors.Is(err, storage.ErrFileNotFound):
-//			// Handle file not found
-//		case errors.Is(err, storage.ErrPermissionDenied):
-//			// Handle permission error
-//		case errors.Is(err, storage.ErrInsufficientSpace):
-//			// Handle disk space error
+//			log.Println("File not found")
+//		case errors.Is(err, storage.ErrInvalidPath):
+//			log.Println("Invalid file path (possible attack)")
+//		case errors.Is(err, storage.ErrFileTooLarge):
+//			log.Println("File exceeds size limit")
+//		case errors.Is(err, storage.ErrMIMETypeNotAllowed):
+//			log.Println("File type not allowed")
 //		default:
-//			// Handle other errors
+//			log.Printf("Storage error: %v", err)
 //		}
 //	}
 //
-// # Custom Storage Backend
+// # Security Features
 //
-// Implement custom storage backend:
+// The package includes built-in security protections:
 //
-//	type S3Storage struct {
-//		client *s3.Client
-//		bucket string
-//	}
-//
-//	func (s *S3Storage) Put(path string, reader io.Reader) error {
-//		_, err := s.client.PutObject(context.Background(), &s3.PutObjectInput{
-//			Bucket: &s.bucket,
-//			Key:    &path,
-//			Body:   reader,
-//		})
-//		return err
-//	}
-//
-//	func (s *S3Storage) Get(path string) (io.ReadCloser, error) {
-//		result, err := s.client.GetObject(context.Background(), &s3.GetObjectInput{
-//			Bucket: &s.bucket,
-//			Key:    &path,
-//		})
-//		if err != nil {
-//			return nil, err
-//		}
-//		return result.Body, nil
-//	}
-//
-//	func (s *S3Storage) Delete(path string) error {
-//		_, err := s.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
-//			Bucket: &s.bucket,
-//			Key:    &path,
-//		})
-//		return err
-//	}
-//
-//	func (s *S3Storage) Exists(path string) (bool, error) {
-//		_, err := s.client.HeadObject(context.Background(), &s3.HeadObjectInput{
-//			Bucket: &s.bucket,
-//			Key:    &path,
-//		})
-//		if err != nil {
-//			var notFound *types.NotFound
-//			if errors.As(err, &notFound) {
-//				return false, nil
-//			}
-//			return false, err
-//		}
-//		return true, nil
-//	}
-//
-// # Best Practices
-//
-//   - Validate file types and sizes before storage
-//   - Use unique filenames to prevent conflicts
-//   - Implement proper error handling for storage operations
-//   - Set appropriate file permissions for security
-//   - Clean up temporary files after processing
-//   - Monitor storage usage and implement quotas
-//   - Use streaming for large file operations
-//   - Implement backup and recovery procedures
-//   - Log storage operations for auditing
-//   - Consider using CDN for public file access
+//   - Path traversal prevention (automatically blocks ../ attacks)
+//   - MIME type detection based on file content (not just extensions)
+//   - Filename sanitization to remove dangerous characters
+//   - File size validation to prevent DoS attacks
+//   - Context cancellation support for timeouts
+//   - Restrictive file permissions (644 for files, 755 for directories)
 package storage

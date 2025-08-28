@@ -1,213 +1,166 @@
-// Package server provides HTTP server configuration and lifecycle management
-// with graceful shutdown, middleware support, and comprehensive options for
-// production deployment. It wraps the standard http.Server with enhanced
-// functionality for robust web applications.
+// Package server provides a robust HTTP server implementation with graceful shutdown,
+// configurable options, and production-ready defaults. It wraps the standard http.Server
+// with enhanced functionality for reliable web applications.
 //
-// # Features
+// # Key Features
 //
-//   - Graceful shutdown with proper cleanup
-//   - Configurable timeouts and limits
-//   - TLS support with automatic certificate management
-//   - Middleware integration
-//   - Health check endpoints
-//   - Request logging and metrics
-//   - Signal handling for clean shutdown
-//   - Development and production configurations
+//   - Graceful shutdown with configurable timeout
+//   - TLS/HTTPS support with custom configuration
+//   - Thread-safe concurrent access protection
+//   - Structured logging integration
+//   - Production-ready default timeouts
+//   - Simple configuration via functional options
 //
 // # Basic Usage
 //
-// Create and start an HTTP server with default configuration:
+// Create and run a server with default configuration:
 //
-//	import "github.com/dmitrymomot/foundation/core/server"
-//
-//	// Create server with router
-//	srv := server.New(
-//		server.WithAddress(":8080"),
-//		server.WithHandler(router),
-//		server.WithReadTimeout(30*time.Second),
-//		server.WithWriteTimeout(30*time.Second),
+//	import (
+//		"context"
+//		"net/http"
+//		"github.com/dmitrymomot/foundation/core/server"
 //	)
 //
-//	// Start server
-//	if err := srv.ListenAndServe(); err != nil {
-//		log.Fatal("Server failed:", err)
+//	func main() {
+//		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//			w.Write([]byte("Hello, World!"))
+//		})
+//
+//		ctx := context.Background()
+//		if err := server.Run(ctx, ":8080", handler); err != nil {
+//			log.Fatal(err)
+//		}
 //	}
 //
 // # Server Configuration
 //
-// Configure server with various options:
+// Configure server with custom options:
 //
-//	srv := server.New(
-//		server.WithAddress("0.0.0.0:8080"),
-//		server.WithReadTimeout(15*time.Second),
-//		server.WithWriteTimeout(15*time.Second),
-//		server.WithIdleTimeout(60*time.Second),
-//		server.WithMaxHeaderBytes(1<<20), // 1MB
-//		server.WithHandler(myRouter),
+//	srv := server.New(":8080",
+//		server.WithShutdownTimeout(60*time.Second),
+//		server.WithLogger(slog.New(slog.NewJSONHandler(os.Stdout, nil))),
 //	)
 //
-// # TLS Configuration
+//	ctx := context.Background()
+//	if err := srv.Run(ctx, handler); err != nil {
+//		log.Fatal(err)
+//	}
 //
-// Enable HTTPS with TLS:
+// # TLS/HTTPS Configuration
 //
-//	// Basic TLS
-//	srv := server.New(
-//		server.WithAddress(":8443"),
-//		server.WithTLS("cert.pem", "key.pem"),
-//		server.WithHandler(router),
-//	)
+// Enable HTTPS with custom TLS configuration:
 //
-//	// TLS with custom config
 //	tlsConfig := &tls.Config{
 //		MinVersion: tls.VersionTLS12,
 //		CipherSuites: []uint16{
 //			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-//			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+//			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
 //		},
 //	}
 //
-//	srv := server.New(
-//		server.WithAddress(":8443"),
-//		server.WithTLSConfig(tlsConfig),
-//		server.WithHandler(router),
+//	srv := server.New(":8443",
+//		server.WithTLS(tlsConfig),
+//		server.WithLogger(logger),
 //	)
+//
+//	if err := srv.Run(ctx, handler); err != nil {
+//		log.Fatal(err)
+//	}
 //
 // # Graceful Shutdown
 //
 // Handle graceful shutdown with signal management:
 //
 //	func main() {
-//		srv := server.New(
-//			server.WithAddress(":8080"),
-//			server.WithHandler(router),
-//		)
+//		srv := server.New(":8080")
 //
-//		// Start server in background
+//		// Create cancellable context
+//		ctx, cancel := context.WithCancel(context.Background())
+//
+//		// Handle shutdown signals
+//		sigCh := make(chan os.Signal, 1)
+//		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+//
 //		go func() {
-//			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-//				log.Fatal("Server failed:", err)
-//			}
+//			<-sigCh
+//			log.Println("Shutdown signal received")
+//			cancel() // Triggers graceful shutdown
 //		}()
 //
-//		// Wait for shutdown signal
-//		quit := make(chan os.Signal, 1)
-//		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-//		<-quit
-//
-//		log.Println("Shutting down server...")
-//
-//		// Graceful shutdown with timeout
-//		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-//		defer cancel()
-//
-//		if err := srv.Shutdown(ctx); err != nil {
-//			log.Fatal("Server shutdown failed:", err)
+//		// Run server - blocks until context is canceled
+//		if err := srv.Run(ctx, handler); err != nil {
+//			log.Printf("Server error: %v", err)
 //		}
 //
-//		log.Println("Server stopped")
-//	}
-//
-// # Health Checks
-//
-// Add health check endpoints:
-//
-//	srv := server.New(
-//		server.WithAddress(":8080"),
-//		server.WithHandler(router),
-//		server.WithHealthCheck("/health", healthCheckHandler),
-//	)
-//
-//	func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-//		health := map[string]string{
-//			"status":    "ok",
-//			"timestamp": time.Now().Format(time.RFC3339),
-//			"version":   "1.0.0",
-//		}
-//
-//		w.Header().Set("Content-Type", "application/json")
-//		json.NewEncoder(w).Encode(health)
-//	}
-//
-// # Middleware Integration
-//
-// Add middleware for logging, CORS, etc.:
-//
-//	srv := server.New(
-//		server.WithAddress(":8080"),
-//		server.WithHandler(router),
-//		server.WithMiddleware(
-//			loggingMiddleware,
-//			corsMiddleware,
-//			authMiddleware,
-//		),
-//	)
-//
-//	func loggingMiddleware(next http.Handler) http.Handler {
-//		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//			start := time.Now()
-//			next.ServeHTTP(w, r)
-//			log.Printf("%s %s - %v", r.Method, r.URL.Path, time.Since(start))
-//		})
+//		log.Println("Server shutdown complete")
 //	}
 //
 // # Production Configuration
 //
-// Configure server for production deployment:
+// Example production server configuration:
 //
-//	srv := server.New(
-//		server.WithAddress(":8080"),
-//		server.WithHandler(router),
-//		server.WithReadTimeout(10*time.Second),
-//		server.WithWriteTimeout(10*time.Second),
-//		server.WithIdleTimeout(120*time.Second),
-//		server.WithMaxHeaderBytes(1<<20),
-//		server.WithTLS("cert.pem", "key.pem"),
-//		server.WithMiddleware(
-//			securityHeadersMiddleware,
-//			rateLimitMiddleware,
-//			loggingMiddleware,
-//		),
+//	import (
+//		"crypto/tls"
+//		"log/slog"
+//		"os"
+//		"time"
 //	)
 //
-// # Development Configuration
+//	func main() {
+//		// Production logger
+//		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+//			Level: slog.LevelInfo,
+//		}))
 //
-// Configure server for development:
+//		// TLS configuration
+//		tlsConfig := &tls.Config{
+//			MinVersion:               tls.VersionTLS12,
+//			PreferServerCipherSuites: true,
+//		}
 //
-//	srv := server.New(
-//		server.WithAddress("localhost:8080"),
-//		server.WithHandler(router),
-//		server.WithReadTimeout(30*time.Second),
-//		server.WithWriteTimeout(30*time.Second),
-//		server.WithMiddleware(
-//			corsMiddleware,
-//			debugMiddleware,
-//		),
-//	)
+//		srv := server.New(":8443",
+//			server.WithTLS(tlsConfig),
+//			server.WithLogger(logger),
+//			server.WithShutdownTimeout(30*time.Second),
+//		)
 //
-// # Custom Error Handling
+//		ctx, cancel := context.WithCancel(context.Background())
+//		defer cancel()
 //
-// Handle server errors:
+//		// Setup signal handling for graceful shutdown
+//		setupGracefulShutdown(cancel)
 //
-//	srv := server.New(
-//		server.WithAddress(":8080"),
-//		server.WithHandler(router),
-//		server.WithErrorHandler(func(err error) {
-//			log.Printf("Server error: %v", err)
-//			// Send to error tracking service
-//			errorTracker.Report(err)
-//		}),
-//	)
+//		if err := srv.Run(ctx, myHandler); err != nil {
+//			logger.Error("Server failed", "error", err)
+//			os.Exit(1)
+//		}
+//	}
 //
-// # Best Practices
+// # Server Defaults
 //
-//   - Set appropriate timeouts for your use case
-//   - Use TLS for production deployments
-//   - Implement proper graceful shutdown
-//   - Add health check endpoints for monitoring
-//   - Use middleware for cross-cutting concerns
-//   - Configure limits to prevent resource exhaustion
-//   - Log server events for debugging and monitoring
-//   - Handle signals for clean shutdown
-//   - Test server configuration under load
-//   - Monitor server metrics in production
+// The server includes production-ready defaults:
+//
+//   - ReadTimeout: 15 seconds
+//   - WriteTimeout: 15 seconds
+//   - IdleTimeout: 60 seconds
+//   - MaxHeaderBytes: http.DefaultMaxHeaderBytes (1MB)
+//   - Graceful shutdown timeout: 30 seconds
+//   - Logger: slog.Default()
+//
+// # Thread Safety
+//
+// The Server type is safe for concurrent use. All methods properly synchronize
+// access to internal state using read-write mutexes.
+//
+// # Error Handling
+//
+// The server handles various error conditions:
+//
+//   - Port already in use
+//   - Invalid addresses
+//   - TLS certificate errors
+//   - Graceful shutdown timeouts
+//   - Multiple Run() calls on the same server instance
+//
+// All errors are properly logged and returned to the caller for handling.
 package server

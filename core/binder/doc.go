@@ -15,7 +15,7 @@
 // # Usage
 //
 // The package provides four main binding functions that can be used individually
-// or combined in a middleware chain:
+// or combined:
 //
 //	import "github.com/dmitrymomot/foundation/core/binder"
 //
@@ -33,8 +33,8 @@
 //
 // # JSON Binding
 //
-// JSON binding supports automatic parsing of request bodies with Content-Type validation,
-// size limits, and strict parsing to prevent malformed data:
+// JSON binding parses request bodies with Content-Type validation, size limits,
+// and strict parsing to prevent malformed data:
 //
 //	type CreateUserRequest struct {
 //		Name     string `json:"name"`
@@ -79,7 +79,8 @@
 //		if req.Avatar != nil {
 //			file, err := req.Avatar.Open()
 //			if err != nil {
-//				// Handle error
+//				http.Error(w, "Failed to open file", http.StatusInternalServerError)
+//				return
 //			}
 //			defer file.Close()
 //			// Process file content
@@ -115,33 +116,46 @@
 // Path parameter binding extracts values from URL path segments using
 // router-specific extractor functions:
 //
+//	import "github.com/go-chi/chi/v5"
+//
 //	type ProfileRequest struct {
 //		UserID   string `path:"id"`
 //		Username string `path:"username"`
-//		Tab      string `path:"tab"`
 //	}
 //
-//	// With chi router
-//	func setupChiRoutes(r chi.Router) {
+//	func main() {
+//		r := chi.NewRouter()
 //		pathBinder := binder.Path(chi.URLParam)
-//		r.Get("/users/{id}/profile/{username}/{tab}", func(w http.ResponseWriter, r *http.Request) {
+//
+//		r.Get("/users/{id}/profile/{username}", func(w http.ResponseWriter, r *http.Request) {
 //			var req ProfileRequest
 //			if err := pathBinder(r, &req); err != nil {
 //				http.Error(w, err.Error(), http.StatusBadRequest)
 //				return
 //			}
-//			// req.UserID, req.Username, req.Tab are populated
+//			// req.UserID and req.Username are populated from path
 //		})
 //	}
 //
 //	// With gorilla/mux
-//	func setupMuxRoutes(router *mux.Router) {
+//	import "github.com/gorilla/mux"
+//
+//	func setupMuxRoutes() {
 //		muxExtractor := func(r *http.Request, fieldName string) string {
 //			vars := mux.Vars(r)
 //			return vars[fieldName]
 //		}
 //		pathBinder := binder.Path(muxExtractor)
-//		// Use pathBinder in handlers
+//
+//		router := mux.NewRouter()
+//		router.HandleFunc("/users/{id}/profile/{username}", func(w http.ResponseWriter, r *http.Request) {
+//			var req ProfileRequest
+//			if err := pathBinder(r, &req); err != nil {
+//				http.Error(w, err.Error(), http.StatusBadRequest)
+//				return
+//			}
+//			// Use req...
+//		})
 //	}
 //
 // # Combining Multiple Binders
@@ -160,9 +174,6 @@
 //		// From form data
 //		Name     string                `form:"name"`
 //		Avatar   *multipart.FileHeader `file:"avatar"`
-//
-//		// From JSON body (requires separate handling)
-//		Metadata map[string]any `json:"metadata"`
 //	}
 //
 //	func complexHandler(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +213,7 @@
 //
 // The package includes several security hardening measures:
 //
-//   - Request size limits to prevent DoS attacks (1MB for JSON, 10MB for forms)
+//   - Request size limits to prevent DoS attacks (DefaultMaxJSONSize=1MB, DefaultMaxMemory=10MB)
 //   - Input sanitization to prevent XSS and injection attacks
 //   - Filename sanitization for uploaded files to prevent path traversal
 //   - Boundary validation for multipart forms
@@ -213,14 +224,9 @@
 //
 // The package provides comprehensive error types for different failure scenarios:
 //
-//	var (
-//		ErrUnsupportedMediaType   // Wrong Content-Type header
-//		ErrFailedToParseJSON     // JSON parsing failures
-//		ErrFailedToParseForm     // Form parsing failures
-//		ErrFailedToParseQuery    // Query parameter failures
-//		ErrFailedToParsePath     // Path parameter failures
-//		ErrMissingContentType    // Missing Content-Type header
-//		ErrBinderNotApplicable   // Binder cannot process request
+//	import (
+//		"errors"
+//		"github.com/dmitrymomot/foundation/core/binder"
 //	)
 //
 //	func handleBindingError(err error) {
@@ -229,25 +235,25 @@
 //			// Handle unsupported media type
 //		case errors.Is(err, binder.ErrFailedToParseJSON):
 //			// Handle JSON parsing error
+//		case errors.Is(err, binder.ErrFailedToParseForm):
+//			// Handle form parsing error
+//		case errors.Is(err, binder.ErrFailedToParseQuery):
+//			// Handle query parsing error
+//		case errors.Is(err, binder.ErrFailedToParsePath):
+//			// Handle path parsing error
+//		case errors.Is(err, binder.ErrMissingContentType):
+//			// Handle missing content type
+//		case errors.Is(err, binder.ErrBinderNotApplicable):
+//			// Handle inapplicable binder
 //		default:
 //			// Handle other binding errors
 //		}
 //	}
 //
-// # Best Practices
+// # Constants
 //
-//   - Use struct tags to clearly specify parameter names and binding sources
-//   - Combine multiple binders when handling complex request structures
-//   - Validate bound data using a validation library after binding
-//   - Handle binding errors appropriately and provide clear error messages
-//   - Use pointer types for optional fields to distinguish between zero values and missing parameters
-//   - Always close multipart form resources when done processing uploaded files
+// The package defines the following constants:
 //
-// # Performance Considerations
-//
-//   - JSON binding limits request body size to 1MB by default
-//   - Form binding uses 10MB memory limit for multipart parsing
-//   - Path extraction requires router-specific functions for optimal performance
-//   - String sanitization is applied automatically but adds minimal overhead
-//   - Reflection is used for struct field binding, so cache binder functions when possible
+//   - DefaultMaxJSONSize: Maximum JSON request body size (1MB)
+//   - DefaultMaxMemory: Maximum memory for multipart form parsing (10MB)
 package binder

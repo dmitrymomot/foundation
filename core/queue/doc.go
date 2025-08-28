@@ -6,12 +6,13 @@
 //
 //   - Task enqueueing with priority support
 //   - Background workers with concurrent processing
-//   - Scheduled task execution with cron-like scheduling
+//   - Scheduled task execution with flexible scheduling options
 //   - Configurable retry policies with exponential backoff
 //   - In-memory storage for testing and development
 //   - Extensible repository interface for custom storage backends
 //   - Graceful shutdown with proper cleanup
-//   - Comprehensive error handling and logging
+//   - Type-safe task handlers using Go generics
+//   - Dead letter queue for failed tasks
 //
 // # Basic Usage
 //
@@ -21,22 +22,34 @@
 //
 //	// Create storage (in-memory for development)
 //	storage := queue.NewMemoryStorage()
+//	defer storage.Close()
 //
 //	// Create enqueuer for adding tasks
 //	enqueuer, err := queue.NewEnqueuer(storage,
-//		queue.WithDefaultQueue("email_queue"),
+//		queue.WithDefaultQueue("email"),
 //		queue.WithDefaultPriority(queue.PriorityHigh),
 //	)
 //
 //	// Create worker for processing tasks
 //	worker, err := queue.NewWorker(storage,
-//		queue.WithWorkerQueue("email_queue"),
-//		queue.WithConcurrency(5),
-//		queue.WithRetryPolicy(3, time.Second*5),
+//		queue.WithQueues("email"),
+//		queue.WithMaxConcurrentTasks(5),
+//		queue.WithPullInterval(time.Second),
 //	)
 //
-//	// Register task handler
-//	worker.RegisterHandler("send_email", handleEmailTask)
+//	// Define payload type
+//	type EmailPayload struct {
+//		To      string `json:"to"`
+//		Subject string `json:"subject"`
+//		Body    string `json:"body"`
+//	}
+//
+//	// Register type-safe handler
+//	handler := queue.NewTaskHandler(func(ctx context.Context, email EmailPayload) error {
+//		// Send email logic here
+//		return sendEmail(email.To, email.Subject, email.Body)
+//	})
+//	worker.RegisterHandler(handler)
 //
 //	// Start worker
 //	ctx := context.Background()
@@ -47,11 +60,12 @@
 //		To:      "user@example.com",
 //		Subject: "Welcome!",
 //		Body:    "Welcome to our service!",
-//	}, queue.WithTaskType("send_email"))
+//	})
 //
 // # Task Types and Handlers
 //
-// Define custom task types and their handlers:
+// The package provides type-safe handlers using Go generics. Handler names are automatically
+// derived from the payload type:
 //
 //	type EmailPayload struct {
 //		To      string `json:"to"`
@@ -65,26 +79,17 @@
 //		Height   int    `json:"height"`
 //	}
 //
-//	// Task handler function
-//	func handleEmailTask(ctx context.Context, task *queue.Task) error {
-//		var payload EmailPayload
-//		if err := json.Unmarshal(task.Payload, &payload); err != nil {
-//			return fmt.Errorf("invalid email payload: %w", err)
-//		}
+//	// Type-safe handler with automatic unmarshaling
+//	emailHandler := queue.NewTaskHandler(func(ctx context.Context, email EmailPayload) error {
+//		return emailService.Send(email.To, email.Subject, email.Body)
+//	})
 //
-//		// Send email
-//		return emailService.Send(payload.To, payload.Subject, payload.Body)
-//	}
+//	imageHandler := queue.NewTaskHandler(func(ctx context.Context, img ImageProcessPayload) error {
+//		return imageProcessor.Resize(img.ImageURL, img.Width, img.Height)
+//	})
 //
-//	func handleImageProcess(ctx context.Context, task *queue.Task) error {
-//		var payload ImageProcessPayload
-//		if err := json.Unmarshal(task.Payload, &payload); err != nil {
-//			return err
-//		}
-//
-//		// Process image
-//		return imageProcessor.Resize(payload.ImageURL, payload.Width, payload.Height)
-//	}
+//	// Register handlers
+//	worker.RegisterHandlers(emailHandler, imageHandler)
 //
 // # Priority-Based Processing
 //
@@ -92,45 +97,44 @@
 //
 //	// High priority tasks (processed first)
 //	enqueuer.Enqueue(ctx, CriticalPayload{...},
-//		queue.WithTaskType("critical_operation"),
-//		queue.WithPriority(queue.PriorityCritical),
+//		queue.WithPriority(queue.PriorityMax),
 //	)
 //
 //	// Normal priority tasks
 //	enqueuer.Enqueue(ctx, StandardPayload{...},
-//		queue.WithTaskType("standard_operation"),
-//		queue.WithPriority(queue.PriorityDefault),
+//		queue.WithPriority(queue.PriorityMedium),
 //	)
 //
 //	// Low priority tasks (processed last)
 //	enqueuer.Enqueue(ctx, CleanupPayload{...},
-//		queue.WithTaskType("cleanup"),
 //		queue.WithPriority(queue.PriorityLow),
 //	)
 //
 // # Scheduled Tasks
 //
-// Create scheduled tasks with cron-like syntax:
+// Create recurring tasks with flexible scheduling options:
 //
 //	// Create scheduler
 //	scheduler, err := queue.NewScheduler(storage,
 //		queue.WithSchedulerLogger(logger),
 //	)
 //
-//	// Schedule daily email reports
-//	scheduler.Schedule("daily_report",
-//		queue.NewCronSchedule("0 9 * * *"), // 9 AM daily
-//		ReportPayload{Type: "daily"},
-//		queue.WithSchedulerTaskType("generate_report"),
-//		queue.WithSchedulerPriority(queue.PriorityHigh),
+//	// Register periodic handler (no payload)
+//	reportHandler := queue.NewPeriodicTaskHandler("daily_report", func(ctx context.Context) error {
+//		return generateDailyReport()
+//	})
+//	worker.RegisterHandler(reportHandler)
+//
+//	// Schedule daily reports at 9 AM
+//	scheduler.AddTask("daily_report", queue.DailyAt(9, 0),
+//		queue.WithTaskPriority(queue.PriorityHigh),
 //	)
 //
-//	// Schedule weekly cleanup
-//	scheduler.Schedule("weekly_cleanup",
-//		queue.NewCronSchedule("0 2 * * 1"), // 2 AM on Mondays
-//		CleanupPayload{Type: "weekly"},
-//		queue.WithSchedulerTaskType("cleanup"),
-//	)
+//	// Schedule weekly cleanup on Mondays at 2 AM
+//	scheduler.AddTask("weekly_cleanup", queue.WeeklyOn(time.Monday, 2, 0))
+//
+//	// Schedule with intervals
+//	scheduler.AddTask("health_check", queue.EveryMinutes(5))
 //
 //	// Start scheduler
 //	go scheduler.Start(ctx)
@@ -139,26 +143,20 @@
 //
 // Configure retry policies for failed tasks:
 //
-//	worker, err := queue.NewWorker(storage,
-//		queue.WithWorkerQueue("processing_queue"),
-//		queue.WithRetryPolicy(5, time.Minute*2), // 5 retries, 2 min interval
+//	// Set max retries when enqueueing
+//	enqueuer.Enqueue(ctx, payload,
+//		queue.WithMaxRetries(5), // Will retry up to 5 times
 //	)
 //
-//	// Handle task with retry logic
-//	func handleRetryableTask(ctx context.Context, task *queue.Task) error {
-//		// Attempt operation
-//		err := performOperation()
+//	// Handle task with retry logic - retries are automatic
+//	handler := queue.NewTaskHandler(func(ctx context.Context, data ProcessingPayload) error {
+//		err := performOperation(data)
 //		if err != nil {
-//			// Log retry attempt
-//			log.Warn("Task failed, will retry",
-//				"task_id", task.ID,
-//				"attempt", task.AttemptCount+1,
-//				"error", err,
-//			)
-//			return err // Will be retried automatically
+//			// Return error to trigger retry with exponential backoff
+//			return fmt.Errorf("operation failed: %w", err)
 //		}
 //		return nil
-//	}
+//	})
 //
 // # Multiple Queues
 //
@@ -166,76 +164,53 @@
 //
 //	// Email queue worker
 //	emailWorker, _ := queue.NewWorker(storage,
-//		queue.WithWorkerQueue("email"),
-//		queue.WithConcurrency(10),
+//		queue.WithQueues("email"),
+//		queue.WithMaxConcurrentTasks(10),
 //	)
-//	emailWorker.RegisterHandler("send_welcome", handleWelcomeEmail)
-//	emailWorker.RegisterHandler("send_notification", handleNotification)
+//	emailWorker.RegisterHandler(welcomeEmailHandler)
+//	emailWorker.RegisterHandler(notificationHandler)
 //
-//	// Image processing queue worker
+//	// Image processing queue worker (CPU intensive, fewer workers)
 //	imageWorker, _ := queue.NewWorker(storage,
-//		queue.WithWorkerQueue("images"),
-//		queue.WithConcurrency(3), // CPU intensive, fewer workers
+//		queue.WithQueues("images"),
+//		queue.WithMaxConcurrentTasks(3),
 //	)
-//	imageWorker.RegisterHandler("resize", handleImageResize)
-//	imageWorker.RegisterHandler("thumbnail", handleThumbnail)
+//	imageWorker.RegisterHandler(resizeHandler)
+//	imageWorker.RegisterHandler(thumbnailHandler)
 //
 //	// Analytics queue worker
 //	analyticsWorker, _ := queue.NewWorker(storage,
-//		queue.WithWorkerQueue("analytics"),
-//		queue.WithConcurrency(2),
+//		queue.WithQueues("analytics"),
+//		queue.WithMaxConcurrentTasks(2),
 //	)
-//	analyticsWorker.RegisterHandler("track_event", handleEventTracking)
+//	analyticsWorker.RegisterHandler(eventTrackingHandler)
 //
 //	// Start all workers
 //	go emailWorker.Start(ctx)
 //	go imageWorker.Start(ctx)
 //	go analyticsWorker.Start(ctx)
 //
-// # Error Handling
+// # Error Handling and Dead Letter Queue
 //
-// Implement comprehensive error handling:
+// Failed tasks are automatically handled with retries and dead letter queue:
 //
-//	func handleTaskWithErrorHandling(ctx context.Context, task *queue.Task) error {
-//		defer func() {
-//			if r := recover(); r != nil {
-//				log.Error("Task panicked",
-//					"task_id", task.ID,
-//					"task_type", task.Type,
-//					"panic", r,
-//				)
-//			}
-//		}()
-//
-//		// Validate task
-//		if task.Payload == nil {
-//			return fmt.Errorf("task payload is nil")
-//		}
-//
+//	handler := queue.NewTaskHandler(func(ctx context.Context, data ProcessingPayload) error {
 //		// Check context cancellation
 //		select {
 //		case <-ctx.Done():
-//			return fmt.Errorf("task cancelled: %w", ctx.Err())
+//			return ctx.Err()
 //		default:
 //		}
 //
-//		// Process task
-//		if err := processTask(task); err != nil {
-//			// Log error with context
-//			log.Error("Task processing failed",
-//				"task_id", task.ID,
-//				"task_type", task.Type,
-//				"error", err,
-//			)
-//			return err
+//		// Process task - errors trigger automatic retries
+//		if err := processData(data); err != nil {
+//			return fmt.Errorf("processing failed: %w", err)
 //		}
-//
-//		log.Info("Task completed successfully",
-//			"task_id", task.ID,
-//			"task_type", task.Type,
-//		)
 //		return nil
-//	}
+//	})
+//
+//	// Tasks that exceed max retries are moved to dead letter queue
+//	// Failed tasks can be inspected via the storage interface
 //
 // # Graceful Shutdown
 //
@@ -244,32 +219,21 @@
 //	func runQueueSystem(ctx context.Context) error {
 //		// Create components
 //		storage := queue.NewMemoryStorage()
+//		defer storage.Close()
+//
 //		worker, _ := queue.NewWorker(storage)
 //		scheduler, _ := queue.NewScheduler(storage)
 //
-//		// Start components
-//		workerCtx, workerCancel := context.WithCancel(ctx)
-//		schedulerCtx, schedulerCancel := context.WithCancel(ctx)
-//
-//		go worker.Start(workerCtx)
-//		go scheduler.Start(schedulerCtx)
+//		// Start components in goroutines
+//		go worker.Start(ctx)
+//		go scheduler.Start(ctx)
 //
 //		// Wait for shutdown signal
 //		<-ctx.Done()
 //
-//		// Graceful shutdown
-//		log.Info("Shutting down queue system...")
-//
-//		// Stop accepting new tasks
-//		workerCancel()
-//		schedulerCancel()
-//
-//		// Wait for current tasks to complete (with timeout)
-//		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-//		defer cancel()
-//
-//		worker.Shutdown(shutdownCtx)
-//		scheduler.Stop()
+//		// Workers stop automatically when context is cancelled
+//		// Call Stop() for immediate shutdown
+//		worker.Stop()
 //
 //		log.Info("Queue system shutdown complete")
 //		return nil
@@ -277,76 +241,51 @@
 //
 // # Custom Storage Backend
 //
-// Implement custom storage for production use:
+// Implement custom storage for production use by satisfying the repository interfaces:
 //
 //	type PostgreSQLStorage struct {
 //		db *sql.DB
 //	}
 //
+//	// Implement EnqueuerRepository
 //	func (s *PostgreSQLStorage) CreateTask(ctx context.Context, task *queue.Task) error {
-//		query := `INSERT INTO tasks (id, queue, type, priority, payload, created_at)
-//		         VALUES ($1, $2, $3, $4, $5, $6)`
+//		query := `INSERT INTO tasks (id, queue, task_type, task_name, priority, payload, status, created_at)
+//		         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
 //		_, err := s.db.ExecContext(ctx, query,
-//			task.ID, task.Queue, task.Type, task.Priority, task.Payload, task.CreatedAt)
+//			task.ID, task.Queue, task.TaskType, task.TaskName,
+//			task.Priority, task.Payload, task.Status, task.CreatedAt)
 //		return err
 //	}
 //
-//	func (s *PostgreSQLStorage) GetNextTask(ctx context.Context, queue string) (*queue.Task, error) {
-//		query := `SELECT id, queue, type, priority, payload, created_at, attempt_count
-//		         FROM tasks WHERE queue = $1 AND status = 'pending'
-//		         ORDER BY priority DESC, created_at ASC LIMIT 1`
-//		// Implementation...
-//		return task, nil
-//	}
+//	// Implement WorkerRepository methods: ClaimTask, CompleteTask, FailTask, etc.
+//	// Implement SchedulerRepository methods: GetPendingTaskByName
 //
 //	// Use custom storage
 //	storage := &PostgreSQLStorage{db: database}
+//	enqueuer, _ := queue.NewEnqueuer(storage)
 //	worker, _ := queue.NewWorker(storage)
 //
-// # Monitoring and Metrics
+// # Delayed Tasks
 //
-// Add monitoring to your queue system:
+// Schedule tasks for future execution:
 //
-//	type MetricsHandler struct {
-//		processed   int64
-//		failed      int64
-//		retries     int64
-//		mu          sync.Mutex
-//	}
+//	// Enqueue with delay
+//	enqueuer.Enqueue(ctx, payload,
+//		queue.WithDelay(time.Hour), // Process in 1 hour
+//	)
 //
-//	func (m *MetricsHandler) WrapHandler(taskType string, handler queue.TaskHandler) queue.TaskHandler {
-//		return func(ctx context.Context, task *queue.Task) error {
-//			start := time.Now()
-//			err := handler(ctx, task)
-//			duration := time.Since(start)
+//	// Enqueue at specific time
+//	enqueuer.Enqueue(ctx, payload,
+//		queue.WithScheduledAt(time.Date(2024, 12, 25, 9, 0, 0, 0, time.UTC)),
+//	)
 //
-//			m.mu.Lock()
-//			if err != nil {
-//				m.failed++
-//				if task.AttemptCount > 0 {
-//					m.retries++
-//				}
-//			} else {
-//				m.processed++
-//			}
-//			m.mu.Unlock()
+// # Storage Interfaces
 //
-//			// Record metrics
-//			recordTaskMetrics(taskType, duration, err == nil)
-//			return err
-//		}
-//	}
+// The package defines three repository interfaces for different components:
 //
-// # Best Practices
+//   - EnqueuerRepository: CreateTask for task creation
+//   - WorkerRepository: ClaimTask, CompleteTask, FailTask, MoveToDLQ, ExtendLock
+//   - SchedulerRepository: CreateTask, GetPendingTaskByName
 //
-//   - Use appropriate queue names for different task types
-//   - Set concurrency based on task characteristics (CPU vs I/O bound)
-//   - Implement proper error handling and logging in task handlers
-//   - Use priority levels to ensure critical tasks are processed first
-//   - Configure retry policies based on task failure patterns
-//   - Implement graceful shutdown to avoid losing in-progress tasks
-//   - Monitor queue depth and processing metrics
-//   - Use scheduled tasks for recurring operations
-//   - Keep task payloads small and serialize efficiently
-//   - Handle context cancellation properly in long-running tasks
+// Use queue.NewMemoryStorage() for development or implement custom storage for production.
 package queue

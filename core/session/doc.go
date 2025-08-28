@@ -7,7 +7,7 @@
 //
 // # Core Components
 //
-// The package provides three main types:
+// The package provides four main types:
 //
 //   - Session[Data]: Generic session container with application-defined data
 //   - Manager[Data]: Coordinates session lifecycle operations
@@ -116,6 +116,24 @@
 //   - Data: Application-defined generic data
 //   - Timestamps: Creation, update, and expiration times
 //
+// # Manager Methods
+//
+// The Manager[Data] type provides the following public methods:
+//
+//   - Load(w, r) (Session[Data], error): Load existing session or create new anonymous one
+//   - Save(w, r, session) error: Persist session changes to store and response
+//   - Touch(w, r) error: Extend session expiration on user activity
+//   - Auth(w, r, userID) error: Authenticate session with user ID, rotates token
+//   - Logout(w, r, ...opts) error: Return session to anonymous state
+//   - Delete(w, r) error: Completely remove session from store and client
+//
+// # Session Methods
+//
+// The Session[Data] type provides these methods:
+//
+//   - IsAuthenticated() bool: Returns true if session has valid user ID
+//   - IsExpired() bool: Returns true if session has expired
+//
 // # Security Features
 //
 // The session system includes several security mechanisms:
@@ -130,11 +148,12 @@
 //
 // Sessions can be configured with:
 //
-//	session.WithTTL(duration)              // Session lifetime
-//	session.WithTouchInterval(duration)    // Min time between activity updates
+//	session.WithTTL(duration)              // Session lifetime (default: 24h)
+//	session.WithTouchInterval(duration)    // Min time between activity updates (default: 5m)
 //
 // TTL determines how long sessions remain valid. TouchInterval prevents excessive
 // storage writes by limiting how frequently session activity updates are recorded.
+// Set TouchInterval to 0 to disable auto-touch functionality.
 //
 // # Error Handling
 //

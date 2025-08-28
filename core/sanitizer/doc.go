@@ -1,285 +1,287 @@
 // Package sanitizer provides comprehensive input sanitization and data cleaning
 // utilities for web applications. It offers protection against XSS attacks,
-// SQL injection, and other security vulnerabilities through various sanitization
-// functions for strings, HTML, URLs, and structured data.
+// SQL injection, and other security vulnerabilities through string manipulation,
+// HTML sanitization, collection processing, and structured data cleaning.
 //
-// # Features
+// The package provides four main categories of functionality:
+//   - String manipulation and normalization
+//   - Format-specific sanitization (email, phone, URL, etc.)
+//   - Security-focused protection (XSS, SQL injection, path traversal)
+//   - Collection and structured data processing
 //
-//   - XSS protection through HTML sanitization
-//   - SQL injection prevention for database queries
-//   - URL and email validation and cleaning
-//   - String normalization and whitespace handling
-//   - Collection sanitization for arrays and maps
-//   - Numeric value cleaning and validation
-//   - Regular expression-based pattern matching
-//   - Tag stripping and HTML entity handling
-//   - Security-focused input validation
+// # Basic String Sanitization
 //
-// # String Sanitization
-//
-// Clean and normalize string inputs:
+// Core string cleaning functions for common transformations:
 //
 //	import "github.com/dmitrymomot/foundation/core/sanitizer"
 //
-//	// Basic string cleaning
-//	clean := sanitizer.String(userInput)
+//	// Basic trimming and case conversion
+//	cleaned := sanitizer.Trim("  hello world  ")          // "hello world"
+//	lower := sanitizer.ToLower("HELLO")                    // "hello"
+//	upper := sanitizer.ToUpper("hello")                    // "HELLO"
+//	title := sanitizer.ToTitle("hello world")             // "HELLO WORLD"
 //
-//	// Remove excessive whitespace
-//	normalized := sanitizer.NormalizeWhitespace("  multiple   spaces  ")
+//	// Combined operations
+//	clean := sanitizer.TrimToLower("  HELLO  ")           // "hello"
+//	clean = sanitizer.TrimToUpper("  hello  ")            // "HELLO"
 //
-//	// Trim and clean
-//	result := sanitizer.TrimAndClean(input)
+//	// Length and character filtering
+//	limited := sanitizer.MaxLength("very long text", 10)  // "very long "
+//	alphanum := sanitizer.KeepAlphanumeric("hello@123!")  // "hello123 "
+//	alpha := sanitizer.KeepAlpha("hello123!")             // "hello "
+//	digits := sanitizer.KeepDigits("abc123def")           // "123"
 //
-//	// Remove control characters
-//	safe := sanitizer.RemoveControlChars(input)
+// # Case Conversion Functions
 //
-// # HTML Sanitization
+// Transform strings between different naming conventions:
 //
-// Protect against XSS attacks:
+//	// Convert to kebab-case (URL-friendly)
+//	slug := sanitizer.ToKebabCase("Hello World!")  // "hello-world"
+//
+//	// Convert to snake_case (database-friendly)
+//	field := sanitizer.ToSnakeCase("Hello World")  // "hello_world"
+//
+//	// Convert to camelCase (JavaScript-friendly)
+//	prop := sanitizer.ToCamelCase("hello world")   // "helloWorld"
+//
+// # Whitespace and Control Character Handling
+//
+// Clean up problematic whitespace and control characters:
+//
+//	// Normalize multiple whitespace to single spaces
+//	normalized := sanitizer.RemoveExtraWhitespace("hello   world")  // "hello world"
+//	normalized = sanitizer.NormalizeWhitespace("hello\t\nworld")    // "hello world"
+//
+//	// Remove control characters but preserve basic whitespace
+//	safe := sanitizer.RemoveControlChars("hello\x00world")          // "helloworld"
+//
+//	// Convert to single line
+//	oneLine := sanitizer.SingleLine("line1\nline2\rline3")         // "line1 line2 line3"
+//
+// # HTML and Security Sanitization
+//
+// Protect against XSS attacks and clean HTML content:
 //
 //	// Strip all HTML tags
-//	plainText := sanitizer.StripHTMLTags("<script>alert('xss')</script>Hello")
-//	// Result: "Hello"
+//	plainText := sanitizer.StripHTML("<p>Hello <script>alert('xss')</script>world</p>")
+//	// Result: "Hello world"
 //
-//	// Allow safe HTML tags
-//	safeHTML := sanitizer.SanitizeHTML(`<p>Safe content</p><script>dangerous()</script>`)
-//	// Result: "<p>Safe content</p>"
+//	// Escape HTML for safe display
+//	escaped := sanitizer.EscapeHTML("<script>alert('xss')</script>")
+//	// Result: "&lt;script&gt;alert('xss')&lt;/script&gt;"
 //
-//	// Clean user-generated content
-//	content := sanitizer.CleanUserContent(userGeneratedHTML)
+//	// Comprehensive XSS prevention
+//	safe := sanitizer.PreventXSS(`<p onclick="evil()">Content</p>`)
 //
-// # URL and Email Sanitization
-//
-// Validate and clean URLs and email addresses:
-//
-//	// URL validation and cleaning
-//	if sanitizer.IsValidURL(urlString) {
-//		cleanURL := sanitizer.SanitizeURL(urlString)
-//		// Use cleanURL safely
-//	}
-//
-//	// Email validation
-//	if sanitizer.IsValidEmail(emailString) {
-//		cleanEmail := sanitizer.CleanEmail(emailString)
-//		// Use cleanEmail safely
-//	}
-//
-//	// Domain validation
-//	if sanitizer.IsValidDomain(domain) {
-//		// Process valid domain
-//	}
+//	// Remove specific dangerous elements
+//	cleaned := sanitizer.StripScriptTags(`<p>Safe</p><script>alert('xss')</script>`)
+//	cleaned = sanitizer.RemoveJavaScriptEvents(`<div onclick="evil()">Content</div>`)
 //
 // # SQL Injection Prevention
 //
-// Clean inputs for database operations:
+// Sanitize inputs for database operations:
 //
-//	// Basic SQL input sanitization
-//	safeInput := sanitizer.SQLSafe(userInput)
+//	// Escape SQL strings (but prefer parameterized queries)
+//	escaped := sanitizer.EscapeSQLString("O'Connor")  // "O''Connor"
 //
-//	// Clean table/column names
-//	safeTableName := sanitizer.CleanIdentifier(tableName)
-//	safeColumnName := sanitizer.CleanIdentifier(columnName)
+//	// Clean SQL identifiers (table/column names)
+//	safeTable := sanitizer.SanitizeSQLIdentifier("users-table!")  // "users_table"
 //
-//	// Note: Always use parameterized queries as primary defense
-//	query := "SELECT * FROM " + sanitizer.CleanIdentifier(tableName) + " WHERE id = ?"
-//	rows, err := db.Query(query, sanitizer.SQLSafe(userID))
+//	// Remove dangerous SQL keywords
+//	cleaned := sanitizer.RemoveSQLKeywords("SELECT * FROM users")  // " *  users"
 //
-// # Numeric Sanitization
+//	// Example with parameterized queries (recommended approach)
+//	tableName := sanitizer.SanitizeSQLIdentifier(userTableName)
+//	query := fmt.Sprintf("SELECT * FROM %s WHERE id = ?", tableName)
+//	// Then use query with parameters
 //
-// Clean and validate numeric inputs:
+// # Format-Specific Sanitization
 //
-//	// Integer cleaning
-//	cleanInt := sanitizer.CleanInteger(intString)
+// Clean and normalize common data formats:
 //
-//	// Float cleaning
-//	cleanFloat := sanitizer.CleanFloat(floatString)
+//	// Email processing
+//	email := sanitizer.NormalizeEmail("  JOHN.DOE@EXAMPLE.COM  ")  // "john.doe@example.com"
+//	domain := sanitizer.ExtractEmailDomain("user@domain.com")      // "domain.com"
+//	masked := sanitizer.MaskEmail("john.doe@example.com")          // "j*******@example.com"
+//	secure := sanitizer.SanitizeEmail("user<script>@example.com")  // "userscript@example.com"
 //
-//	// Currency cleaning
-//	amount := sanitizer.CleanCurrency("$1,234.56")
-//	// Result: "1234.56"
+//	// Phone number processing
+//	digits := sanitizer.NormalizePhone("(555) 123-4567")          // "5551234567"
+//	formatted := sanitizer.FormatPhoneUS("5551234567")            // "(555) 123-4567"
+//	masked := sanitizer.MaskPhone("5551234567")                   // "******4567"
 //
-//	// Phone number cleaning
-//	phone := sanitizer.CleanPhoneNumber("+1 (555) 123-4567")
-//	// Result: "15551234567"
-//
-// # Collection Sanitization
-//
-// Clean arrays, slices, and maps:
-//
-//	// Sanitize string slice
-//	cleanStrings := sanitizer.SanitizeStringSlice([]string{
-//		"  normal string  ",
-//		"<script>alert('xss')</script>",
-//		"another string",
-//	})
-//
-//	// Sanitize map values
-//	data := map[string]string{
-//		"name":  "  John Doe  ",
-//		"email": "john@example.com",
-//		"bio":   "<p>Developer</p><script>alert('xss')</script>",
-//	}
-//	cleanData := sanitizer.SanitizeStringMap(data)
-//
-//	// Clean struct fields
-//	type User struct {
-//		Name  string
-//		Email string
-//		Bio   string
-//	}
-//	user := User{
-//		Name:  "  John  ",
-//		Email: "JOHN@EXAMPLE.COM",
-//		Bio:   "<b>Developer</b><script>evil()</script>",
-//	}
-//	cleanUser := sanitizer.SanitizeStruct(user)
-//
-// # Form Data Sanitization
-//
-// Clean form inputs comprehensively:
-//
-//	func sanitizeFormData(formData map[string]string) map[string]string {
-//		cleaned := make(map[string]string)
-//
-//		for key, value := range formData {
-//			switch key {
-//			case "email":
-//				cleaned[key] = sanitizer.CleanEmail(value)
-//			case "phone":
-//				cleaned[key] = sanitizer.CleanPhoneNumber(value)
-//			case "url", "website":
-//				cleaned[key] = sanitizer.SanitizeURL(value)
-//			case "bio", "description":
-//				cleaned[key] = sanitizer.SanitizeHTML(value)
-//			default:
-//				cleaned[key] = sanitizer.String(value)
-//			}
-//		}
-//
-//		return cleaned
-//	}
+//	// URL processing
+//	normalized := sanitizer.NormalizeURL("example.com/path/")     // "https://example.com/path"
+//	domain := sanitizer.ExtractDomain("https://example.com/path") // "example.com"
+//	cleaned := sanitizer.SanitizeURL("javascript:alert('xss')")   // "" (removes dangerous URLs)
+//	noQuery := sanitizer.RemoveQueryParams("https://example.com?tracking=123")
 //
 // # File Path Sanitization
 //
-// Clean file paths and names:
+// Secure file path and filename handling:
 //
-//	// Clean filename
-//	safeFilename := sanitizer.CleanFilename(userFilename)
+//	// Clean filenames for safe storage
+//	safe := sanitizer.SanitizeFilename("my file<>:name.txt")       // "my file___name.txt"
+//	secure := sanitizer.SanitizeSecureFilename("../../../etc/passwd")  // ".._.._..._etc_passwd"
 //
-//	// Prevent directory traversal
-//	safePath := sanitizer.SanitizePath(userPath)
+//	// Prevent directory traversal attacks
+//	safePath := sanitizer.SanitizePath("../../../etc/passwd")     // "etc/passwd"
+//	normalized := sanitizer.NormalizePath("folder\\..\\file.txt") // "file.txt"
+//	cleaned := sanitizer.PreventPathTraversal("folder/../file")   // "folder/file"
 //
-//	// Validate file extension
-//	if sanitizer.IsAllowedExtension(filename, []string{".jpg", ".png", ".gif"}) {
-//		// Process allowed file
+// # Numeric Value Processing
+//
+// Type-safe numeric sanitization using Go generics:
+//
+//	// Clamp values within ranges
+//	clamped := sanitizer.Clamp(15, 0, 10)                         // 10
+//	minClamped := sanitizer.ClampMin(-5, 0)                       // 0
+//	maxClamped := sanitizer.ClampMax(15, 10)                      // 10
+//
+//	// Absolute values and sign handling
+//	abs := sanitizer.Abs(-42)                                     // 42
+//	positive := sanitizer.ZeroIfNegative(-5)                      // 0
+//	nonZero := sanitizer.NonZero(0)                               // 1
+//
+//	// Floating-point operations
+//	rounded := sanitizer.Round(3.7)                               // 4.0
+//	precise := sanitizer.RoundToDecimalPlaces(3.14159, 2)         // 3.14
+//	percentage := sanitizer.Percentage(25, 100)                  // 25.0
+//
+//	// Safe division
+//	result := sanitizer.SafeDivide(10, 0, -1)                     // -1 (fallback)
+//
+// # Collection Processing
+//
+// Clean and manipulate slices and maps:
+//
+//	// String slice operations
+//	trimmed := sanitizer.TrimStringSlice([]string{"  hello ", " world  "})
+//	lower := sanitizer.ToLowerStringSlice([]string{"HELLO", "WORLD"})
+//	clean := sanitizer.CleanStringSlice([]string{"  hello ", "", " world "})
+//	// clean result: ["hello", "world"] (trimmed, filtered, deduplicated)
+//
+//	// Slice utilities
+//	filtered := sanitizer.FilterEmpty([]string{"hello", "", "world"})    // ["hello", "world"]
+//	unique := sanitizer.DeduplicateStrings([]string{"a", "b", "a"})      // ["a", "b"]
+//	limited := sanitizer.LimitSliceLength([]string{"a", "b", "c"}, 2)    // ["a", "b"]
+//	sorted := sanitizer.SortStrings([]string{"c", "a", "b"})            // ["a", "b", "c"]
+//
+//	// Map operations
+//	data := map[string]string{"  NAME ": "  John ", "email": "john@example.com"}
+//	cleaned := sanitizer.CleanStringMap(data)
+//	// Result: {"name": "John", "email": "john@example.com"}
+//
+//	// Map utilities
+//	keys := sanitizer.ExtractMapKeys(data)
+//	values := sanitizer.ExtractMapValues(data)
+//	merged := sanitizer.MergeStringMaps(map1, map2, map3)
+//
+// # Struct Field Sanitization with Tags
+//
+// Automatically sanitize struct fields using reflection and tags:
+//
+//	type User struct {
+//		Name     string `sanitize:"trim,title"`
+//		Email    string `sanitize:"email"`
+//		Username string `sanitize:"trim,lower,alphanum,max:20"`
+//		Bio      string `sanitize:"trim,safe_html"`
+//		Website  string `sanitize:"url"`
+//		Tags     []string `sanitize:"trim,lower"`
+//		// Use "-" to skip sanitization
+//		Password string `sanitize:"-"`
 //	}
 //
-// # Regular Expression Sanitization
-//
-// Use pattern-based cleaning:
-//
-//	// Remove patterns
-//	cleaned := sanitizer.RemovePattern(input, `[^\w\s]`) // Keep only word chars and spaces
-//
-//	// Replace patterns
-//	normalized := sanitizer.ReplacePattern(input, `\s+`, " ") // Replace multiple spaces
-//
-//	// Extract valid parts
-//	valid := sanitizer.ExtractPattern(input, `[a-zA-Z0-9]+`) // Extract alphanumeric
-//
-// # Security-Focused Sanitization
-//
-// Apply security-specific cleaning:
-//
-//	type UserInput struct {
-//		Username string `json:"username"`
-//		Password string `json:"password"`
-//		Email    string `json:"email"`
-//		Profile  struct {
-//			Bio     string `json:"bio"`
-//			Website string `json:"website"`
-//		} `json:"profile"`
+//	user := &User{
+//		Name:     "  john doe  ",
+//		Email:    "  JOHN@EXAMPLE.COM  ",
+//		Username: "  John123!@#  ",
+//		Bio:      `<p>Developer</p><script>alert('xss')</script>`,
+//		Website:  "example.com/profile",
+//		Tags:     []string{"  GO  ", "  WEB  "},
 //	}
 //
-//	func secureUserInput(input UserInput) UserInput {
-//		return UserInput{
-//			Username: sanitizer.CleanUsername(input.Username),
-//			Password: input.Password, // Don't sanitize passwords
-//			Email:    sanitizer.CleanEmail(input.Email),
-//			Profile: struct {
-//				Bio     string `json:"bio"`
-//				Website string `json:"website"`
-//			}{
-//				Bio:     sanitizer.SanitizeHTML(input.Profile.Bio),
-//				Website: sanitizer.SanitizeURL(input.Profile.Website),
-//			},
-//		}
+//	err := sanitizer.SanitizeStruct(user)
+//	// user.Name becomes "JOHN DOE"
+//	// user.Email becomes "john@example.com"
+//	// user.Username becomes "john123" (limited to 20 chars)
+//	// user.Bio becomes safe HTML
+//	// user.Website becomes "https://example.com/profile"
+//	// user.Tags becomes ["go", "web"]
+//
+// # Available Sanitizer Tags
+//
+// The following tags can be used with SanitizeStruct:
+//
+//	// String operations
+//	"trim", "lower", "upper", "title", "trim_lower", "trim_upper"
+//	"kebab", "snake", "camel", "single_line", "no_spaces"
+//	"alphanum", "alpha", "digits", "max:N"
+//
+//	// Format sanitizers
+//	"email", "phone", "url", "domain", "filename", "whitespace"
+//	"credit_card", "ssn", "postal_code"
+//
+//	// Security sanitizers
+//	"strip_html", "escape_html", "xss", "sql_string", "sql_identifier"
+//	"path", "user_input", "secure_filename", "no_control", "no_null"
+//
+//	// Composite sanitizers
+//	"username" (alphanum + lower + trim)
+//	"slug" (kebab + trim)
+//	"name" (title + no_spaces + trim)
+//	"text" (no_spaces + trim)
+//	"safe_text" (escape_html + no_spaces + trim)
+//	"safe_html" (xss + trim)
+//
+// # Custom Sanitizer Registration
+//
+// Register your own sanitization functions:
+//
+//	// Register a custom sanitizer
+//	sanitizer.RegisterSanitizer("remove_emoji", func(s string) string {
+//		// Implementation to remove emoji characters
+//		return removeEmoji(s)
+//	})
+//
+//	// Use in struct tags
+//	type Post struct {
+//		Title string `sanitize:"trim,remove_emoji"`
 //	}
 //
-// # Middleware Integration
+// # Functional Composition
 //
-// Use sanitization in HTTP middleware:
+// Build sanitization pipelines using functional composition:
 //
-//	func sanitizationMiddleware(next http.HandlerFunc) http.HandlerFunc {
-//		return func(w http.ResponseWriter, r *http.Request) {
-//			// Sanitize query parameters
-//			query := r.URL.Query()
-//			for key, values := range query {
-//				for i, value := range values {
-//					query[key][i] = sanitizer.String(value)
-//				}
-//			}
-//			r.URL.RawQuery = query.Encode()
+//	// Create a reusable sanitization pipeline
+//	cleanName := sanitizer.Compose(
+//		sanitizer.Trim,
+//		sanitizer.ToTitle,
+//		sanitizer.RemoveExtraWhitespace,
+//	)
 //
-//			// Sanitize form data
-//			if r.Method == "POST" || r.Method == "PUT" {
-//				r.ParseForm()
-//				for key, values := range r.PostForm {
-//					for i, value := range values {
-//						r.PostForm[key][i] = sanitizer.String(value)
-//					}
-//				}
-//			}
+//	// Apply pipeline to values
+//	result := cleanName("  john   doe  ")  // "JOHN DOE"
 //
-//			next(w, r)
-//		}
-//	}
+//	// Or apply transformations in sequence
+//	result = sanitizer.Apply("  HELLO WORLD  ",
+//		sanitizer.Trim,
+//		sanitizer.ToLower,
+//		sanitizer.ToKebabCase,
+//	)  // "hello-world"
 //
-// # Custom Sanitization Rules
+// # Security Best Practices
 //
-// Create application-specific sanitizers:
+// When using this package for security:
 //
-//	func sanitizeProductData(product Product) Product {
-//		return Product{
-//			Name:        sanitizer.String(product.Name),
-//			Description: sanitizer.SanitizeHTML(product.Description),
-//			Price:       sanitizer.CleanCurrency(product.Price),
-//			SKU:         sanitizer.CleanIdentifier(product.SKU),
-//			Tags:        sanitizer.SanitizeStringSlice(product.Tags),
-//			Images:      sanitizeImageURLs(product.Images),
-//		}
-//	}
-//
-//	func sanitizeImageURLs(urls []string) []string {
-//		var clean []string
-//		for _, url := range urls {
-//			if sanitizer.IsValidURL(url) {
-//				clean = append(clean, sanitizer.SanitizeURL(url))
-//			}
-//		}
-//		return clean
-//	}
-//
-// # Best Practices
-//
-//   - Sanitize all user inputs at application boundaries
-//   - Use appropriate sanitization based on data context
-//   - Combine sanitization with validation for robust security
-//   - Apply HTML sanitization for user-generated content
-//   - Use parameterized queries in addition to input sanitization
-//   - Validate file uploads and sanitize filenames
-//   - Log suspicious input patterns for security monitoring
-//   - Test sanitization functions with malicious inputs
-//   - Keep sanitization rules updated with new attack patterns
-//   - Document which sanitization methods are applied to each field
+//   - Always sanitize user input at application boundaries
+//   - Use parameterized queries as primary SQL injection defense
+//   - Apply context-appropriate sanitization (HTML vs SQL vs filename)
+//   - Validate input lengths to prevent DoS attacks
+//   - Log suspicious input patterns for monitoring
+//   - Test sanitization with malicious inputs
+//   - Keep security sanitization rules updated
+//   - Use HTTPS when normalizing URLs
+//   - Sanitize filenames before filesystem operations
+//   - Remove control characters from user content
 package sanitizer

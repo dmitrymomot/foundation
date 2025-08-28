@@ -1,175 +1,200 @@
-// Package response provides comprehensive HTTP response utilities including JSON, HTML,
-// Server-Sent Events (SSE), WebSocket upgrades, file serving, and HTMX support.
-// It offers a consistent API for generating various types of HTTP responses with
-// proper headers, status codes, and error handling.
-//
-// # Features
-//
-//   - JSON responses with proper Content-Type headers
-//   - HTML template rendering with Go templates and templ components
-//   - Server-Sent Events (SSE) for real-time updates
-//   - WebSocket connection upgrades
-//   - File downloads and streaming responses
-//   - HTMX response helpers for modern web applications
-//   - HTTP redirections with proper status codes
-//   - Comprehensive error handling with status code mapping
-//   - Decorator pattern for response enhancement
+// Package response provides HTTP response utilities for web applications.
+// It offers a consistent API for generating various types of HTTP responses
+// including JSON, HTML templates, files, redirects, streaming responses, WebSockets,
+// Server-Sent Events, and HTMX-enhanced responses.
 //
 // # Basic Usage
 //
-// The package provides functions that return handler.Response for use in HTTP handlers:
+// All functions return handler.Response which can be used in HTTP handlers:
 //
 //	import "github.com/dmitrymomot/foundation/core/response"
 //
-//	// JSON responses
 //	func getUserHandler(ctx handler.Context) handler.Response {
 //		user := User{ID: 1, Name: "John Doe"}
 //		return response.JSON(user)
 //	}
 //
-//	// Error responses
-//	func errorHandler(ctx handler.Context) handler.Response {
-//		return response.Error(http.StatusBadRequest, "Invalid input")
-//	}
-//
-//	// HTML responses
 //	func homeHandler(ctx handler.Context) handler.Response {
-//		data := PageData{Title: "Home", Content: "Welcome!"}
-//		return response.HTML("home.html", data)
+//		return response.HTML("<h1>Welcome!</h1>")
 //	}
 //
 // # JSON Responses
 //
-// Create JSON responses with automatic serialization and proper headers:
+// Create JSON responses with automatic serialization:
 //
-//	// Simple JSON response
+//	// JSON with 200 OK status
 //	response.JSON(map[string]string{
 //		"message": "Success",
 //		"status":  "ok",
 //	})
 //
 //	// JSON with custom status code
-//	response.JSONWithStatus(http.StatusCreated, user)
+//	response.JSONWithStatus(user, http.StatusCreated)
 //
-//	// JSON error response
-//	response.JSONError(http.StatusBadRequest, "Validation failed", map[string]string{
-//		"email": "Invalid email format",
-//		"age":   "Must be at least 18",
-//	})
+// # Basic Response Types
 //
-//	// Paginated JSON response
-//	response.JSON(PaginatedResponse{
-//		Data:       users,
-//		Page:       1,
-//		PerPage:    10,
-//		Total:      100,
-//		TotalPages: 10,
-//	})
+// Create simple text and HTML responses:
 //
-// # HTML Template Responses
+//	// Plain text response
+//	response.String("Hello, World!")
 //
-// Render HTML templates with data:
+//	// HTML content
+//	response.HTML("<h1>Welcome</h1>")
 //
-//	// Basic template rendering
-//	response.HTML("user-profile.html", UserData{
-//		Name:  "John Doe",
-//		Email: "john@example.com",
-//	})
+//	// Raw bytes with content type
+//	response.Bytes(imageData, "image/jpeg")
 //
-//	// Template with custom status
-//	response.HTMLWithStatus(http.StatusNotFound, "404.html", ErrorData{
-//		Message: "Page not found",
-//	})
+//	// Empty responses
+//	response.NoContent()           // 204 No Content
+//	response.Status(http.StatusOK) // Custom status with no body
 //
-//	// Templ component rendering
-//	component := userProfileComponent(user)
+// # Template Responses
+//
+// Render Go html/template templates:
+//
+//	tmpl := template.Must(template.ParseFiles("user.html"))
+//	response.Template(tmpl, userData)
+//
+//	// Named templates from parsed files
+//	response.TemplateName(tmpl, "user-profile", userData)
+//
+//	// Streaming templates (more memory efficient)
+//	response.TemplateStream(tmpl, userData)
+//
+// # Templ Component Responses
+//
+// Render templ components:
+//
+//	component := userProfile(user)
 //	response.Templ(component)
 //
-// # Server-Sent Events (SSE)
-//
-// Create real-time streaming responses:
-//
-//	func liveUpdatesHandler(ctx handler.Context) handler.Response {
-//		return response.SSE(func(writer *response.SSEWriter) error {
-//			ticker := time.NewTicker(time.Second)
-//			defer ticker.Stop()
-//
-//			for {
-//				select {
-//				case <-ctx.Done():
-//					return nil
-//				case <-ticker.C:
-//					event := response.SSEEvent{
-//						Event: "update",
-//						Data:  fmt.Sprintf("Current time: %v", time.Now()),
-//						ID:    fmt.Sprintf("%d", time.Now().Unix()),
-//					}
-//					if err := writer.WriteEvent(event); err != nil {
-//						return err
-//					}
-//				}
-//			}
-//		})
-//	}
-//
-//	// Simple SSE with predefined events
-//	func notificationHandler(ctx handler.Context) handler.Response {
-//		events := []response.SSEEvent{
-//			{Event: "notification", Data: "New message received"},
-//			{Event: "update", Data: "Status changed"},
-//		}
-//		return response.SSEEvents(events)
-//	}
-//
-// # WebSocket Responses
-//
-// Upgrade HTTP connections to WebSocket:
-//
-//	func chatHandler(ctx handler.Context) handler.Response {
-//		return response.WebSocket(func(conn *websocket.Conn) error {
-//			defer conn.Close()
-//
-//			for {
-//				var message ChatMessage
-//				if err := conn.ReadJSON(&message); err != nil {
-//					return err
-//				}
-//
-//				// Process message
-//				response := processMessage(message)
-//
-//				if err := conn.WriteJSON(response); err != nil {
-//					return err
-//				}
-//			}
-//		})
-//	}
+//	// With custom status
+//	response.TemplWithStatus(component, http.StatusCreated)
 //
 // # File Responses
 //
 // Serve files and handle downloads:
 //
-//	// File download
-//	response.File("/path/to/document.pdf", "invoice.pdf")
+//	// Serve static files
+//	response.File("/path/to/image.jpg")
 //
-//	// Inline file serving
-//	response.FileInline("/path/to/image.jpg")
+//	// Force download with custom filename
+//	response.Download("/path/to/document.pdf", "invoice.pdf")
+//
+//	// Download in-memory data
+//	response.Attachment(pdfData, "report.pdf", "application/pdf")
 //
 //	// Stream from io.Reader
-//	response.Stream(fileReader, "application/pdf", "document.pdf")
+//	response.FileReader(reader, "data.csv", "text/csv")
 //
-//	// Byte array response
-//	response.Bytes(imageData, "image/jpeg")
+//	// Generate CSV downloads
+//	records := [][]string{{"Name", "Age"}, {"John", "30"}}
+//	response.CSV(records, "users.csv")
 //
-// # HTMX Responses
+//	// CSV with headers
+//	response.CSVWithHeaders([]string{"Name", "Age"}, userRows, "users.csv")
 //
-// Create responses optimized for HTMX applications:
+// # Redirects
+//
+// Handle HTTP redirections (with automatic HTMX support):
+//
+//	// Temporary redirect (302)
+//	response.Redirect("/dashboard")
+//
+//	// Permanent redirect (301)
+//	response.RedirectPermanent("/new-location")
+//
+//	// See Other (303) - POST-redirect-GET pattern
+//	response.RedirectSeeOther("/success")
+//
+//	// Temporary redirect preserving method (307)
+//	response.RedirectTemporary("/retry")
+//
+//	// Custom redirect status
+//	response.RedirectWithStatus("/custom", http.StatusFound)
+//
+// # Server-Sent Events (SSE)
+//
+// Create real-time streaming responses:
+//
+//	events := make(chan any)
+//	go func() {
+//		defer close(events)
+//		for i := 0; i < 10; i++ {
+//			events <- fmt.Sprintf("Event %d", i)
+//			time.Sleep(time.Second)
+//		}
+//	}()
+//
+//	response.SSE(events)
+//
+//	// With custom event configuration
+//	response.SSE(events,
+//		response.WithEventName("update"),
+//		response.WithKeepAlive(30*time.Second),
+//		response.WithEventIDGenerator(func(data any) string {
+//			return fmt.Sprintf("msg-%d", time.Now().Unix())
+//		}),
+//	)
+//
+// # WebSocket Responses
+//
+// Upgrade HTTP connections to WebSocket:
+//
+//	response.WebSocket(func(ctx context.Context, conn *websocket.Conn) error {
+//		defer conn.Close()
+//		for {
+//			var message map[string]any
+//			if err := conn.ReadJSON(&message); err != nil {
+//				return err
+//			}
+//			// Echo message back
+//			return conn.WriteJSON(message)
+//		}
+//	})
+//
+//	// Simple echo WebSocket
+//	response.EchoWebSocket()
+//
+//	// Channel-based WebSocket
+//	incoming := make(chan response.WebSocketMessage)
+//	outgoing := make(chan response.WebSocketMessage)
+//	response.WebSocketWithChannels(incoming, outgoing)
+//
+// # Streaming Responses
+//
+// Create streaming responses for large data:
+//
+//	// Custom streaming
+//	response.Stream(func(w io.Writer) error {
+//		for i := 0; i < 1000; i++ {
+//			fmt.Fprintf(w, "Line %d\n", i)
+//			if f, ok := w.(http.Flusher); ok {
+//				f.Flush()
+//			}
+//		}
+//		return nil
+//	})
+//
+//	// Newline-delimited JSON streaming
+//	items := make(chan any)
+//	go func() {
+//		defer close(items)
+//		for _, user := range users {
+//			items <- user
+//		}
+//	}()
+//	response.StreamJSON(items)
+//
+// # HTMX Support
+//
+// Enhanced responses for HTMX applications:
 //
 //	// Basic HTMX response with triggers
 //	response.WithHTMX(
-//		response.HTML("partial.html", data),
-//		response.TriggerEvent("userUpdated", user),
-//		response.PushURL("/users/" + user.ID),
+//		response.HTML("<div>Updated</div>"),
+//		response.TriggerEvent("userUpdated", userData),
+//		response.PushURL("/users/1"),
 //	)
 //
 //	// HTMX redirect
@@ -178,222 +203,85 @@
 //		response.HTMXRedirect("/dashboard"),
 //	)
 //
-//	// HTMX with multiple triggers
+//	// Complex HTMX behavior
 //	response.WithHTMX(
-//		response.JSON(result),
+//		response.Templ(component),
 //		response.Trigger(map[string]any{
-//			"formSubmitted": map[string]any{
-//				"success": true,
-//				"message": "Data saved",
-//			},
-//			"updateUI": nil,
+//			"formSubmitted": map[string]any{"success": true},
+//			"updateUI":      nil,
 //		}),
-//		response.Refresh(),
-//	)
-//
-//	// HTMX swap and retarget
-//	response.WithHTMX(
-//		response.HTML("new-content.html", data),
 //		response.Reswap("outerHTML"),
-//		response.Retarget("#content-area"),
+//		response.Retarget("#content"),
 //	)
 //
-// # Redirect Responses
-//
-// Handle various types of HTTP redirects:
-//
-//	// Permanent redirect (301)
-//	response.Redirect("/new-location", http.StatusMovedPermanently)
-//
-//	// Temporary redirect (302)
-//	response.Redirect("/temporary-location", http.StatusFound)
-//
-//	// See other (303) - for POST-redirect-GET pattern
-//	response.Redirect("/success", http.StatusSeeOther)
-//
-//	// Temporary redirect (307) - preserves request method
-//	response.Redirect("/retry", http.StatusTemporaryRedirect)
-//
-// # Error Responses
-//
-// Generate consistent error responses:
-//
-//	// Simple error
-//	response.Error(http.StatusNotFound, "User not found")
-//
-//	// Error with details
-//	response.ErrorWithDetails(http.StatusBadRequest, "Validation failed", map[string]any{
-//		"errors": []string{
-//			"Email is required",
-//			"Password must be at least 8 characters",
-//		},
-//	})
-//
-//	// JSON error response
-//	response.JSONError(http.StatusUnauthorized, "Access denied", map[string]string{
-//		"code": "INVALID_TOKEN",
-//		"hint": "Please refresh your token",
-//	})
+//	// Check for HTMX requests
+//	if response.IsHTMXRequest(request) {
+//		// Return partial HTML
+//	}
 //
 // # Response Decorators
 //
-// Enhance responses with additional functionality:
+// Enhance responses with headers, cookies, and caching:
 //
 //	// Add custom headers
 //	response.WithHeaders(
 //		response.JSON(data),
 //		map[string]string{
-//			"X-API-Version": "v1.2.3",
+//			"X-API-Version": "v1.0.0",
 //			"X-Rate-Limit":  "100",
 //		},
 //	)
 //
 //	// Add cookies
-//	response.WithCookies(
-//		response.HTML("welcome.html", data),
+//	response.WithCookie(
+//		response.HTML("<h1>Welcome</h1>"),
 //		&http.Cookie{
 //			Name:  "session_id",
 //			Value: sessionID,
 //		},
 //	)
 //
-//	// Combine decorators
-//	response.WithHeaders(
-//		response.WithCookies(
-//			response.JSON(data),
-//			sessionCookie,
-//		),
-//		headers,
+//	// Cache control
+//	response.WithCache(
+//		response.JSON(publicData),
+//		time.Hour, // Cache for 1 hour
 //	)
 //
-// # Advanced Error Handling
+//	// Disable caching
+//	response.WithCache(response.HTML(dynamicContent), 0)
 //
-// Use error handlers for consistent error processing:
+// # Error Handling
 //
-//	func apiErrorHandler(ctx handler.Context, err error) {
-//		// Log error
-//		log.Error("Handler error", "error", err, "path", ctx.Request().URL.Path)
+// The package provides structured error handling with HTTPError types:
 //
-//		// Map error to HTTP status
-//		status := mapErrorToStatus(err)
+//	// Return an error to be handled by error middleware
+//	response.Error(errors.New("something went wrong"))
 //
-//		// Send appropriate response
-//		if isAPIRequest(ctx.Request()) {
-//			response.JSONError(status, err.Error(), nil)(
-//				ctx.ResponseWriter(), ctx.Request())
-//		} else {
-//			response.HTMLWithStatus(status, "error.html", ErrorData{
-//				Message: err.Error(),
-//			})(ctx.ResponseWriter(), ctx.Request())
-//		}
-//	}
+//	// Use predefined HTTP errors
+//	response.Error(response.ErrNotFound)
+//	response.Error(response.ErrUnauthorized.WithMessage("Invalid token"))
 //
-//	func mapErrorToStatus(err error) int {
-//		switch {
-//		case errors.Is(err, ErrNotFound):
-//			return http.StatusNotFound
-//		case errors.Is(err, ErrUnauthorized):
-//			return http.StatusUnauthorized
-//		case errors.Is(err, ErrValidation):
-//			return http.StatusBadRequest
-//		default:
-//			return http.StatusInternalServerError
-//		}
-//	}
-//
-// # Content Negotiation
-//
-// Handle different content types based on Accept header:
-//
-//	func adaptiveResponse(ctx handler.Context, data any) handler.Response {
-//		accept := ctx.Request().Header.Get("Accept")
-//
-//		switch {
-//		case strings.Contains(accept, "application/json"):
-//			return response.JSON(data)
-//		case strings.Contains(accept, "text/html"):
-//			return response.HTML("data.html", data)
-//		case strings.Contains(accept, "text/xml"):
-//			return response.XML(data)
-//		default:
-//			return response.JSON(data) // Default to JSON
-//		}
-//	}
-//
-// # Caching Headers
-//
-// Set appropriate caching headers:
-//
-//	// Cache for 1 hour
-//	response.WithHeaders(
-//		response.JSON(data),
-//		map[string]string{
-//			"Cache-Control": "public, max-age=3600",
-//			"ETag":          generateETag(data),
+//	// Custom HTTP error
+//	httpErr := response.HTTPError{
+//		Status:  http.StatusBadRequest,
+//		Code:    "validation_failed",
+//		Message: "Invalid input data",
+//		Details: map[string]any{
+//			"field_errors": []string{"email is required"},
 //		},
-//	)
-//
-//	// No cache for dynamic content
-//	response.WithHeaders(
-//		response.HTML("dashboard.html", userData),
-//		map[string]string{
-//			"Cache-Control": "no-cache, no-store, must-revalidate",
-//			"Pragma":        "no-cache",
-//			"Expires":       "0",
-//		},
-//	)
-//
-// # API Response Patterns
-//
-// Implement consistent API response patterns:
-//
-//	type APIResponse struct {
-//		Success bool        `json:"success"`
-//		Data    any         `json:"data,omitempty"`
-//		Error   *APIError   `json:"error,omitempty"`
-//		Meta    *APIMeta    `json:"meta,omitempty"`
 //	}
+//	response.Error(httpErr)
 //
-//	func successResponse(data any) handler.Response {
-//		return response.JSON(APIResponse{
-//			Success: true,
-//			Data:    data,
-//		})
+//	// Use error handlers for consistent error processing
+//	response.ErrorHandler(ctx, err)     // Plain text error response
+//	response.JSONErrorHandler(ctx, err) // JSON error response
+//
+// # Rendering Responses
+//
+// Use the Render function to execute responses in handlers:
+//
+//	func handler(ctx handler.Context) {
+//		resp := response.JSON(data)
+//		response.Render(ctx, resp)
 //	}
-//
-//	func errorResponse(code int, message string) handler.Response {
-//		return response.JSONWithStatus(code, APIResponse{
-//			Success: false,
-//			Error: &APIError{
-//				Code:    code,
-//				Message: message,
-//			},
-//		})
-//	}
-//
-//	func paginatedResponse(data any, page, limit, total int) handler.Response {
-//		return response.JSON(APIResponse{
-//			Success: true,
-//			Data:    data,
-//			Meta: &APIMeta{
-//				Page:       page,
-//				Limit:      limit,
-//				Total:      total,
-//				TotalPages: (total + limit - 1) / limit,
-//			},
-//		})
-//	}
-//
-// # Best Practices
-//
-//   - Use appropriate HTTP status codes for different scenarios
-//   - Set proper Content-Type headers for all responses
-//   - Implement consistent error response formats
-//   - Use HTMX helpers for modern web applications
-//   - Handle content negotiation for API versioning
-//   - Set appropriate caching headers for static content
-//   - Log errors before sending error responses
-//   - Use streaming responses for large data sets
-//   - Implement proper CORS headers for API endpoints
-//   - Use decorators to add cross-cutting concerns like headers and cookies
 package response

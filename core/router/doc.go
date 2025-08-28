@@ -1,147 +1,133 @@
-// Package router provides a high-performance HTTP router with middleware support,
-// context management, and flexible routing patterns. It offers both programmatic
-// route definition and chainable middleware composition for building robust web applications.
+// Package router provides a high-performance, type-safe HTTP router with middleware support
+// built on top of a radix tree for efficient path matching.
 //
-// # Features
+// The router supports modern web development patterns including middleware chaining,
+// route grouping, sub-router mounting, and WebSocket upgrades. It uses Go generics
+// to provide type-safe context handling while maintaining excellent performance
+// through its radix tree implementation.
 //
-//   - High-performance radix tree-based routing
-//   - Type-safe middleware composition
-//   - Context-aware request handling
-//   - Path parameter extraction
-//   - Method-based routing (GET, POST, PUT, DELETE, etc.)
-//   - Mount support for sub-routers
-//   - Error handling with custom error handlers
-//   - Middleware chaining with proper execution order
-//   - Compatible with standard http.Handler interface
+// Basic usage:
 //
-// # Basic Usage
+//	import (
+//		"net/http"
+//		"github.com/dmitrymomot/foundation/core/handler"
+//		"github.com/dmitrymomot/foundation/core/router"
+//	)
 //
-// Create a router and define routes with handlers:
+//	func main() {
+//		r := router.New[*router.Context]()
 //
-//	import "github.com/dmitrymomot/foundation/core/router"
-//
-//	// Create a new router
-//	r := router.New()
-//
-//	// Define routes
-//	r.GET("/users", listUsersHandler)
-//	r.POST("/users", createUserHandler)
-//	r.GET("/users/{id}", getUserHandler)
-//	r.PUT("/users/{id}", updateUserHandler)
-//	r.DELETE("/users/{id}", deleteUserHandler)
-//
-//	// Start server
-//	http.ListenAndServe(":8080", r)
-//
-// # Path Parameters
-//
-// Extract path parameters from URLs:
-//
-//	func getUserHandler(ctx router.Context) router.Response {
-//		userID := ctx.Param("id")
-//		user, err := userService.GetByID(userID)
-//		if err != nil {
-//			return response.Error(404, "User not found")
-//		}
-//		return response.JSON(user)
-//	}
-//
-//	// Multiple parameters
-//	r.GET("/users/{userID}/posts/{postID}", func(ctx router.Context) router.Response {
-//		userID := ctx.Param("userID")
-//		postID := ctx.Param("postID")
-//		// Handle request
-//	})
-//
-// # Middleware
-//
-// Add middleware for cross-cutting concerns:
-//
-//	// Logging middleware
-//	func loggingMiddleware(next router.HandlerFunc) router.HandlerFunc {
-//		return func(ctx router.Context) router.Response {
-//			start := time.Now()
-//			response := next(ctx)
-//			log.Printf("%s %s - %v", ctx.Request().Method, ctx.Request().URL.Path, time.Since(start))
-//			return response
-//		}
-//	}
-//
-//	// Auth middleware
-//	func authMiddleware(next router.HandlerFunc) router.HandlerFunc {
-//		return func(ctx router.Context) router.Response {
-//			token := ctx.Request().Header.Get("Authorization")
-//			if !isValidToken(token) {
-//				return response.Error(401, "Unauthorized")
+//		r.Get("/", func(ctx *router.Context) handler.Response {
+//			return func(w http.ResponseWriter, r *http.Request) error {
+//				w.Write([]byte("Hello World"))
+//				return nil
 //			}
-//			ctx.SetValue("userID", extractUserID(token))
-//			return next(ctx)
-//		}
+//		})
+//
+//		r.Get("/users/{id}", func(ctx *router.Context) handler.Response {
+//			return func(w http.ResponseWriter, r *http.Request) error {
+//				id := ctx.Param("id")
+//				w.Write([]byte("User ID: " + id))
+//				return nil
+//			}
+//		})
+//
+//		http.ListenAndServe(":8080", r)
 //	}
 //
-//	// Apply middleware
-//	r.Use(loggingMiddleware)
-//	r.Use(authMiddleware)
+// # Route Patterns
 //
-// # Route Groups
+// The router supports several URL pattern types:
 //
-// Group routes with common middleware:
+//   - Static routes: /users/profile
+//   - Parameters: /users/{id} or /users/{id:[0-9]+} with regex constraints
+//   - Wildcards: /files/* (catches all remaining path segments)
 //
-//	// API v1 routes
-//	v1 := r.Group("/api/v1")
-//	v1.Use(apiMiddleware)
-//	v1.GET("/users", listUsersHandler)
-//	v1.POST("/users", createUserHandler)
+// Parameters are extracted and made available via ctx.Param("name").
 //
-//	// Admin routes
-//	admin := r.Group("/admin")
-//	admin.Use(adminMiddleware)
-//	admin.GET("/dashboard", dashboardHandler)
-//	admin.GET("/users", adminUsersHandler)
+// # Middleware Support
+//
+// Middleware can be applied globally or to specific route groups:
+//
+//	// Global middleware
+//	r.Use(loggingMiddleware, authMiddleware)
+//
+//	// Route-specific middleware
+//	r.With(adminMiddleware).Get("/admin", adminHandler)
+//
+//	// Route groups with shared middleware
+//	r.Route("/api/v1", func(r router.Router[*router.Context]) {
+//		r.Use(apiMiddleware)
+//		r.Get("/users", listUsersHandler)
+//		r.Post("/users", createUserHandler)
+//	})
 //
 // # Error Handling
 //
-// Implement custom error handling:
+// The router provides comprehensive error handling with panic recovery:
 //
-//	r.SetErrorHandler(func(ctx router.Context, err error) {
-//		log.Printf("Route error: %v", err)
-//		switch {
-//		case errors.Is(err, ErrNotFound):
-//			response.Error(404, "Not found")(ctx.ResponseWriter(), ctx.Request())
-//		case errors.Is(err, ErrUnauthorized):
-//			response.Error(401, "Unauthorized")(ctx.ResponseWriter(), ctx.Request())
-//		default:
-//			response.Error(500, "Internal server error")(ctx.ResponseWriter(), ctx.Request())
+//	errorHandler := func(ctx *router.Context, err error) {
+//		if panicErr, ok := err.(router.PanicError); ok {
+//			log.Printf("Panic: %v\nStack: %s", panicErr.Value(), panicErr.Stack())
+//		}
+//		http.Error(ctx.ResponseWriter(), err.Error(), http.StatusInternalServerError)
+//	}
+//
+//	r := router.New[*router.Context](
+//		router.WithErrorHandler(errorHandler),
+//	)
+//
+// # Custom Context Types
+//
+// Use custom context types for application-specific data:
+//
+//	type AppContext struct {
+//		*router.Context
+//		User *User
+//		DB   *sql.DB
+//	}
+//
+//	contextFactory := func(w http.ResponseWriter, r *http.Request, params map[string]string) *AppContext {
+//		return &AppContext{
+//			Context: router.newContext(w, r, params), // Note: this requires package access
+//			DB:      db,
+//		}
+//	}
+//
+//	r := router.New[*AppContext](
+//		router.WithContextFactory(contextFactory),
+//	)
+//
+// # WebSocket Support
+//
+// The router supports WebSocket upgrades through the http.Hijacker interface:
+//
+//	r.Get("/ws", func(ctx *router.Context) handler.Response {
+//		return func(w http.ResponseWriter, r *http.Request) error {
+//			hijacker, ok := w.(http.Hijacker)
+//			if !ok {
+//				return errors.New("websocket upgrade not supported")
+//			}
+//			// Use websocket library to upgrade connection
+//			// upgrader.Upgrade(w, r, nil)
+//			return nil
 //		}
 //	})
 //
-// # Sub-routers and Mounting
+// # Sub-router Mounting
 //
-// Mount sub-routers for modular applications:
+// Mount sub-routers for modular application design:
 //
-//	// User routes
-//	userRouter := router.New()
-//	userRouter.GET("/", listUsersHandler)
-//	userRouter.POST("/", createUserHandler)
-//	userRouter.GET("/{id}", getUserHandler)
+//	apiRouter := router.New[*router.Context]()
+//	apiRouter.Get("/users", listUsersHandler)
+//	apiRouter.Post("/users", createUserHandler)
 //
-//	// Product routes
-//	productRouter := router.New()
-//	productRouter.GET("/", listProductsHandler)
-//	productRouter.POST("/", createProductHandler)
+//	mainRouter := router.New[*router.Context]()
+//	mainRouter.Mount("/api/v1", apiRouter)
 //
-//	// Mount sub-routers
-//	r.Mount("/users", userRouter)
-//	r.Mount("/products", productRouter)
+// # Performance
 //
-// # Best Practices
-//
-//   - Use middleware for cross-cutting concerns
-//   - Group related routes together
-//   - Implement proper error handling
-//   - Use path parameters for dynamic routes
-//   - Apply authentication/authorization middleware appropriately
-//   - Log requests and responses for debugging
-//   - Use context for request-scoped data
-//   - Keep handlers focused on single responsibilities
+// The router uses a radix tree for O(k) path matching where k is the key length,
+// providing excellent performance even with thousands of routes. The tree supports
+// efficient parameter extraction and wildcard matching.
 package router

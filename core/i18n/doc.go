@@ -184,12 +184,12 @@
 //
 // The package includes CLDR-compliant plural rules for major language families:
 //
-//   - EnglishPluralRule: English and similar languages (zero, one, other)
-//   - SlavicPluralRule: Polish, Ukrainian, Czech, etc. (zero, one, few, many)
+//   - EnglishPluralRule: English (zero, one, other)
+//   - SlavicPluralRule: Polish, Czech, Ukrainian, etc. (zero, one, few, many)
 //   - RomancePluralRule: French, Italian, Portuguese (one for 0,1; many for 1M+; other)
 //   - SpanishPluralRule: Spanish (one, many for 1M+, other)
-//   - GermanicPluralRule: German, Dutch, Swedish, etc. (one, other)
-//   - AsianPluralRule: Japanese, Chinese, Korean, etc. (other only)
+//   - GermanicPluralRule: German, Dutch, Swedish, Norwegian, etc. (one, other)
+//   - AsianPluralRule: Japanese, Chinese, Korean, Thai, etc. (other only)
 //   - ArabicPluralRule: Arabic (zero, one, two, few, many, other)
 //   - DefaultPluralRule: Generic rule for unknown languages
 //
