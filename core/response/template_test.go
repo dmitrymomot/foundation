@@ -38,9 +38,9 @@ func TestTemplate(t *testing.T) {
 		{
 			name:            "template_with_struct",
 			template:        tmpl,
-			data:            struct{ Name string }{Name: "GoKit"},
+			data:            struct{ Name string }{Name: "Foundation"},
 			expectedStatus:  http.StatusOK,
-			expectedContent: "<h1>Hello GoKit</h1>",
+			expectedContent: "<h1>Hello Foundation</h1>",
 			expectedType:    "text/html; charset=utf-8",
 		},
 		{

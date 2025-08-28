@@ -265,7 +265,7 @@ func TestTempl_RealWorldExample(t *testing.T) {
     <title>Welcome</title>
 </head>
 <body>
-    <h1>Welcome to GoKit</h1>
+    <h1>Welcome to Foundation</h1>
     <p>This is rendered with templ!</p>
 </body>
 </html>`
@@ -280,6 +280,6 @@ func TestTempl_RealWorldExample(t *testing.T) {
 	err := response(w, req)
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "Welcome to GoKit")
+	assert.Contains(t, w.Body.String(), "Welcome to Foundation")
 	assert.Contains(t, w.Body.String(), "This is rendered with templ!")
 }
