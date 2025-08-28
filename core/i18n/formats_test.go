@@ -8,214 +8,179 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestFormatNumber(t *testing.T) {
-	tests := []struct {
-		name     string
-		number   float64
-		lang     string
-		expected string
-	}{
-		// English formatting
-		{"English integer", 1234, "en", "1,234"},
-		{"English decimal", 1234.5, "en", "1,234.5"},
-		{"English large number", 1234567.89, "en", "1,234,567.89"},
-		{"English negative", -1234.5, "en", "-1,234.5"},
-		{"English small number", 123, "en", "123"},
-		{"English zero", 0, "en", "0"},
+func TestLocaleFormat_FormatNumber(t *testing.T) {
+	t.Run("English format", func(t *testing.T) {
+		lf := i18n.NewEnglishFormat()
 
-		// German formatting
-		{"German integer", 1234, "de", "1.234"},
-		{"German decimal", 1234.5, "de", "1.234,5"},
-		{"German large number", 1234567.89, "de", "1.234.567,89"},
-		{"German negative", -1234.5, "de", "-1.234,5"},
+		assert.Equal(t, "1,234", lf.FormatNumber(1234))
+		assert.Equal(t, "1,234.5", lf.FormatNumber(1234.5))
+		assert.Equal(t, "1,234,567.89", lf.FormatNumber(1234567.89))
+		assert.Equal(t, "-1,234.5", lf.FormatNumber(-1234.5))
+		assert.Equal(t, "123", lf.FormatNumber(123))
+		assert.Equal(t, "0", lf.FormatNumber(0))
+	})
 
-		// French formatting
-		{"French integer", 1234, "fr", "1 234"},
-		{"French decimal", 1234.5, "fr", "1 234,5"},
-		{"French large number", 1234567.89, "fr", "1 234 567,89"},
+	t.Run("Custom format with options", func(t *testing.T) {
+		// European-style formatting
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDecimalSeparator(","),
+			i18n.WithThousandSeparator("."),
+		)
 
-		// Spanish formatting
-		{"Spanish integer", 1234, "es", "1.234"},
-		{"Spanish decimal", 1234.5, "es", "1.234,5"},
+		assert.Equal(t, "1.234", lf.FormatNumber(1234))
+		assert.Equal(t, "1.234,5", lf.FormatNumber(1234.5))
+		assert.Equal(t, "1.234.567,89", lf.FormatNumber(1234567.89))
+		assert.Equal(t, "-1.234,5", lf.FormatNumber(-1234.5))
+	})
 
-		// Fallback to English for unknown language
-		{"Unknown language", 1234.5, "xx", "1,234.5"},
-	}
+	t.Run("Space as thousand separator", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDecimalSeparator(","),
+			i18n.WithThousandSeparator(" "),
+		)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := i18n.FormatNumber(tt.number, tt.lang)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+		assert.Equal(t, "1 234", lf.FormatNumber(1234))
+		assert.Equal(t, "1 234,5", lf.FormatNumber(1234.5))
+		assert.Equal(t, "1 234 567,89", lf.FormatNumber(1234567.89))
+	})
 }
 
-func TestFormatCurrency(t *testing.T) {
-	tests := []struct {
-		name     string
-		amount   float64
-		lang     string
-		expected string
-	}{
-		// English/USD formatting
-		{"English positive", 1234.50, "en", "$1,234.50"},
-		{"English integer", 1234, "en", "$1,234.00"},
-		{"English negative", -1234.50, "en", "-$1,234.50"},
-		{"English cents only", 0.99, "en", "$0.99"},
-		{"English zero", 0, "en", "$0.00"},
+func TestLocaleFormat_FormatCurrency(t *testing.T) {
+	t.Run("English/USD format", func(t *testing.T) {
+		lf := i18n.NewEnglishFormat()
 
-		// German/Euro formatting
-		{"German positive", 1234.50, "de", "1.234,50 €"},
-		{"German integer", 1234, "de", "1.234,00 €"},
-		{"German negative", -1234.50, "de", "-1.234,50 €"},
+		assert.Equal(t, "$1,234.50", lf.FormatCurrency(1234.50))
+		assert.Equal(t, "$1,234.00", lf.FormatCurrency(1234))
+		assert.Equal(t, "-$1,234.50", lf.FormatCurrency(-1234.50))
+		assert.Equal(t, "$0.99", lf.FormatCurrency(0.99))
+		assert.Equal(t, "$0.00", lf.FormatCurrency(0))
+	})
 
-		// Spanish/Euro formatting
-		{"Spanish positive", 1234.50, "es", "1.234,50 €"},
+	t.Run("Custom Euro format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDecimalSeparator(","),
+			i18n.WithThousandSeparator("."),
+			i18n.WithCurrencySymbol("€"),
+			i18n.WithCurrencyPosition("after"),
+		)
 
-		// French/Euro formatting
-		{"French positive", 1234.50, "fr", "1 234,50 €"},
+		assert.Equal(t, "1.234,50 €", lf.FormatCurrency(1234.50))
+		assert.Equal(t, "1.234,00 €", lf.FormatCurrency(1234))
+		assert.Equal(t, "-1.234,50 €", lf.FormatCurrency(-1234.50))
+	})
 
-		// Japanese/Yen formatting
-		{"Japanese positive", 1234.50, "ja", "¥1,234.50"},
+	t.Run("Custom Pound format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithCurrencySymbol("£"),
+		)
 
-		// Portuguese/Real formatting
-		{"Portuguese positive", 1234.50, "pt", "R$1.234,50"},
+		assert.Equal(t, "£1,234.50", lf.FormatCurrency(1234.50))
+	})
 
-		// Russian/Ruble formatting
-		{"Russian positive", 1234.50, "ru", "1 234,50 ₽"},
+	t.Run("Custom Brazilian Real format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDecimalSeparator(","),
+			i18n.WithThousandSeparator("."),
+			i18n.WithCurrencySymbol("R$"),
+		)
 
-		// Unknown language fallback
-		{"Unknown language", 1234.50, "xx", "$1,234.50"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := i18n.FormatCurrency(tt.amount, tt.lang)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+		assert.Equal(t, "R$1.234,50", lf.FormatCurrency(1234.50))
+	})
 }
 
-func TestFormatPercent(t *testing.T) {
-	tests := []struct {
-		name     string
-		value    float64
-		lang     string
-		expected string
-	}{
-		// English formatting
-		{"English 50%", 0.5, "en", "50%"},
-		{"English 100%", 1.0, "en", "100%"},
-		{"English 0%", 0, "en", "0%"},
-		{"English 25.5%", 0.255, "en", "25.5%"},
-		{"English negative", -0.15, "en", "-15%"},
-		{"English small", 0.005, "en", "0.5%"},
+func TestLocaleFormat_FormatPercent(t *testing.T) {
+	t.Run("English format", func(t *testing.T) {
+		lf := i18n.NewEnglishFormat()
 
-		// German formatting
-		{"German 50%", 0.5, "de", "50%"},
-		{"German 25.5%", 0.255, "de", "25,5%"},
+		assert.Equal(t, "50%", lf.FormatPercent(0.5))
+		assert.Equal(t, "100%", lf.FormatPercent(1.0))
+		assert.Equal(t, "0%", lf.FormatPercent(0))
+		assert.Equal(t, "25.5%", lf.FormatPercent(0.255))
+		assert.Equal(t, "-15%", lf.FormatPercent(-0.15))
+		assert.Equal(t, "0.5%", lf.FormatPercent(0.005))
+	})
 
-		// French formatting
-		{"French 50%", 0.5, "fr", "50%"},
-		{"French 25.5%", 0.255, "fr", "25,5%"},
+	t.Run("Custom format with comma decimal", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDecimalSeparator(","),
+		)
 
-		// Unknown language fallback
-		{"Unknown language", 0.5, "xx", "50%"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := i18n.FormatPercent(tt.value, tt.lang)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+		assert.Equal(t, "50%", lf.FormatPercent(0.5))
+		assert.Equal(t, "25,5%", lf.FormatPercent(0.255))
+		assert.Equal(t, "-15%", lf.FormatPercent(-0.15))
+	})
 }
 
-func TestFormatDate(t *testing.T) {
-	// Use a fixed date for testing: January 2, 2024
+func TestLocaleFormat_FormatDate(t *testing.T) {
 	testDate := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
 
-	tests := []struct {
-		name     string
-		date     time.Time
-		lang     string
-		expected string
-	}{
-		{"English date", testDate, "en", "01/02/2024"},
-		{"German date", testDate, "de", "02.01.2024"},
-		{"French date", testDate, "fr", "02/01/2024"},
-		{"Spanish date", testDate, "es", "02/01/2024"},
-		{"Japanese date", testDate, "ja", "2024/01/02"},
-		{"Chinese date", testDate, "zh", "2024/01/02"},
-		{"Dutch date", testDate, "nl", "02-01-2024"},
-		{"Russian date", testDate, "ru", "02.01.2024"},
-		{"Unknown language", testDate, "xx", "01/02/2024"},
-	}
+	t.Run("English format", func(t *testing.T) {
+		lf := i18n.NewEnglishFormat()
+		assert.Equal(t, "01/02/2024", lf.FormatDate(testDate))
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := i18n.FormatDate(tt.date, tt.lang)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	t.Run("Custom European format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDateFormat("02.01.2006"),
+		)
+		assert.Equal(t, "02.01.2024", lf.FormatDate(testDate))
+	})
+
+	t.Run("Custom ISO format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDateFormat("2006-01-02"),
+		)
+		assert.Equal(t, "2024-01-02", lf.FormatDate(testDate))
+	})
 }
 
-func TestFormatTime(t *testing.T) {
-	// Use a fixed time for testing: 3:04 PM
+func TestLocaleFormat_FormatTime(t *testing.T) {
 	testTime := time.Date(2024, 1, 2, 15, 4, 0, 0, time.UTC)
 
-	tests := []struct {
-		name     string
-		time     time.Time
-		lang     string
-		expected string
-	}{
-		{"English time", testTime, "en", "3:04 PM"},
-		{"German time", testTime, "de", "15:04"},
-		{"French time", testTime, "fr", "15:04"},
-		{"Spanish time", testTime, "es", "15:04"},
-		{"Japanese time", testTime, "ja", "15:04"},
-		{"Unknown language", testTime, "xx", "3:04 PM"},
-	}
+	t.Run("English 12-hour format", func(t *testing.T) {
+		lf := i18n.NewEnglishFormat()
+		assert.Equal(t, "3:04 PM", lf.FormatTime(testTime))
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := i18n.FormatTime(tt.time, tt.lang)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	t.Run("Custom 24-hour format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithTimeFormat("15:04"),
+		)
+		assert.Equal(t, "15:04", lf.FormatTime(testTime))
+	})
+
+	t.Run("Custom format with seconds", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithTimeFormat("15:04:05"),
+		)
+		assert.Equal(t, "15:04:00", lf.FormatTime(testTime))
+	})
 }
 
-func TestFormatDateTime(t *testing.T) {
-	// Use a fixed datetime for testing: January 2, 2024 3:04 PM
+func TestLocaleFormat_FormatDateTime(t *testing.T) {
 	testDateTime := time.Date(2024, 1, 2, 15, 4, 0, 0, time.UTC)
 
-	tests := []struct {
-		name     string
-		datetime time.Time
-		lang     string
-		expected string
-	}{
-		{"English datetime", testDateTime, "en", "01/02/2024 3:04 PM"},
-		{"German datetime", testDateTime, "de", "02.01.2024 15:04"},
-		{"French datetime", testDateTime, "fr", "02/01/2024 15:04"},
-		{"Spanish datetime", testDateTime, "es", "02/01/2024 15:04"},
-		{"Japanese datetime", testDateTime, "ja", "2024/01/02 15:04"},
-		{"Chinese datetime", testDateTime, "zh", "2024/01/02 15:04"},
-		{"Dutch datetime", testDateTime, "nl", "02-01-2024 15:04"},
-		{"Russian datetime", testDateTime, "ru", "02.01.2024 15:04"},
-		{"Unknown language", testDateTime, "xx", "01/02/2024 3:04 PM"},
-	}
+	t.Run("English format", func(t *testing.T) {
+		lf := i18n.NewEnglishFormat()
+		assert.Equal(t, "01/02/2024 3:04 PM", lf.FormatDateTime(testDateTime))
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := i18n.FormatDateTime(tt.datetime, tt.lang)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
+	t.Run("Custom European format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDateTimeFormat("02.01.2006 15:04"),
+		)
+		assert.Equal(t, "02.01.2024 15:04", lf.FormatDateTime(testDateTime))
+	})
+
+	t.Run("Custom ISO format", func(t *testing.T) {
+		lf := i18n.NewLocaleFormat(
+			i18n.WithDateTimeFormat("2006-01-02T15:04:05Z07:00"),
+		)
+		assert.Equal(t, "2024-01-02T15:04:00Z", lf.FormatDateTime(testDateTime))
+	})
 }
 
-func TestTranslatorFormatMethods(t *testing.T) {
+func TestTranslatorWithFormat(t *testing.T) {
 	// Create an i18n instance
 	i18nInstance, err := i18n.New(
 		i18n.WithDefaultLanguage("en"),
@@ -225,42 +190,47 @@ func TestTranslatorFormatMethods(t *testing.T) {
 	)
 	assert.NoError(t, err)
 
-	t.Run("FormatNumber", func(t *testing.T) {
-		translator := i18n.NewTranslator(i18nInstance, "de", "test")
-		result := translator.FormatNumber(1234.5)
-		assert.Equal(t, "1.234,5", result)
-	})
-
-	t.Run("FormatCurrency", func(t *testing.T) {
-		translator := i18n.NewTranslator(i18nInstance, "de", "test")
-		result := translator.FormatCurrency(1234.50)
-		assert.Equal(t, "1.234,50 €", result)
-	})
-
-	t.Run("FormatPercent", func(t *testing.T) {
-		translator := i18n.NewTranslator(i18nInstance, "fr", "test")
-		result := translator.FormatPercent(0.255)
-		assert.Equal(t, "25,5%", result)
-	})
-
-	t.Run("FormatDate", func(t *testing.T) {
-		translator := i18n.NewTranslator(i18nInstance, "ja", "test")
-		testDate := time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC)
-		result := translator.FormatDate(testDate)
-		assert.Equal(t, "2024/01/02", result)
-	})
-
-	t.Run("FormatTime", func(t *testing.T) {
+	t.Run("Default English format", func(t *testing.T) {
 		translator := i18n.NewTranslator(i18nInstance, "en", "test")
-		testTime := time.Date(2024, 1, 2, 15, 4, 0, 0, time.UTC)
-		result := translator.FormatTime(testTime)
-		assert.Equal(t, "3:04 PM", result)
+
+		assert.Equal(t, "1,234.5", translator.FormatNumber(1234.5))
+		assert.Equal(t, "$1,234.50", translator.FormatCurrency(1234.50))
+		assert.Equal(t, "25.5%", translator.FormatPercent(0.255))
+
+		testDate := time.Date(2024, 1, 2, 15, 4, 0, 0, time.UTC)
+		assert.Equal(t, "01/02/2024", translator.FormatDate(testDate))
+		assert.Equal(t, "3:04 PM", translator.FormatTime(testDate))
+		assert.Equal(t, "01/02/2024 3:04 PM", translator.FormatDateTime(testDate))
 	})
 
-	t.Run("FormatDateTime", func(t *testing.T) {
-		translator := i18n.NewTranslator(i18nInstance, "es", "test")
-		testDateTime := time.Date(2024, 1, 2, 15, 4, 0, 0, time.UTC)
-		result := translator.FormatDateTime(testDateTime)
-		assert.Equal(t, "02/01/2024 15:04", result)
+	t.Run("Custom format with NewTranslatorWithFormat", func(t *testing.T) {
+		customFormat := i18n.NewLocaleFormat(
+			i18n.WithDecimalSeparator(","),
+			i18n.WithThousandSeparator("."),
+			i18n.WithCurrencySymbol("€"),
+			i18n.WithCurrencyPosition("after"),
+			i18n.WithDateFormat("02.01.2006"),
+			i18n.WithTimeFormat("15:04"),
+			i18n.WithDateTimeFormat("02.01.2006 15:04"),
+		)
+
+		translator := i18n.NewTranslatorWithFormat(i18nInstance, "en", "test", customFormat)
+
+		assert.Equal(t, "1.234,5", translator.FormatNumber(1234.5))
+		assert.Equal(t, "1.234,50 €", translator.FormatCurrency(1234.50))
+		assert.Equal(t, "25,5%", translator.FormatPercent(0.255))
+
+		testDate := time.Date(2024, 1, 2, 15, 4, 0, 0, time.UTC)
+		assert.Equal(t, "02.01.2024", translator.FormatDate(testDate))
+		assert.Equal(t, "15:04", translator.FormatTime(testDate))
+		assert.Equal(t, "02.01.2024 15:04", translator.FormatDateTime(testDate))
+	})
+
+	t.Run("Access format from translator", func(t *testing.T) {
+		translator := i18n.NewTranslator(i18nInstance, "en", "test")
+		format := translator.Format()
+
+		assert.NotNil(t, format)
+		assert.Equal(t, "1,234.5", format.FormatNumber(1234.5))
 	})
 }

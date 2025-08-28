@@ -296,42 +296,43 @@
 // # Locale-Aware Formatting
 //
 // The Translator provides convenient methods for formatting numbers, currencies,
-// dates, and percentages according to locale-specific conventions:
+// dates, and percentages. By default, it uses US English formatting, but you can
+// customize the formatting using LocaleFormat:
 //
-//	translator := i18n.NewTranslator(i18nInstance, "de", "app")
+//	// Default English formatting
+//	translator := i18n.NewTranslator(i18nInstance, "en", "app")
+//	fmt.Println(translator.FormatCurrency(1234.50))  // "$1,234.50"
+//	fmt.Println(translator.FormatNumber(1234.5))     // "1,234.5"
+//	fmt.Println(translator.FormatDate(now))          // "01/02/2006"
 //
-//	// Format numbers with locale-specific separators
-//	price := translator.FormatNumber(1234.5)
-//	// Output: "1.234,5" (German format)
+//	// Custom formatting with LocaleFormat
+//	euroFormat := i18n.NewLocaleFormat(
+//		i18n.WithDecimalSeparator(","),
+//		i18n.WithThousandSeparator("."),
+//		i18n.WithCurrencySymbol("€"),
+//		i18n.WithCurrencyPosition("after"),
+//		i18n.WithDateFormat("02.01.2006"),
+//		i18n.WithTimeFormat("15:04"),
+//	)
+//	translator := i18n.NewTranslatorWithFormat(i18nInstance, "en", "app", euroFormat)
+//	fmt.Println(translator.FormatCurrency(1234.50))  // "1.234,50 €"
+//	fmt.Println(translator.FormatNumber(1234.5))     // "1.234,5"
+//	fmt.Println(translator.FormatDate(now))          // "02.01.2006"
 //
-//	// Format currency with appropriate symbol and position
-//	cost := translator.FormatCurrency(99.99)
-//	// Output: "99,99 €" (German format)
+// You can also create and reuse LocaleFormat instances for consistency:
 //
-//	// Format percentages (input as decimal: 0.5 = 50%)
-//	rate := translator.FormatPercent(0.255)
-//	// Output: "25,5%" (German format)
+//	// Create a reusable format for your application
+//	myFormat := i18n.NewLocaleFormat(
+//		i18n.WithDecimalSeparator(","),
+//		i18n.WithThousandSeparator(" "),
+//		i18n.WithCurrencySymbol("USD"),
+//		i18n.WithCurrencyPosition("after"),
+//	)
 //
-//	// Format dates and times
-//	now := time.Now()
-//	dateStr := translator.FormatDate(now)      // "02.01.2006" format
-//	timeStr := translator.FormatTime(now)      // "15:04" format
-//	datetimeStr := translator.FormatDateTime(now) // "02.01.2006 15:04" format
+//	// Use the same format across multiple translators
+//	translator1 := i18n.NewTranslatorWithFormat(i18n1, "en", "app", myFormat)
+//	translator2 := i18n.NewTranslatorWithFormat(i18n2, "es", "app", myFormat)
 //
-// Formatting automatically adapts to the translator's language:
-//
-//	// English formatting
-//	enTranslator := i18n.NewTranslator(i18nInstance, "en", "app")
-//	fmt.Println(enTranslator.FormatCurrency(1234.50))  // "$1,234.50"
-//	fmt.Println(enTranslator.FormatNumber(1234.5))     // "1,234.5"
-//	fmt.Println(enTranslator.FormatDate(now))          // "01/02/2006"
-//
-//	// French formatting
-//	frTranslator := i18n.NewTranslator(i18nInstance, "fr", "app")
-//	fmt.Println(frTranslator.FormatCurrency(1234.50))  // "1 234,50 €"
-//	fmt.Println(frTranslator.FormatNumber(1234.5))     // "1 234,5"
-//	fmt.Println(frTranslator.FormatDate(now))          // "02/01/2006"
-//
-// Supported locales include English, Spanish, French, German, Italian, Portuguese,
-// Russian, Dutch, Japanese, and Chinese. Unknown locales fall back to English formatting.
+// The LocaleFormat struct is immutable and thread-safe, making it safe to share
+// across multiple translators and goroutines.
 package i18n
