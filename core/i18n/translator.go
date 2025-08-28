@@ -10,6 +10,12 @@ type Translator struct {
 
 // NewTranslator creates a new Translator with the specified language and namespace context.
 func NewTranslator(i18n *I18n, language, namespace string) *Translator {
+	if i18n == nil {
+		panic("localization service is not provided")
+	}
+	if language == "" {
+		language = i18n.DefaultLanguage()
+	}
 	return &Translator{
 		i18n:      i18n,
 		language:  language,
