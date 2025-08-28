@@ -211,10 +211,7 @@ func (lf *LocaleFormat) formatIntegerWithSeparator(n int64) string {
 	var result []string
 
 	for i := len(str); i > 0; i -= 3 {
-		start := i - 3
-		if start < 0 {
-			start = 0
-		}
+		start := max(0, i-3)
 		result = append([]string{str[start:i]}, result...)
 	}
 
