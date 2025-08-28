@@ -236,4 +236,40 @@
 //	uiMsg := i18nInstance.T("en", "ui", "save")     // "Save"
 //	emailMsg := i18nInstance.T("en", "email", "save") // "Your changes have been saved"
 //	apiMsg := i18nInstance.T("en", "api", "save")   // "Failed to save data"
+//
+// # Simplified Translation with Translator
+//
+// The Translator type provides a simplified interface for translations by fixing
+// the language and namespace context. This is especially useful in web applications
+// where you want to translate content for a specific user's language and context.
+//
+//	// Create a translator for a specific user language and namespace
+//	translator := i18n.NewTranslator(i18nInstance, "es", "ui")
+//
+//	// Use simplified methods without specifying language/namespace
+//	saveButton := translator.T("buttons.save")
+//	// Output: "Guardar"
+//
+//	cancelButton := translator.T("buttons.cancel")
+//	// Output: "Cancelar"
+//
+//	// Pluralization with simplified interface
+//	itemCount := translator.Tn("items.count", 5)
+//	// Output: "5 elementos"
+//
+//	// Access the translator's context
+//	currentLang := translator.Language()  // Returns: "es"
+//	namespace := translator.Namespace()   // Returns: "ui"
+//
+// The Translator is particularly useful in web handlers where the language is
+// determined once per request but used multiple times:
+//
+//	func handleUserProfile(translator *i18n.Translator) {
+//		title := translator.T("profile.title")
+//		description := translator.T("profile.description", i18n.M{
+//			"username": user.Name,
+//		})
+//		saveBtn := translator.T("buttons.save")
+//		// No need to repeat language and namespace for each translation
+//	}
 package i18n
