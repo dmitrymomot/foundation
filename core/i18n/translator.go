@@ -1,5 +1,7 @@
 package i18n
 
+import "time"
+
 // Translator provides a simplified translation interface with a fixed language and namespace context.
 // It wraps an I18n instance and eliminates the need to specify language and namespace for each translation.
 type Translator struct {
@@ -43,4 +45,41 @@ func (t *Translator) Language() string {
 // Namespace returns the current namespace context of the translator.
 func (t *Translator) Namespace() string {
 	return t.namespace
+}
+
+// FormatNumber formats a number with locale-specific separators.
+// For example, in English: 1234.5 -> "1,234.5", in German: "1.234,5"
+func (t *Translator) FormatNumber(n float64) string {
+	return FormatNumber(n, t.language)
+}
+
+// FormatCurrency formats a currency amount with locale-specific formatting.
+// For example, in English: 1234.50 -> "$1,234.50", in German: "1.234,50 €"
+func (t *Translator) FormatCurrency(amount float64) string {
+	return FormatCurrency(amount, t.language)
+}
+
+// FormatPercent formats a percentage with locale-specific formatting.
+// The input should be a decimal (0.5 for 50%).
+// For example, in English: 0.5 -> "50%", in French: "50 %"
+func (t *Translator) FormatPercent(n float64) string {
+	return FormatPercent(n, t.language)
+}
+
+// FormatDate formats a date with locale-specific formatting.
+// For example, in US English: "01/02/2006", in German: "02.01.2006"
+func (t *Translator) FormatDate(date time.Time) string {
+	return FormatDate(date, t.language)
+}
+
+// FormatTime formats a time with locale-specific formatting.
+// For example, in US English: "3:04 PM", in German: "15:04"
+func (t *Translator) FormatTime(time time.Time) string {
+	return FormatTime(time, t.language)
+}
+
+// FormatDateTime formats a datetime with locale-specific formatting.
+// Combines date and time formatting for the locale.
+func (t *Translator) FormatDateTime(datetime time.Time) string {
+	return FormatDateTime(datetime, t.language)
 }

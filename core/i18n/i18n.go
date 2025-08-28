@@ -24,6 +24,9 @@ type I18n struct {
 
 	// Pre-computed list of available languages (for O(1) access)
 	languages []string
+
+	// Optional handler called when a translation key is not found
+	missingKeyHandler func(lang, namespace, key string)
 }
 
 // Option configures the I18n instance during construction.
@@ -120,6 +123,17 @@ func WithLanguages(langs ...string) Option {
 	}
 }
 
+// WithMissingKeyHandler sets a handler function that will be called when a translation
+// key is not found in any language (including the default fallback).
+// This is useful for logging missing translations during development.
+// The handler receives the requested language, namespace, and key.
+func WithMissingKeyHandler(handler func(lang, namespace, key string)) Option {
+	return func(i *I18n) error {
+		i.missingKeyHandler = handler
+		return nil
+	}
+}
+
 // WithTranslations loads translations for a specific language and namespace.
 // The translations map can be nested; it will be flattened internally for
 // efficient lookups.
@@ -170,6 +184,11 @@ func (i *I18n) T(lang, namespace, key string, placeholders ...M) string {
 		if translation, exists := i.translations[defaultKey]; exists {
 			return replacePlaceholdersWithMerge(translation, placeholders...)
 		}
+	}
+
+	// Call missing key handler if set
+	if i.missingKeyHandler != nil {
+		i.missingKeyHandler(lang, namespace, key)
 	}
 
 	// Return the key as last resort
@@ -265,6 +284,10 @@ func (i *I18n) Tn(lang, namespace, key string, n int, placeholders ...M) string 
 
 	// If still not found, return the key
 	if !found {
+		// Call missing key handler if set
+		if i.missingKeyHandler != nil {
+			i.missingKeyHandler(lang, namespace, key)
+		}
 		return key
 	}
 

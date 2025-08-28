@@ -272,4 +272,66 @@
 //		saveBtn := translator.T("buttons.save")
 //		// No need to repeat language and namespace for each translation
 //	}
+//
+// # Missing Key Handler
+//
+// Use WithMissingKeyHandler to track missing translations during development.
+// The handler is called only when a translation key is not found in any language:
+//
+//	i18nInstance, err := i18n.New(
+//		i18n.WithMissingKeyHandler(func(lang, namespace, key string) {
+//			log.Printf("Missing translation: %s:%s:%s", lang, namespace, key)
+//			// Could also send to error tracking service
+//		}),
+//		i18n.WithTranslations("en", "app", map[string]any{
+//			"hello": "Hello",
+//		}),
+//	)
+//
+//	// Handler is called for missing keys
+//	msg := i18nInstance.T("en", "app", "missing.key")
+//	// Logs: "Missing translation: en:app:missing.key"
+//	// Returns: "missing.key"
+//
+// # Locale-Aware Formatting
+//
+// The Translator provides convenient methods for formatting numbers, currencies,
+// dates, and percentages according to locale-specific conventions:
+//
+//	translator := i18n.NewTranslator(i18nInstance, "de", "app")
+//
+//	// Format numbers with locale-specific separators
+//	price := translator.FormatNumber(1234.5)
+//	// Output: "1.234,5" (German format)
+//
+//	// Format currency with appropriate symbol and position
+//	cost := translator.FormatCurrency(99.99)
+//	// Output: "99,99 €" (German format)
+//
+//	// Format percentages (input as decimal: 0.5 = 50%)
+//	rate := translator.FormatPercent(0.255)
+//	// Output: "25,5%" (German format)
+//
+//	// Format dates and times
+//	now := time.Now()
+//	dateStr := translator.FormatDate(now)      // "02.01.2006" format
+//	timeStr := translator.FormatTime(now)      // "15:04" format
+//	datetimeStr := translator.FormatDateTime(now) // "02.01.2006 15:04" format
+//
+// Formatting automatically adapts to the translator's language:
+//
+//	// English formatting
+//	enTranslator := i18n.NewTranslator(i18nInstance, "en", "app")
+//	fmt.Println(enTranslator.FormatCurrency(1234.50))  // "$1,234.50"
+//	fmt.Println(enTranslator.FormatNumber(1234.5))     // "1,234.5"
+//	fmt.Println(enTranslator.FormatDate(now))          // "01/02/2006"
+//
+//	// French formatting
+//	frTranslator := i18n.NewTranslator(i18nInstance, "fr", "app")
+//	fmt.Println(frTranslator.FormatCurrency(1234.50))  // "1 234,50 €"
+//	fmt.Println(frTranslator.FormatNumber(1234.5))     // "1 234,5"
+//	fmt.Println(frTranslator.FormatDate(now))          // "02/01/2006"
+//
+// Supported locales include English, Spanish, French, German, Italian, Portuguese,
+// Russian, Dutch, Japanese, and Chinese. Unknown locales fall back to English formatting.
 package i18n
