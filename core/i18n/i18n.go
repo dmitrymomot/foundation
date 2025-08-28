@@ -3,7 +3,11 @@ package i18n
 import (
 	"fmt"
 	"maps"
+	"sort"
 )
+
+// DefaultLang is the default language code used when no default language is specified.
+const DefaultLang = "en"
 
 // I18n provides internationalization support with translations and pluralization.
 // It is immutable after creation, making it safe for concurrent use.
@@ -17,6 +21,9 @@ type I18n struct {
 
 	// Default/fallback language
 	defaultLang string
+
+	// Pre-computed list of available languages (for O(1) access)
+	languages []string
 }
 
 // Option configures the I18n instance during construction.
@@ -29,7 +36,7 @@ func New(opts ...Option) (*I18n, error) {
 	i := &I18n{
 		translations: make(map[string]string),
 		pluralRules:  make(map[string]PluralRule),
-		defaultLang:  "en",
+		defaultLang:  DefaultLang,
 	}
 
 	// Apply all options
@@ -43,6 +50,9 @@ func New(opts ...Option) (*I18n, error) {
 	if i.defaultLang == "" {
 		return nil, fmt.Errorf("default language cannot be empty")
 	}
+
+	// Build the pre-computed languages list
+	i.languages = i.buildLanguagesList()
 
 	return i, nil
 }
@@ -68,6 +78,44 @@ func WithPluralRule(lang string, rule PluralRule) Option {
 			return fmt.Errorf("plural rule cannot be nil")
 		}
 		i.pluralRules[lang] = rule
+		return nil
+	}
+}
+
+// WithLanguages sets the supported languages for the I18n instance.
+// The default language will always be included and placed first in the list.
+// Other languages will be sorted alphabetically.
+func WithLanguages(langs ...string) Option {
+	return func(i *I18n) error {
+		if len(langs) == 0 {
+			return nil
+		}
+
+		// Use a map to deduplicate
+		langSet := make(map[string]bool)
+		for _, lang := range langs {
+			if lang != "" {
+				langSet[lang] = true
+			}
+		}
+
+		// Build the final list with default first
+		i.languages = make([]string, 0, len(langSet)+1)
+		i.languages = append(i.languages, i.defaultLang)
+
+		// Remove default from set if present
+		delete(langSet, i.defaultLang)
+
+		// Add remaining languages sorted
+		if len(langSet) > 0 {
+			otherLangs := make([]string, 0, len(langSet))
+			for lang := range langSet {
+				otherLangs = append(otherLangs, lang)
+			}
+			sort.Strings(otherLangs)
+			i.languages = append(i.languages, otherLangs...)
+		}
+
 		return nil
 	}
 }
@@ -126,6 +174,32 @@ func (i *I18n) T(lang, namespace, key string, placeholders ...M) string {
 
 	// Return the key as last resort
 	return key
+}
+
+// Languages returns all configured languages in the I18n instance.
+// The default language is always returned first, followed by other languages sorted alphabetically.
+// This is an O(1) operation as the list is pre-computed during construction.
+func (i *I18n) Languages() []string {
+	return i.languages
+}
+
+// DefaultLanguage returns the default language code configured for the I18n instance.
+// If no default language was explicitly set, returns DefaultLang ("en").
+func (i *I18n) DefaultLanguage() string {
+	return i.defaultLang
+}
+
+// buildLanguagesList builds the pre-computed list of languages.
+// Called once during construction after all options are applied.
+// If no languages were explicitly configured, returns only the default language.
+func (i *I18n) buildLanguagesList() []string {
+	// If languages were already set by WithLanguages, return as-is
+	if len(i.languages) > 0 {
+		return i.languages
+	}
+
+	// Otherwise, return just the default language
+	return []string{i.defaultLang}
 }
 
 // Tn retrieves a pluralized translation for the given count.
