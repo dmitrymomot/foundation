@@ -1,6 +1,6 @@
 # foundation
 
-A comprehensive toolkit for building secure, scalable web applications with a focus on B2B micro-SaaS development. The library implements modern Go patterns including generics for type safety, functional options for configuration, and interface-based design for flexibility and testability.
+A comprehensive toolkit for building secure, scalable web applications in Go. The library implements modern patterns including generics for type safety, functional options for configuration, and interface-based design for flexibility and testability.
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/dmitrymomot/foundation)
 [![GitHub tag (latest SemVer)](https://img.shields.io/github/tag/dmitrymomot/foundation)](https://github.com/dmitrymomot/foundation/tags)
@@ -121,7 +121,7 @@ The foundation library follows these key architectural patterns:
 - **Functional options** for flexible configuration
 - **Interface-based design** for testability and modularity
 - **Security-first approach** with built-in sanitization and validation
-- **Multi-tenant considerations** throughout the design
+- **Modular architecture** allowing composable and flexible design
 
 ## Documentation
 
