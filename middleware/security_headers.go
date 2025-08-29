@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"maps"
 	"net/http"
 
 	"github.com/dmitrymomot/foundation/core/handler"
@@ -299,10 +300,9 @@ func SecurityHeadersWithConfig[C handler.Context](cfg SecurityHeadersConfig) han
 	if cfg.CrossOriginResourcePolicy != "" {
 		headers["Cross-Origin-Resource-Policy"] = cfg.CrossOriginResourcePolicy
 	}
+
 	// Add custom headers
-	for k, v := range cfg.CustomHeaders {
-		headers[k] = v
-	}
+	maps.Copy(headers, cfg.CustomHeaders)
 
 	return func(next handler.HandlerFunc[C]) handler.HandlerFunc[C] {
 		return func(ctx C) handler.Response {
