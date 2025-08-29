@@ -10,7 +10,8 @@ import (
 	"github.com/dmitrymomot/foundation/core/handler"
 )
 
-// spaConfig holds configuration for SPA serving
+// spaConfig holds configuration options for Single Page Application serving.
+// This struct is used internally by SPA() to manage client-side routing behavior.
 type spaConfig struct {
 	root         string
 	indexFile    string
@@ -19,10 +20,15 @@ type spaConfig struct {
 	stripPrefix  string
 }
 
-// SPAOption configures SPA serving behavior
+// SPAOption is a functional option type for configuring SPA serving behavior.
+// Use with SPA() to customize how single page applications are served.
 type SPAOption func(*spaConfig)
 
 // WithSPAIndex sets the index file for the SPA (default: "index.html").
+// This file is served when no matching static file is found, enabling
+// client-side routing for single page applications.
+//
+// The indexFile parameter should be relative to the SPA root directory.
 func WithSPAIndex(indexFile string) SPAOption {
 	return func(c *spaConfig) {
 		c.indexFile = indexFile
@@ -30,7 +36,13 @@ func WithSPAIndex(indexFile string) SPAOption {
 }
 
 // WithNotFoundPage sets a custom 404 page for the SPA.
-// This page is served with a 404 status when files are not found.
+// This page is served with a 404 status code when files are not found,
+// instead of falling back to the index file.
+//
+// This is useful for showing a proper 404 page for invalid routes
+// that shouldn't be handled by client-side routing.
+//
+// The notFoundFile parameter should be relative to the SPA root directory.
 func WithNotFoundPage(notFoundFile string) SPAOption {
 	return func(c *spaConfig) {
 		c.notFoundFile = notFoundFile
@@ -39,7 +51,15 @@ func WithNotFoundPage(notFoundFile string) SPAOption {
 
 // WithExcludePaths sets paths that should be excluded from SPA handling.
 // These paths will return 404 instead of falling back to index.html.
-// Useful for API routes or WebSocket endpoints.
+//
+// This is essential for preventing API routes, WebSocket endpoints, or other
+// server-side routes from accidentally serving the SPA index file.
+//
+// Default excluded paths are "/api" and "/ws".
+//
+// Example:
+//
+//	static.WithExcludePaths("/api", "/ws", "/health", "/metrics")
 func WithExcludePaths(paths ...string) SPAOption {
 	return func(c *spaConfig) {
 		c.excludePaths = paths
@@ -47,6 +67,10 @@ func WithExcludePaths(paths ...string) SPAOption {
 }
 
 // WithSPAStripPrefix removes the given prefix from the URL path before serving files.
+// This is useful when the SPA is mounted under a specific route prefix.
+//
+// For example, if the SPA is served at "/app/*" but files are in "./dist/",
+// use WithSPAStripPrefix("/app") to properly map URLs to filesystem paths.
 func WithSPAStripPrefix(prefix string) SPAOption {
 	return func(c *spaConfig) {
 		c.stripPrefix = prefix
@@ -54,9 +78,46 @@ func WithSPAStripPrefix(prefix string) SPAOption {
 }
 
 // SPA creates a handler for serving Single Page Applications.
-// It serves static files if they exist, otherwise falls back to index.html
-// for client-side routing. This allows SPA frameworks to handle their own routing.
-// Panics at startup if the root directory or index file doesn't exist.
+//
+// This handler implements the standard SPA serving pattern:
+// 1. If a static file exists at the requested path, serve it
+// 2. If a directory exists with index.html, serve the index.html
+// 3. If the path is excluded (e.g., API routes), return 404
+// 4. Otherwise, fall back to the main index file for client-side routing
+//
+// This pattern enables client-side routing frameworks (React Router, Vue Router, etc.)
+// to handle navigation while still serving static assets normally.
+//
+// Features:
+// - Automatic static file serving with proper content types
+// - Client-side routing fallback to index.html
+// - Configurable exclude paths for API routes
+// - Custom 404 page support
+// - HTTP range requests and caching headers
+//
+// Parameters:
+//   - root: The root directory containing the SPA build files (must exist at startup)
+//   - opts: Optional configuration functions for customizing behavior
+//
+// Panics at startup if:
+//   - The root directory doesn't exist
+//   - The index file doesn't exist
+//   - The custom 404 file (if specified) doesn't exist
+//   - Any specified files are not accessible
+//
+// Example for React/Vue/Angular applications:
+//
+//	// Basic SPA serving
+//	spaHandler := static.SPA[MyContext]("./dist")
+//
+//	// Advanced configuration
+//	spaHandler := static.SPA[MyContext](
+//		"./build",
+//		static.WithSPAIndex("app.html"),
+//		static.WithNotFoundPage("404.html"),
+//		static.WithExcludePaths("/api", "/ws", "/health"),
+//		static.WithSPAStripPrefix("/app"),
+//	)
 func SPA[C handler.Context](root string, opts ...SPAOption) handler.HandlerFunc[C] {
 	config := &spaConfig{
 		root:         filepath.Clean(root),

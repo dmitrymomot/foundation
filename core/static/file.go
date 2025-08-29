@@ -9,8 +9,32 @@ import (
 )
 
 // File creates a handler that serves a single static file.
-// It automatically detects content type and supports range requests.
-// Panics at startup if the file doesn't exist or is a directory.
+//
+// The handler provides efficient file serving with the following features:
+// - Automatic content type detection based on file extension
+// - HTTP range request support for partial content (useful for video/audio)
+// - Proper HTTP caching headers (Last-Modified, ETag)
+// - Efficient sendfile system calls when available
+//
+// Parameters:
+//   - filePath: Absolute or relative path to the file to serve (must exist at startup)
+//
+// Panics at startup if:
+//   - The file doesn't exist
+//   - The path points to a directory instead of a file
+//   - The file is not accessible due to permissions
+//
+// Example:
+//
+//	// Serve a favicon
+//	faviconHandler := static.File[MyContext]("./public/favicon.ico")
+//
+//	// Serve a CSS file
+//	styleHandler := static.File[MyContext]("/var/www/assets/style.css")
+//
+// The handler integrates with any HTTP router that accepts http.HandlerFunc:
+//
+//	mux.Handle("GET /favicon.ico", handler.Adapt(faviconHandler))
 func File[C handler.Context](filePath string) handler.HandlerFunc[C] {
 	// Validate at startup
 	cleanPath := filepath.Clean(filePath)

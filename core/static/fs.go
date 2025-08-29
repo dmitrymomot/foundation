@@ -8,17 +8,23 @@ import (
 	"github.com/dmitrymomot/foundation/core/handler"
 )
 
-// fsConfig holds configuration for fs.FS serving
+// fsConfig holds configuration options for fs.FS serving.
+// This struct is used internally by FS() to manage embedded filesystem serving.
 type fsConfig struct {
 	fs          fs.FS
 	stripPrefix string
 	subPath     string
 }
 
-// FSOption configures fs.FS serving behavior
+// FSOption is a functional option type for configuring fs.FS serving behavior.
+// Use with FS() to customize how embedded files are served.
 type FSOption func(*fsConfig)
 
 // WithFSStripPrefix removes the given prefix from the URL path before serving files.
+// This is useful when embedding files under a specific route prefix.
+//
+// For example, if embedded files are mounted at "/assets/" but stored in "static/",
+// use WithFSStripPrefix("/assets") so "/assets/style.css" serves "static/style.css".
 func WithFSStripPrefix(prefix string) FSOption {
 	return func(c *fsConfig) {
 		c.stripPrefix = prefix
@@ -26,7 +32,13 @@ func WithFSStripPrefix(prefix string) FSOption {
 }
 
 // WithSubFS serves files from a subdirectory within the fs.FS.
-// This is useful when the embedded filesystem contains multiple directories.
+// This is useful when the embedded filesystem contains multiple directories
+// and you want to serve only a specific subdirectory.
+//
+// For example, if your embed.FS contains "assets/css/" and "assets/js/",
+// use WithSubFS("assets/css") to serve only the CSS files.
+//
+// The path parameter should use forward slashes regardless of OS.
 func WithSubFS(path string) FSOption {
 	return func(c *fsConfig) {
 		c.subPath = path
@@ -34,8 +46,39 @@ func WithSubFS(path string) FSOption {
 }
 
 // FS creates a handler that serves files from an fs.FS (including embed.FS).
-// This is useful for embedding static assets in the binary.
-// Panics at startup if the sub-path is invalid.
+//
+// This handler is designed for serving embedded static assets that are compiled
+// into the binary using Go's embed directive. It provides the same features as Dir()
+// but works with any filesystem that implements fs.FS.
+//
+// Features:
+// - Directory listing disabled for security
+// - Serves index.html when present in directories
+// - Supports HTTP range requests and caching headers
+// - Works with embed.FS, os.DirFS, and any fs.FS implementation
+//
+// Parameters:
+//   - fsys: The filesystem to serve files from (embed.FS, os.DirFS, etc.)
+//   - opts: Optional configuration functions (WithFSStripPrefix, WithSubFS)
+//
+// Panics at startup if:
+//   - The sub-path specified in WithSubFS is invalid
+//   - The filesystem root is not accessible
+//
+// Example with embed.FS:
+//
+//	//go:embed assets/*
+//	var assetsFS embed.FS
+//
+//	// Serve all embedded files
+//	handler := static.FS[MyContext](assetsFS)
+//
+//	// Serve only from "dist" subdirectory with prefix stripping
+//	handler := static.FS[MyContext](
+//		assetsFS,
+//		static.WithSubFS("dist"),
+//		static.WithFSStripPrefix("/static"),
+//	)
 func FS[C handler.Context](fsys fs.FS, opts ...FSOption) handler.HandlerFunc[C] {
 	config := &fsConfig{
 		fs:          fsys,
@@ -74,11 +117,14 @@ func FS[C handler.Context](fsys fs.FS, opts ...FSOption) handler.HandlerFunc[C] 
 	}
 }
 
-// neuteredFS wraps http.FileSystem for embed.FS to disable directory listing
+// neuteredFS wraps http.FileSystem for fs.FS implementations to disable directory listing.
+// It only allows directory access if an index.html file is present.
 type neuteredFS struct {
 	http.FileSystem
 }
 
+// Open implements http.FileSystem.Open with directory listing disabled.
+// Directories are only accessible if they contain an index.html file.
 func (nfs neuteredFS) Open(path string) (http.File, error) {
 	f, err := nfs.FileSystem.Open(path)
 	if err != nil {
