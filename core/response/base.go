@@ -14,6 +14,22 @@ func Render(ctx handler.Context, resp handler.Response) {
 	}
 }
 
+// Handle converts a Response into a HandlerFunc that can be used with the generic handler system.
+// This function serves as an adapter, allowing Response functions to be used in contexts that
+// expect HandlerFunc[C] types. The returned HandlerFunc ignores the context parameter and
+// simply returns the provided response.
+//
+// Purpose: Bridge between Response-based functions and generic handler functions.
+//
+// Example:
+//
+//	r.Get("/hello", response.Handle(response.String("Hello, World!")))
+func Handle[C handler.Context](resp handler.Response) handler.HandlerFunc[C] {
+	return func(ctx C) handler.Response {
+		return resp
+	}
+}
+
 // String creates a text/plain response with 200 OK status.
 func String(content string) handler.Response {
 	return func(w http.ResponseWriter, r *http.Request) error {
