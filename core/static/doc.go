@@ -10,6 +10,13 @@
 // All handlers integrate with the foundation/core/handler framework and support custom context types.
 // Directory listing is disabled by default for security, but index.html files are served when present.
 //
+// # When to Use Each Handler
+//
+// - File(): Serve individual static files (favicon.ico, robots.txt, sitemap.xml)
+// - Dir(): Serve traditional static asset directories (images, CSS, JavaScript files)
+// - FS(): Serve embedded assets compiled into the binary (for single-binary deployments)
+// - SPA(): Serve React/Vue/Angular applications with client-side routing support
+//
 // # Basic File Serving
 //
 // Serve a single static file:

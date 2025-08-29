@@ -133,7 +133,7 @@ func (nfs neuteredFS) Open(path string) (http.File, error) {
 
 	s, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 
@@ -141,7 +141,7 @@ func (nfs neuteredFS) Open(path string) (http.File, error) {
 		// Check if index.html exists in directory
 		index := strings.TrimSuffix(path, "/") + "/index.html"
 		if _, err := nfs.FileSystem.Open(index); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, fs.ErrNotExist
 		}
 	}
