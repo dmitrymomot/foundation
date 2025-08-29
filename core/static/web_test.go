@@ -413,46 +413,46 @@ func TestSPAPathTraversalPrevention(t *testing.T) {
 	handler := static.SPA[*testContext](publicDir)
 
 	tests := []struct {
-		name           string
-		urlPath        string
-		shouldFallback bool // true if should serve index.html, false if should serve 404
-		description    string
+		name          string
+		urlPath       string
+		expectedError bool
+		description   string
 	}{
 		{
-			name:           "normal_asset_access",
-			urlPath:        "/app.js",
-			shouldFallback: false,
-			description:    "Normal assets should be served",
+			name:          "normal_asset_access",
+			urlPath:       "/app.js",
+			expectedError: false,
+			description:   "Normal assets should be served",
 		},
 		{
-			name:           "path_traversal_dots",
-			urlPath:        "/../secret.txt",
-			shouldFallback: true, // SPA fallback behavior for invalid paths
-			description:    "Path traversal with .. should fallback to index",
+			name:          "path_traversal_dots",
+			urlPath:       "/../secret.txt",
+			expectedError: true,
+			description:   "Path traversal with .. should return 404",
 		},
 		{
-			name:           "path_traversal_encoded_dots",
-			urlPath:        "/%2e%2e/secret.txt",
-			shouldFallback: true,
-			description:    "URL-encoded path traversal should fallback to index",
+			name:          "path_traversal_encoded_dots",
+			urlPath:       "/%2e%2e/secret.txt",
+			expectedError: true,
+			description:   "URL-encoded path traversal should return 404",
 		},
 		{
-			name:           "path_traversal_double_encoded",
-			urlPath:        "/%252e%252e/secret.txt",
-			shouldFallback: true,
-			description:    "Double-encoded path traversal should fallback to index",
+			name:          "path_traversal_double_encoded",
+			urlPath:       "/%252e%252e/secret.txt",
+			expectedError: false, // Double-encoded doesn't decode to .. so it's treated as normal path
+			description:   "Double-encoded path doesn't traverse",
 		},
 		{
-			name:           "path_traversal_multiple",
-			urlPath:        "/../../../../../../etc/passwd",
-			shouldFallback: true,
-			description:    "Multiple traversal attempts should fallback to index",
+			name:          "path_traversal_multiple",
+			urlPath:       "/../../../../../../etc/passwd",
+			expectedError: true,
+			description:   "Multiple traversal attempts should return 404",
 		},
 		{
-			name:           "path_traversal_mixed",
-			urlPath:        "/assets/../../../secret.txt",
-			shouldFallback: true,
-			description:    "Mixed path traversal should fallback to index",
+			name:          "path_traversal_mixed",
+			urlPath:       "/assets/../../../secret.txt",
+			expectedError: true,
+			description:   "Mixed path traversal should return 404",
 		},
 	}
 
@@ -466,18 +466,29 @@ func TestSPAPathTraversalPrevention(t *testing.T) {
 
 			response := handler(ctx)
 			err := response(w, req)
-			assert.NoError(t, err)
 
-			body := w.Body.String()
+			if tt.expectedError {
+				// Path traversal attempts should return 404
+				assert.Error(t, err, tt.description)
+				if err != nil {
+					httpErr, ok := err.(interface{ StatusCode() int })
+					if assert.True(t, ok, "error should implement StatusCode() method") {
+						assert.Equal(t, http.StatusNotFound, httpErr.StatusCode(), "Should return 404 for path traversal")
+					}
+				}
+			} else {
+				assert.NoError(t, err, tt.description)
 
-			// Verify no secret data is exposed
-			assert.NotContains(t, body, "SECRET DATA", "Secret file content should never be exposed")
+				body := w.Body.String()
+				// Verify no secret data is exposed
+				assert.NotContains(t, body, "SECRET DATA", "Secret file content should never be exposed")
 
-			if tt.urlPath == "/app.js" {
-				assert.Contains(t, body, "console.log", "Valid asset should be served")
-			} else if tt.shouldFallback {
-				// For invalid paths, SPA serves index.html
-				assert.Contains(t, body, "SPA", "Should serve index.html for invalid paths")
+				if tt.urlPath == "/app.js" {
+					assert.Contains(t, body, "console.log", "Valid asset should be served")
+				} else {
+					// Non-existent files fall back to index.html for SPA
+					assert.Contains(t, body, "SPA", "Should serve index.html for non-existent routes")
+				}
 			}
 		})
 	}

@@ -91,6 +91,12 @@ func SPA[C handler.Context](root string, opts ...SPAOption) handler.HandlerFunc[
 
 	return func(ctx C) handler.Response {
 		return func(w http.ResponseWriter, r *http.Request) error {
+			// Check for path traversal attempts in the original URL
+			// This is important for SEO - we want to return 404 for malformed URLs
+			if strings.Contains(r.URL.Path, "../") || strings.Contains(r.URL.Path, "..\\") {
+				return response.ErrNotFound
+			}
+
 			// Clean the URL path
 			urlPath := path.Clean(r.URL.Path)
 
@@ -107,9 +113,8 @@ func SPA[C handler.Context](root string, opts ...SPAOption) handler.HandlerFunc[
 
 			// Validate that the path is within the root directory
 			if err := validatePathSecurity(config.root, filePath); err != nil {
-				// Serve index for invalid paths (client-side routing)
-				http.ServeFile(w, r, indexPath)
-				return nil
+				// Return 404 for path traversal attempts (SEO: avoid duplicate content)
+				return response.ErrNotFound
 			}
 
 			// Check if file exists (not directory)
@@ -226,6 +231,13 @@ func Website[C handler.Context](root string, opts ...WebsiteOption) handler.Hand
 
 	return func(ctx C) handler.Response {
 		return func(w http.ResponseWriter, r *http.Request) error {
+			// Check for path traversal attempts in the original URL
+			// This is important for SEO - we want to return 404 for malformed URLs
+			if strings.Contains(r.URL.Path, "../") || strings.Contains(r.URL.Path, "..\\") {
+				serveNotFound(w, r, notFoundPath)
+				return nil
+			}
+
 			// Clean the URL path
 			urlPath := path.Clean(r.URL.Path)
 			originalPath := r.URL.Path // Keep original to check for trailing slash
@@ -296,7 +308,11 @@ func Website[C handler.Context](root string, opts ...WebsiteOption) handler.Hand
 func serveNotFound(w http.ResponseWriter, r *http.Request, customNotFoundPath string) {
 	if customNotFoundPath != "" {
 		w.WriteHeader(http.StatusNotFound)
-		http.ServeFile(w, r, customNotFoundPath)
+		// Create a clean request to avoid http.ServeFile rejecting paths with ../
+		cleanReq := r.Clone(r.Context())
+		cleanReq.URL.Path = "/404"
+		cleanReq.RequestURI = "/404"
+		http.ServeFile(w, cleanReq, customNotFoundPath)
 	} else {
 		http.NotFound(w, r)
 	}
