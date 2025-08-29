@@ -13,6 +13,7 @@ import (
 	"github.com/dmitrymomot/foundation/core/static"
 )
 
+// TestSPA tests the basic SPA handler functionality
 func TestSPA(t *testing.T) {
 	t.Parallel()
 
@@ -96,6 +97,13 @@ func TestSPA(t *testing.T) {
 			expectedBody:   indexContent,
 			checkFallback:  true,
 		},
+		{
+			name:           "spa_does_not_serve_subdirectory_index",
+			urlPath:        "/assets/",
+			expectedStatus: http.StatusOK,
+			expectedBody:   indexContent, // Should fallback to root index, not serve directory
+			checkFallback:  true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -123,12 +131,11 @@ func TestSPA(t *testing.T) {
 	}
 }
 
+// TestSPAWithCustomIndex tests SPA with custom index file
 func TestSPAWithCustomIndex(t *testing.T) {
 	t.Parallel()
 
-	// Create SPA directory with custom index file
 	tmpDir := t.TempDir()
-
 	customIndexContent := `<!DOCTYPE html><html><head><title>Custom SPA</title></head><body><div id="custom-app"></div></body></html>`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "main.html"), []byte(customIndexContent), 0644))
 
@@ -178,76 +185,11 @@ func TestSPAWithCustomIndex(t *testing.T) {
 	}
 }
 
-func TestSPAWithNotFoundPage(t *testing.T) {
-	t.Parallel()
-
-	// Create SPA directory with custom 404 page
-	tmpDir := t.TempDir()
-
-	indexContent := `<!DOCTYPE html><html><body><div id="app"></div></body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
-
-	notFoundContent := `<!DOCTYPE html><html><body><h1>Custom 404 Page</h1></body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "404.html"), []byte(notFoundContent), 0644))
-
-	handler := static.SPA[*testContext](tmpDir, static.WithNotFoundPage("404.html"))
-
-	tests := []struct {
-		name           string
-		urlPath        string
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "serve_index_normally",
-			urlPath:        "/index.html",
-			expectedStatus: http.StatusMovedPermanently, // http.ServeFile redirects index.html to /
-			expectedBody:   "",
-		},
-		{
-			name:           "serve_custom_404_explicitly",
-			urlPath:        "/404.html",
-			expectedStatus: http.StatusOK,
-			expectedBody:   notFoundContent,
-		},
-		{
-			name:           "serve_custom_404_for_missing_route_when_404_page_configured",
-			urlPath:        "/dashboard",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   notFoundContent,
-		},
-		{
-			name:           "serve_custom_404_for_missing_file",
-			urlPath:        "/nonexistent.txt",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   notFoundContent,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequest("GET", tt.urlPath, nil)
-			w := httptest.NewRecorder()
-			ctx := newTestContext(req, w)
-
-			response := handler(ctx)
-			err := response(w, req)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
-		})
-	}
-}
-
+// TestSPAWithExcludePaths tests SPA with excluded paths
 func TestSPAWithExcludePaths(t *testing.T) {
 	t.Parallel()
 
-	// Create SPA directory
 	tmpDir := t.TempDir()
-
 	indexContent := `<!DOCTYPE html><html><body><div id="app"></div></body></html>`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
 
@@ -257,6 +199,7 @@ func TestSPAWithExcludePaths(t *testing.T) {
 	tests := []struct {
 		name           string
 		urlPath        string
+		expectedError  bool
 		expectedStatus int
 		expectedBody   string
 		description    string
@@ -264,24 +207,33 @@ func TestSPAWithExcludePaths(t *testing.T) {
 		{
 			name:           "exclude_api_path",
 			urlPath:        "/api/users",
+			expectedError:  true, // Should return response.ErrNotFound
 			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
 			description:    "API paths should be excluded from SPA fallback",
 		},
 		{
 			name:           "exclude_ws_path",
 			urlPath:        "/ws/chat",
+			expectedError:  true, // Should return response.ErrNotFound
 			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
 			description:    "WebSocket paths should be excluded from SPA fallback",
 		},
 		{
 			name:           "allow_app_route",
 			urlPath:        "/dashboard",
+			expectedError:  false,
 			expectedStatus: http.StatusOK,
 			expectedBody:   indexContent,
 			description:    "App routes should fall back to index",
 		},
+		{
+			name:           "allow_api_docs",
+			urlPath:        "/api-docs",
+			expectedError:  false,
+			expectedStatus: http.StatusOK,
+			expectedBody:   indexContent,
+			description:    "Path segment matching: /api-docs should not be excluded by /api",
+		},
 	}
 
 	for _, tt := range tests {
@@ -295,59 +247,60 @@ func TestSPAWithExcludePaths(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err, tt.description)
-			assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
-			assert.Equal(t, tt.expectedBody, w.Body.String(), tt.description)
+			if tt.expectedError {
+				assert.Error(t, err, tt.description)
+				assert.Equal(t, "Not Found", err.Error())
+			} else {
+				assert.NoError(t, err, tt.description)
+				assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
+				assert.Equal(t, tt.expectedBody, w.Body.String(), tt.description)
+			}
 		})
 	}
 }
 
+// TestSPAWithCustomExcludePaths tests SPA with custom exclude paths
 func TestSPAWithCustomExcludePaths(t *testing.T) {
 	t.Parallel()
 
-	// Create SPA directory
 	tmpDir := t.TempDir()
-
 	indexContent := `<!DOCTYPE html><html><body><div id="app"></div></body></html>`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
 
-	handler := static.SPA[*testContext](tmpDir, static.WithExcludePaths("/api", "/admin", "/health"))
+	handler := static.SPA[*testContext](tmpDir, static.WithSPAExcludePaths("/api", "/admin", "/health"))
 
 	tests := []struct {
-		name           string
-		urlPath        string
-		expectedStatus int
-		expectedBody   string
+		name          string
+		urlPath       string
+		expectedError bool
+		expectedBody  string
 	}{
 		{
-			name:           "exclude_custom_api_path",
-			urlPath:        "/api/v1/users",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
+			name:          "exclude_custom_api_path",
+			urlPath:       "/api/v1/users",
+			expectedError: true,
 		},
 		{
-			name:           "exclude_custom_admin_path",
-			urlPath:        "/admin/dashboard",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
+			name:          "exclude_custom_admin_path",
+			urlPath:       "/admin/dashboard",
+			expectedError: true,
 		},
 		{
-			name:           "exclude_custom_health_path",
-			urlPath:        "/health",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
+			name:          "exclude_custom_health_path",
+			urlPath:       "/health",
+			expectedError: true,
 		},
 		{
-			name:           "allow_websocket_path_when_not_excluded",
-			urlPath:        "/ws/chat",
-			expectedStatus: http.StatusOK,
-			expectedBody:   indexContent,
+			name:          "allow_websocket_path_when_not_excluded",
+			urlPath:       "/ws/chat",
+			expectedError: false,
+			expectedBody:  indexContent,
 		},
 		{
-			name:           "allow_app_route",
-			urlPath:        "/dashboard",
-			expectedStatus: http.StatusOK,
-			expectedBody:   indexContent,
+			name:          "allow_app_route",
+			urlPath:       "/dashboard",
+			expectedError: false,
+			expectedBody:  indexContent,
 		},
 	}
 
@@ -362,136 +315,19 @@ func TestSPAWithCustomExcludePaths(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
+			if tt.expectedError {
+				assert.Error(t, err)
+				assert.Equal(t, "Not Found", err.Error())
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			}
 		})
 	}
 }
 
-func TestSPAWithStripPrefix(t *testing.T) {
-	t.Parallel()
-
-	// Create SPA directory
-	tmpDir := t.TempDir()
-
-	indexContent := `<!DOCTYPE html><html><body><div id="app"></div></body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "app.js"), []byte("// app"), 0644))
-
-	handler := static.SPA[*testContext](tmpDir, static.WithSPAStripPrefix("/app"))
-
-	tests := []struct {
-		name           string
-		urlPath        string
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "serve_static_file_with_prefix",
-			urlPath:        "/app/app.js",
-			expectedStatus: http.StatusOK,
-			expectedBody:   "// app",
-		},
-		{
-			name:           "fallback_to_index_with_prefix",
-			urlPath:        "/app/dashboard",
-			expectedStatus: http.StatusOK,
-			expectedBody:   indexContent,
-		},
-		{
-			name:           "serve_index_with_prefix",
-			urlPath:        "/app/",
-			expectedStatus: http.StatusOK,
-			expectedBody:   indexContent,
-		},
-		{
-			name:           "no_prefix_falls_back_to_index",
-			urlPath:        "/app.js",
-			expectedStatus: http.StatusOK,
-			expectedBody:   indexContent, // Without prefix, SPA serves index.html for non-excluded paths
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequest("GET", tt.urlPath, nil)
-			w := httptest.NewRecorder()
-			ctx := newTestContext(req, w)
-
-			response := handler(ctx)
-			err := response(w, req)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
-		})
-	}
-}
-
-func TestSPAWithDirectoryIndex(t *testing.T) {
-	t.Parallel()
-
-	// Create directory structure with index files
-	tmpDir := t.TempDir()
-
-	rootIndexContent := `<!DOCTYPE html><html><body>Root SPA</body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(rootIndexContent), 0644))
-
-	// Create subdirectory with its own index.html
-	subDir := filepath.Join(tmpDir, "docs")
-	require.NoError(t, os.Mkdir(subDir, 0755))
-	subIndexContent := `<!DOCTYPE html><html><body>Docs Index</body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(subDir, "index.html"), []byte(subIndexContent), 0644))
-
-	handler := static.SPA[*testContext](tmpDir)
-
-	tests := []struct {
-		name           string
-		urlPath        string
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "serve_root_index",
-			urlPath:        "/",
-			expectedStatus: http.StatusOK,
-			expectedBody:   rootIndexContent,
-		},
-		{
-			name:           "serve_subdirectory_index",
-			urlPath:        "/docs/",
-			expectedStatus: http.StatusOK,
-			expectedBody:   subIndexContent,
-		},
-		{
-			name:           "serve_subdirectory_index_explicit",
-			urlPath:        "/docs/index.html",
-			expectedStatus: http.StatusMovedPermanently, // http.ServeFile redirects /docs/index.html to /docs/
-			expectedBody:   "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequest("GET", tt.urlPath, nil)
-			w := httptest.NewRecorder()
-			ctx := newTestContext(req, w)
-
-			response := handler(ctx)
-			err := response(w, req)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
-		})
-	}
-}
-
+// TestSPAStartupValidation tests SPA startup validation
 func TestSPAStartupValidation(t *testing.T) {
 	t.Parallel()
 
@@ -505,7 +341,6 @@ func TestSPAStartupValidation(t *testing.T) {
 		t.Parallel()
 
 		nonExistentDir := filepath.Join(tmpDir, "does-not-exist")
-
 		assert.Panics(t, func() {
 			static.SPA[*testContext](nonExistentDir)
 		})
@@ -541,22 +376,10 @@ func TestSPAStartupValidation(t *testing.T) {
 		})
 	})
 
-	t.Run("panic_on_missing_404_file", func(t *testing.T) {
-		t.Parallel()
-
-		validDir := filepath.Join(tmpDir, "valid3")
-		require.NoError(t, os.Mkdir(validDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(validDir, "index.html"), []byte("index"), 0644))
-
-		assert.Panics(t, func() {
-			static.SPA[*testContext](validDir, static.WithNotFoundPage("missing.html"))
-		})
-	})
-
 	t.Run("valid_setup_works", func(t *testing.T) {
 		t.Parallel()
 
-		validDir := filepath.Join(tmpDir, "valid4")
+		validDir := filepath.Join(tmpDir, "valid3")
 		require.NoError(t, os.Mkdir(validDir, 0755))
 		require.NoError(t, os.WriteFile(filepath.Join(validDir, "index.html"), []byte("index"), 0644))
 
@@ -564,56 +387,85 @@ func TestSPAStartupValidation(t *testing.T) {
 			static.SPA[*testContext](validDir)
 		})
 	})
-
-	t.Run("clean_path_handling", func(t *testing.T) {
-		t.Parallel()
-
-		validDir := filepath.Join(tmpDir, "valid5")
-		require.NoError(t, os.Mkdir(validDir, 0755))
-		require.NoError(t, os.WriteFile(filepath.Join(validDir, "index.html"), []byte("index"), 0644))
-
-		// Path with redundant elements should work (cleaned internally)
-		messyPath := filepath.Join(tmpDir, ".", "valid5")
-
-		assert.NotPanics(t, func() {
-			static.SPA[*testContext](messyPath)
-		})
-	})
-
-	t.Run("panic_on_permission_error", func(t *testing.T) {
-		t.Parallel()
-
-		// Skip permission tests as they don't work reliably across all environments
-		t.Skip("Permission tests are environment-dependent and not reliable")
-
-		restrictedDir := filepath.Join(tmpDir, "restricted")
-		require.NoError(t, os.Mkdir(restrictedDir, 0000))
-		defer os.Chmod(restrictedDir, 0755) // Clean up
-
-		assert.Panics(t, func() {
-			static.SPA[*testContext](restrictedDir)
-		})
-	})
 }
 
-func TestSPAMethodsAllowed(t *testing.T) {
+// TestWebsite tests basic Website handler functionality
+func TestWebsite(t *testing.T) {
 	t.Parallel()
 
-	// Create SPA directory
 	tmpDir := t.TempDir()
 
-	indexContent := `<!DOCTYPE html><html><body><div id="app"></div></body></html>`
+	// Create website structure
+	indexContent := `<!DOCTYPE html><html><body><h1>Home</h1></body></html>`
+	aboutContent := `<!DOCTYPE html><html><body><h1>About</h1></body></html>`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "app.js"), []byte("// app"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "about.html"), []byte(aboutContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "styles.css"), []byte("body { margin: 0; }"), 0644))
 
-	handler := static.SPA[*testContext](tmpDir)
-	methods := []string{"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"}
+	// Create blog directory with index
+	blogDir := filepath.Join(tmpDir, "blog")
+	require.NoError(t, os.Mkdir(blogDir, 0755))
+	blogIndexContent := `<!DOCTYPE html><html><body><h1>Blog</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(blogDir, "index.html"), []byte(blogIndexContent), 0644))
 
-	for _, method := range methods {
-		t.Run("method_"+method+"_for_static_file", func(t *testing.T) {
+	handler := static.Website[*testContext](tmpDir)
+
+	tests := []struct {
+		name           string
+		urlPath        string
+		expectedStatus int
+		expectedBody   string
+		followRedirect bool
+	}{
+		{
+			name:           "serve_root_index",
+			urlPath:        "/",
+			expectedStatus: http.StatusOK,
+			expectedBody:   indexContent,
+		},
+		{
+			name:           "serve_html_file_directly",
+			urlPath:        "/about.html",
+			expectedStatus: http.StatusOK,
+			expectedBody:   aboutContent,
+		},
+		{
+			name:           "serve_css_file",
+			urlPath:        "/styles.css",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "body { margin: 0; }",
+		},
+		{
+			name:           "redirect_directory_without_slash",
+			urlPath:        "/blog",
+			expectedStatus: http.StatusMovedPermanently,
+			expectedBody:   "",
+		},
+		{
+			name:           "serve_directory_with_slash",
+			urlPath:        "/blog/",
+			expectedStatus: http.StatusOK,
+			expectedBody:   blogIndexContent,
+		},
+		{
+			name:           "return_404_for_missing_file",
+			urlPath:        "/missing.html",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "404 page not found\n",
+		},
+		{
+			name:           "return_404_for_missing_route",
+			urlPath:        "/dashboard",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "404 page not found\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(method, "/app.js", nil)
+			req := httptest.NewRequest("GET", tt.urlPath, nil)
 			w := httptest.NewRecorder()
 			ctx := newTestContext(req, w)
 
@@ -621,59 +473,96 @@ func TestSPAMethodsAllowed(t *testing.T) {
 			err := response(w, req)
 
 			assert.NoError(t, err)
-
-			// http.ServeFile serves content for all methods, but only GET and HEAD return body
-			assert.Equal(t, http.StatusOK, w.Code)
-			if method == "GET" {
-				assert.Equal(t, "// app", w.Body.String())
-			} else if method == "HEAD" {
-				assert.Empty(t, w.Body.String())
-			}
-		})
-
-		t.Run("method_"+method+"_for_spa_route", func(t *testing.T) {
-			t.Parallel()
-
-			req := httptest.NewRequest(method, "/dashboard", nil)
-			w := httptest.NewRecorder()
-			ctx := newTestContext(req, w)
-
-			response := handler(ctx)
-			err := response(w, req)
-
-			assert.NoError(t, err)
-
-			// SPA fallback also uses http.ServeFile for index.html
-			assert.Equal(t, http.StatusOK, w.Code)
-			if method == "GET" {
-				assert.Equal(t, indexContent, w.Body.String())
-			} else if method == "HEAD" {
-				assert.Empty(t, w.Body.String())
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.expectedStatus == http.StatusMovedPermanently {
+				location := w.Header().Get("Location")
+				assert.Equal(t, tt.urlPath+"/", location)
+			} else {
+				assert.Equal(t, tt.expectedBody, w.Body.String())
 			}
 		})
 	}
 }
 
-func TestSPACombinedOptions(t *testing.T) {
+// TestWebsiteIndexRedirects tests SEO-friendly index.html redirects
+func TestWebsiteIndexRedirects(t *testing.T) {
 	t.Parallel()
 
-	// Create SPA directory
 	tmpDir := t.TempDir()
 
-	customIndexContent := `<!DOCTYPE html><html><body>Custom SPA</body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "app.html"), []byte(customIndexContent), 0644))
+	// Create website structure
+	indexContent := `<!DOCTYPE html><html><body><h1>Home</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
 
-	notFoundContent := `<!DOCTYPE html><html><body>Custom 404</body></html>`
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "error.html"), []byte(notFoundContent), 0644))
+	// Create blog directory with index
+	blogDir := filepath.Join(tmpDir, "blog")
+	require.NoError(t, os.Mkdir(blogDir, 0755))
+	blogIndexContent := `<!DOCTYPE html><html><body><h1>Blog</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(blogDir, "index.html"), []byte(blogIndexContent), 0644))
 
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "bundle.js"), []byte("// bundle"), 0644))
+	handler := static.Website[*testContext](tmpDir)
 
-	handler := static.SPA[*testContext](tmpDir,
-		static.WithSPAIndex("app.html"),
-		static.WithNotFoundPage("error.html"),
-		static.WithExcludePaths("/api", "/health"),
-		static.WithSPAStripPrefix("/webapp"),
-	)
+	tests := []struct {
+		name             string
+		urlPath          string
+		expectedStatus   int
+		expectedLocation string
+		description      string
+	}{
+		{
+			name:             "redirect_root_index_html",
+			urlPath:          "/index.html",
+			expectedStatus:   http.StatusMovedPermanently,
+			expectedLocation: "/",
+			description:      "SEO: /index.html should redirect to /",
+		},
+		{
+			name:             "redirect_blog_index_html",
+			urlPath:          "/blog/index.html",
+			expectedStatus:   http.StatusMovedPermanently,
+			expectedLocation: "/blog/",
+			description:      "SEO: /blog/index.html should redirect to /blog/",
+		},
+		{
+			name:             "redirect_blog_without_slash",
+			urlPath:          "/blog",
+			expectedStatus:   http.StatusMovedPermanently,
+			expectedLocation: "/blog/",
+			description:      "SEO: /blog should redirect to /blog/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", tt.urlPath, nil)
+			w := httptest.NewRecorder()
+			ctx := newTestContext(req, w)
+
+			response := handler(ctx)
+			err := response(w, req)
+
+			assert.NoError(t, err, tt.description)
+			assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
+			assert.Equal(t, tt.expectedLocation, w.Header().Get("Location"), tt.description)
+		})
+	}
+}
+
+// TestWebsiteWithCustom404 tests Website handler with custom 404 page
+func TestWebsiteWithCustom404(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	indexContent := `<!DOCTYPE html><html><body><h1>Home</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
+
+	notFoundContent := `<!DOCTYPE html><html><body><h1>Custom 404 - Page Not Found</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "404.html"), []byte(notFoundContent), 0644))
+
+	handler := static.Website[*testContext](tmpDir, static.WithNotFoundFile("404.html"))
 
 	tests := []struct {
 		name           string
@@ -682,34 +571,28 @@ func TestSPACombinedOptions(t *testing.T) {
 		expectedBody   string
 	}{
 		{
-			name:           "serve_static_file_with_all_options",
-			urlPath:        "/webapp/bundle.js",
+			name:           "serve_index_normally",
+			urlPath:        "/",
 			expectedStatus: http.StatusOK,
-			expectedBody:   "// bundle",
+			expectedBody:   indexContent,
 		},
 		{
-			name:           "serve_custom_404_for_route_when_404_page_configured",
-			urlPath:        "/webapp/dashboard",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   notFoundContent, // With custom 404 page, routes get 404 instead of index fallback
-		},
-		{
-			name:           "exclude_api_with_prefix",
-			urlPath:        "/webapp/api/users",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
-		},
-		{
-			name:           "serve_custom_404_with_prefix",
-			urlPath:        "/webapp/missing.txt",
+			name:           "serve_custom_404_for_missing_file",
+			urlPath:        "/missing.html",
 			expectedStatus: http.StatusNotFound,
 			expectedBody:   notFoundContent,
 		},
 		{
-			name:           "no_prefix_serves_existing_file",
-			urlPath:        "/bundle.js",
+			name:           "serve_custom_404_for_missing_route",
+			urlPath:        "/dashboard",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   notFoundContent,
+		},
+		{
+			name:           "serve_404_file_directly",
+			urlPath:        "/404.html",
 			expectedStatus: http.StatusOK,
-			expectedBody:   "// bundle", // File exists in root, so it's served directly
+			expectedBody:   notFoundContent,
 		},
 	}
 
@@ -731,48 +614,164 @@ func TestSPACombinedOptions(t *testing.T) {
 	}
 }
 
-func TestSPAContentTypeHeaders(t *testing.T) {
+// TestWebsiteWithExcludePaths tests Website handler with excluded paths
+func TestWebsiteWithExcludePaths(t *testing.T) {
 	t.Parallel()
 
-	// Create SPA directory with various file types
 	tmpDir := t.TempDir()
 
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte("<html>SPA</html>"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "app.js"), []byte("// js"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "styles.css"), []byte("body{}"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "data.json"), []byte(`{"test":true}`), 0644))
+	indexContent := `<!DOCTYPE html><html><body><h1>Home</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "index.html"), []byte(indexContent), 0644))
 
-	handler := static.SPA[*testContext](tmpDir)
+	notFoundContent := `<!DOCTYPE html><html><body><h1>Custom 404</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "404.html"), []byte(notFoundContent), 0644))
+
+	handler := static.Website[*testContext](tmpDir,
+		static.WithNotFoundFile("404.html"),
+		static.WithWebsiteExcludePaths("/api", "/admin"),
+	)
 
 	tests := []struct {
-		name                string
-		urlPath             string
-		expectedContentType string
+		name           string
+		urlPath        string
+		expectedStatus int
+		expectedBody   string
+		description    string
 	}{
 		{
-			name:                "html_content_type_for_root",
-			urlPath:             "/", // Use root path instead since index.html redirects
-			expectedContentType: "text/html",
+			name:           "exclude_api_path_with_custom_404",
+			urlPath:        "/api/users",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   notFoundContent,
+			description:    "Excluded paths should serve custom 404",
 		},
 		{
-			name:                "js_content_type",
-			urlPath:             "/app.js",
-			expectedContentType: "text/javascript",
+			name:           "exclude_admin_path_with_custom_404",
+			urlPath:        "/admin",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   notFoundContent,
+			description:    "Excluded paths should serve custom 404",
 		},
 		{
-			name:                "css_content_type",
-			urlPath:             "/styles.css",
-			expectedContentType: "text/css",
+			name:           "serve_index_normally",
+			urlPath:        "/",
+			expectedStatus: http.StatusOK,
+			expectedBody:   indexContent,
+			description:    "Non-excluded paths work normally",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", tt.urlPath, nil)
+			w := httptest.NewRecorder()
+			ctx := newTestContext(req, w)
+
+			response := handler(ctx)
+			err := response(w, req)
+
+			assert.NoError(t, err, tt.description)
+			assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
+			assert.Equal(t, tt.expectedBody, w.Body.String(), tt.description)
+		})
+	}
+}
+
+// TestWebsiteStartupValidation tests Website startup validation
+func TestWebsiteStartupValidation(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	t.Run("panic_on_nonexistent_directory", func(t *testing.T) {
+		t.Parallel()
+
+		nonExistentDir := filepath.Join(tmpDir, "does-not-exist")
+		assert.Panics(t, func() {
+			static.Website[*testContext](nonExistentDir)
+		})
+	})
+
+	t.Run("panic_on_missing_404_file", func(t *testing.T) {
+		t.Parallel()
+
+		validDir := filepath.Join(tmpDir, "valid")
+		require.NoError(t, os.Mkdir(validDir, 0755))
+
+		assert.Panics(t, func() {
+			static.Website[*testContext](validDir, static.WithNotFoundFile("missing.html"))
+		})
+	})
+
+	t.Run("valid_setup_without_index", func(t *testing.T) {
+		t.Parallel()
+
+		validDir := filepath.Join(tmpDir, "valid2")
+		require.NoError(t, os.Mkdir(validDir, 0755))
+		// Note: Website doesn't require index.html in root
+
+		assert.NotPanics(t, func() {
+			static.Website[*testContext](validDir)
+		})
+	})
+}
+
+// TestWebsiteCombinedOptions tests Website handler with all options combined
+func TestWebsiteCombinedOptions(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+
+	homeContent := `<!DOCTYPE html><html><body><h1>Home</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "home.html"), []byte(homeContent), 0644))
+
+	notFoundContent := `<!DOCTYPE html><html><body><h1>Error 404</h1></body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "error.html"), []byte(notFoundContent), 0644))
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "style.css"), []byte("body { color: red; }"), 0644))
+
+	handler := static.Website[*testContext](tmpDir,
+		static.WithIndexFile("home.html"),
+		static.WithNotFoundFile("error.html"),
+		static.WithWebsiteExcludePaths("/api", "/health"),
+	)
+
+	tests := []struct {
+		name           string
+		urlPath        string
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "serve_custom_index",
+			urlPath:        "/",
+			expectedStatus: http.StatusOK,
+			expectedBody:   homeContent,
 		},
 		{
-			name:                "json_content_type",
-			urlPath:             "/data.json",
-			expectedContentType: "application/json",
+			name:           "redirect_custom_index_html",
+			urlPath:        "/home.html",
+			expectedStatus: http.StatusMovedPermanently,
 		},
 		{
-			name:                "html_content_type_for_fallback",
-			urlPath:             "/dashboard",
-			expectedContentType: "text/html",
+			name:           "serve_css",
+			urlPath:        "/style.css",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "body { color: red; }",
+		},
+		{
+			name:           "exclude_api_with_custom_404",
+			urlPath:        "/api/users",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   notFoundContent,
+		},
+		{
+			name:           "serve_custom_404_for_missing",
+			urlPath:        "/missing.html",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   notFoundContent,
 		},
 	}
 
@@ -788,10 +787,12 @@ func TestSPAContentTypeHeaders(t *testing.T) {
 			err := response(w, req)
 
 			assert.NoError(t, err)
-			assert.Equal(t, http.StatusOK, w.Code)
-
-			contentType := w.Header().Get("Content-Type")
-			assert.Contains(t, contentType, tt.expectedContentType)
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			if tt.expectedStatus == http.StatusMovedPermanently {
+				assert.Equal(t, "/", w.Header().Get("Location"))
+			} else {
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			}
 		})
 	}
 }
