@@ -1,6 +1,7 @@
 package static
 
 import (
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -148,6 +149,14 @@ func Dir[C handler.Context](root string, opts ...DirOption[C]) handler.HandlerFu
 
 			// Check if file exists and use error handler for any errors
 			fullPath := filepath.Join(config.root, strings.TrimPrefix(cleanPath, config.stripPrefix))
+
+			// Additional security: Validate that the path is within the root directory
+			cleanFullPath := filepath.Clean(fullPath)
+			cleanRoot := filepath.Clean(config.root)
+			if !strings.HasPrefix(cleanFullPath, cleanRoot+string(filepath.Separator)) && cleanFullPath != cleanRoot {
+				return config.errorHandler(ctx, fmt.Errorf("invalid file path: %s", fullPath))
+			}
+
 			if _, err := os.Stat(fullPath); err != nil {
 				response := config.errorHandler(ctx, err)
 				return response(w, r)

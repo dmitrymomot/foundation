@@ -1,6 +1,7 @@
 package static
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path"
@@ -185,6 +186,14 @@ func SPA[C handler.Context](root string, opts ...SPAOption) handler.HandlerFunc[
 
 			// Construct file path
 			filePath := filepath.Join(config.root, urlPath)
+
+			// Additional security: Validate that the path is within the root directory
+			cleanFilePath := filepath.Clean(filePath)
+			cleanRoot := filepath.Clean(config.root)
+			if !strings.HasPrefix(cleanFilePath, cleanRoot+string(filepath.Separator)) && cleanFilePath != cleanRoot {
+				http.NotFound(w, r)
+				return nil
+			}
 
 			// Check if file exists
 			info, err := os.Stat(filePath)
