@@ -15,6 +15,8 @@
 // Serve a single static file:
 //
 //	import (
+//		"net/http"
+//		"os"
 //		"github.com/dmitrymomot/foundation/core/handler"
 //		"github.com/dmitrymomot/foundation/core/static"
 //	)
@@ -29,14 +31,23 @@
 //	// Basic directory serving
 //	assetsHandler := static.Dir[handler.BaseContext]("./assets")
 //
-//	// Advanced directory serving with prefix stripping and custom 404
+//	// Advanced directory serving with prefix stripping and custom error handler
 //	customHandler := static.Dir[handler.BaseContext](
 //		"./public",
-//		static.WithStripPrefix("/static"),
-//		static.WithNotFound(func(w http.ResponseWriter, r *http.Request) error {
-//			w.WriteHeader(404)
-//			w.Write([]byte("Custom 404 page"))
-//			return nil
+//		static.WithStripPrefix[handler.BaseContext]("/static"),
+//		static.WithErrorHandler[handler.BaseContext](func(ctx handler.BaseContext, err error) handler.Response {
+//			return func(w http.ResponseWriter, r *http.Request) error {
+//				if os.IsNotExist(err) {
+//					w.WriteHeader(http.StatusNotFound)
+//					w.Write([]byte("<h1>Custom 404 Page</h1>"))
+//				} else if os.IsPermission(err) {
+//					w.WriteHeader(http.StatusForbidden)
+//					w.Write([]byte("<h1>Access Denied</h1>"))
+//				} else {
+//					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+//				}
+//				return nil
+//			}
 //		}),
 //	)
 //
@@ -92,10 +103,10 @@
 //		// Single file
 //		mux.Handle("GET /favicon.ico", handler.Adapt(static.File[handler.BaseContext]("./favicon.ico")))
 //
-//		// Static assets
+//		// Static assets with default error handling
 //		mux.Handle("GET /assets/", handler.Adapt(static.Dir[handler.BaseContext](
 //			"./public",
-//			static.WithStripPrefix("/assets"),
+//			static.WithStripPrefix[handler.BaseContext]("/assets"),
 //		)))
 //
 //		// SPA fallback (should be last)
@@ -109,7 +120,8 @@
 // - Directory listing is disabled by default for security
 // - Path traversal protection through path cleaning
 // - Startup validation ensures files/directories exist
-// - Custom 404 handlers prevent information disclosure
+// - Custom error handlers prevent information disclosure
+// - Default error handler maps filesystem errors to appropriate HTTP status codes
 //
 // # Error Handling
 //
@@ -120,4 +132,8 @@
 //
 // This fail-fast approach ensures configuration errors are caught early
 // rather than at runtime.
+//
+// The Dir() handler includes a default error handler that maps filesystem errors
+// to HTTP status codes (404 for not found, 403 for permission denied, 500 for others).
+// You can override this with WithErrorHandler() for custom error handling.
 package static

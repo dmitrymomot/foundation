@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/static"
 )
 
@@ -190,6 +191,59 @@ func TestDirWithIndex(t *testing.T) {
 	}
 }
 
+func TestDirDefaultErrorHandler(t *testing.T) {
+	t.Parallel()
+
+	// Create test directory
+	tmpDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "exists.txt"), []byte("content"), 0644))
+
+	handler := static.Dir[*testContext](tmpDir)
+
+	tests := []struct {
+		name           string
+		urlPath        string
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name:           "existing_file_returns_200",
+			urlPath:        "/exists.txt",
+			expectedStatus: http.StatusOK,
+			expectedBody:   "content",
+		},
+		{
+			name:           "nonexistent_file_returns_404",
+			urlPath:        "/missing.txt",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "404 page not found\n",
+		},
+		{
+			name:           "directory_without_index_returns_404",
+			urlPath:        "/nonexistent-dir/",
+			expectedStatus: http.StatusNotFound,
+			expectedBody:   "404 page not found\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", tt.urlPath, nil)
+			w := httptest.NewRecorder()
+			ctx := newTestContext(req, w)
+
+			response := handler(ctx)
+			err := response(w, req)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedStatus, w.Code)
+			assert.Equal(t, tt.expectedBody, w.Body.String())
+		})
+	}
+}
+
 func TestDirWithStripPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -231,7 +285,7 @@ func TestDirWithStripPrefix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := static.Dir[*testContext](tmpDir, static.WithStripPrefix(tt.stripPrefix))
+			handler := static.Dir[*testContext](tmpDir, static.WithStripPrefix[*testContext](tt.stripPrefix))
 			req := httptest.NewRequest("GET", tt.urlPath, nil)
 			w := httptest.NewRecorder()
 			ctx := newTestContext(req, w)
@@ -246,22 +300,29 @@ func TestDirWithStripPrefix(t *testing.T) {
 	}
 }
 
-func TestDirWithNotFound(t *testing.T) {
+func TestDirWithErrorHandler(t *testing.T) {
 	t.Parallel()
 
 	// Create test directory
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "exists.txt"), []byte("exists"), 0644))
 
-	customNotFoundCalled := false
-	customNotFoundHandler := func(w http.ResponseWriter, r *http.Request) error {
-		customNotFoundCalled = true
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Custom 404 page"))
-		return nil
+	customErrorHandlerCalled := false
+	customErrorHandler := func(ctx *testContext, err error) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			customErrorHandlerCalled = true
+			if os.IsNotExist(err) {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("Custom 404 page"))
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("Error: " + err.Error()))
+			}
+			return nil
+		}
 	}
 
-	handler := static.Dir[*testContext](tmpDir, static.WithNotFound(customNotFoundHandler))
+	handler := static.Dir[*testContext](tmpDir, static.WithErrorHandler[*testContext](customErrorHandler))
 
 	t.Run("existing_file_uses_normal_handler", func(t *testing.T) {
 		t.Parallel()
@@ -277,12 +338,10 @@ func TestDirWithNotFound(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "exists", w.Body.String())
 		// Custom handler should not be called for existing files
-		// Note: customNotFoundCalled may be true from previous test run
-		// so we can't reliably check it here
 	})
 
 	t.Run("nonexistent_file_uses_custom_handler", func(t *testing.T) {
-		customNotFoundCalled = false // Reset for this test
+		customErrorHandlerCalled = false // Reset for this test
 
 		req := httptest.NewRequest("GET", "/nonexistent.txt", nil)
 		w := httptest.NewRecorder()
@@ -294,7 +353,7 @@ func TestDirWithNotFound(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusNotFound, w.Code)
 		assert.Equal(t, "Custom 404 page", w.Body.String())
-		assert.True(t, customNotFoundCalled)
+		assert.True(t, customErrorHandlerCalled)
 	})
 }
 
@@ -512,15 +571,22 @@ func TestDirCombinedOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("file content"), 0644))
 
-	customNotFoundHandler := func(w http.ResponseWriter, r *http.Request) error {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Custom not found with prefix"))
-		return nil
+	customErrorHandler := func(ctx *testContext, err error) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			if os.IsNotExist(err) {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("Custom not found with prefix"))
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("Error: " + err.Error()))
+			}
+			return nil
+		}
 	}
 
 	handler := static.Dir[*testContext](tmpDir,
-		static.WithStripPrefix("/static"),
-		static.WithNotFound(customNotFoundHandler),
+		static.WithStripPrefix[*testContext]("/static"),
+		static.WithErrorHandler[*testContext](customErrorHandler),
 	)
 
 	tests := []struct {

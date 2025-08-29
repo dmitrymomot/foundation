@@ -13,15 +13,15 @@ import (
 
 // dirConfig holds configuration options for directory serving.
 // This struct is used internally by Dir() to manage serving behavior.
-type dirConfig struct {
-	root            string
-	stripPrefix     string
-	notFoundHandler func(w http.ResponseWriter, r *http.Request) error
+type dirConfig[C handler.Context] struct {
+	root         string
+	stripPrefix  string
+	errorHandler func(ctx C, err error) handler.Response
 }
 
 // DirOption is a functional option type for configuring directory serving behavior.
 // Use with Dir() to customize how static files are served from a directory.
-type DirOption func(*dirConfig)
+type DirOption[C handler.Context] func(*dirConfig[C])
 
 // WithStripPrefix removes the given prefix from the URL path before serving files.
 // This is useful when mounting static files under a specific route prefix.
@@ -30,29 +30,54 @@ type DirOption func(*dirConfig)
 // use WithStripPrefix("/static") so "/static/css/style.css" serves "./assets/css/style.css".
 //
 // The prefix parameter should include leading slash if needed for proper path matching.
-func WithStripPrefix(prefix string) DirOption {
-	return func(c *dirConfig) {
+func WithStripPrefix[C handler.Context](prefix string) DirOption[C] {
+	return func(c *dirConfig[C]) {
 		c.stripPrefix = prefix
 	}
 }
 
-// WithNotFound sets a custom handler for when files are not found.
-// This allows custom 404 pages or fallback behavior instead of the default HTTP 404.
+// WithErrorHandler sets a custom handler for file serving errors.
+// This allows custom error pages or fallback behavior for various error conditions
+// including file not found, permission denied, and other filesystem errors.
 //
-// The handler function receives the original http.ResponseWriter and *http.Request,
-// and should return an error if the response writing fails. The handler is responsible
-// for setting appropriate status codes and response content.
+// The handler function receives the context and the error that occurred,
+// and should return a Response that handles the error appropriately.
+// The default error handler uses http.Error to return standard HTTP error responses.
 //
 // Example:
 //
-//	func custom404(w http.ResponseWriter, r *http.Request) error {
-//		w.WriteHeader(http.StatusNotFound)
-//		w.Write([]byte("<h1>Page Not Found</h1>"))
-//		return nil
+//	func customErrorHandler(ctx *MyContext, err error) handler.Response {
+//		return func(w http.ResponseWriter, r *http.Request) error {
+//			if os.IsNotExist(err) {
+//				w.WriteHeader(http.StatusNotFound)
+//				w.Write([]byte("<h1>File Not Found</h1>"))
+//			} else {
+//				http.Error(w, err.Error(), http.StatusInternalServerError)
+//			}
+//			return nil
+//		}
 //	}
-func WithNotFound(handler func(w http.ResponseWriter, r *http.Request) error) DirOption {
-	return func(c *dirConfig) {
-		c.notFoundHandler = handler
+func WithErrorHandler[C handler.Context](handler func(ctx C, err error) handler.Response) DirOption[C] {
+	return func(c *dirConfig[C]) {
+		c.errorHandler = handler
+	}
+}
+
+// defaultErrorHandler provides standard HTTP error responses for file serving errors.
+// It maps common filesystem errors to appropriate HTTP status codes:
+// - os.IsNotExist -> 404 Not Found
+// - os.IsPermission -> 403 Forbidden
+// - Other errors -> 500 Internal Server Error
+func defaultErrorHandler[C handler.Context](ctx C, err error) handler.Response {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		if os.IsNotExist(err) {
+			http.Error(w, "404 page not found", http.StatusNotFound)
+		} else if os.IsPermission(err) {
+			http.Error(w, "403 forbidden", http.StatusForbidden)
+		} else {
+			http.Error(w, "500 internal server error", http.StatusInternalServerError)
+		}
+		return nil
 	}
 }
 
@@ -64,10 +89,11 @@ func WithNotFound(handler func(w http.ResponseWriter, r *http.Request) error) Di
 // - Supports HTTP range requests for partial content
 // - Automatically detects content types
 // - Cleans URL paths to prevent directory traversal attacks
+// - Uses a default error handler that maps filesystem errors to HTTP status codes
 //
 // Parameters:
 //   - root: The root directory path to serve files from (must exist at startup)
-//   - opts: Optional configuration functions (WithStripPrefix, WithNotFound)
+//   - opts: Optional configuration functions (WithStripPrefix, WithErrorHandler)
 //
 // Panics at startup if:
 //   - The directory doesn't exist
@@ -76,19 +102,20 @@ func WithNotFound(handler func(w http.ResponseWriter, r *http.Request) error) Di
 //
 // Example:
 //
-//	// Basic directory serving
+//	// Basic directory serving with default error handling
 //	handler := static.Dir[MyContext]("./public")
 //
 //	// With custom options
 //	handler := static.Dir[MyContext](
 //		"./assets",
 //		static.WithStripPrefix("/static"),
-//		static.WithNotFound(custom404Handler),
+//		static.WithErrorHandler(customErrorHandler),
 //	)
-func Dir[C handler.Context](root string, opts ...DirOption) handler.HandlerFunc[C] {
-	config := &dirConfig{
-		root:        filepath.Clean(root),
-		stripPrefix: "",
+func Dir[C handler.Context](root string, opts ...DirOption[C]) handler.HandlerFunc[C] {
+	config := &dirConfig[C]{
+		root:         filepath.Clean(root),
+		stripPrefix:  "",
+		errorHandler: defaultErrorHandler[C],
 	}
 
 	for _, opt := range opts {
@@ -119,12 +146,11 @@ func Dir[C handler.Context](root string, opts ...DirOption) handler.HandlerFunc[
 			// Clean the URL path to prevent directory traversal
 			cleanPath := path.Clean(r.URL.Path)
 
-			// Check if custom 404 handler is set
-			if config.notFoundHandler != nil {
-				fullPath := filepath.Join(config.root, strings.TrimPrefix(cleanPath, config.stripPrefix))
-				if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-					return config.notFoundHandler(w, r)
-				}
+			// Check if file exists and use error handler for any errors
+			fullPath := filepath.Join(config.root, strings.TrimPrefix(cleanPath, config.stripPrefix))
+			if _, err := os.Stat(fullPath); err != nil {
+				response := config.errorHandler(ctx, err)
+				return response(w, r)
 			}
 
 			fileServer.ServeHTTP(w, r)
