@@ -2,7 +2,6 @@ package static
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"github.com/dmitrymomot/foundation/core/handler"
@@ -39,16 +38,8 @@ func File[C handler.Context](filePath string) handler.HandlerFunc[C] {
 	// Validate at startup
 	cleanPath := filepath.Clean(filePath)
 
-	info, err := os.Stat(cleanPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			panic("static.File: file does not exist: " + cleanPath)
-		}
-		panic("static.File: error accessing file: " + err.Error())
-	}
-
-	if info.IsDir() {
-		panic("static.File: path is a directory, not a file: " + cleanPath)
+	if err := validateStartup(cleanPath, false); err != nil {
+		panic("static.File: " + err.Error())
 	}
 
 	return func(ctx C) handler.Response {

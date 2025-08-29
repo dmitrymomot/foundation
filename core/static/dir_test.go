@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/static"
 )
 
@@ -112,11 +111,20 @@ func TestDir(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
+			if tt.expectedStatus == http.StatusOK {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedStatus, w.Code)
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			} else {
+				// For error cases, the error is returned from Response function
+				assert.Error(t, err)
+				httpErr, ok := err.(interface{ StatusCode() int })
+				if assert.True(t, ok, "error should implement StatusCode() method") {
+					assert.Equal(t, tt.expectedStatus, httpErr.StatusCode())
+				}
+			}
 
-			if tt.checkHeaders {
+			if tt.checkHeaders && tt.expectedStatus == http.StatusOK {
 				// Check content type is set
 				contentType := w.Header().Get("Content-Type")
 				assert.NotEmpty(t, contentType)
@@ -184,9 +192,21 @@ func TestDirWithIndex(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
+			if tt.expectedStatus == http.StatusOK || tt.expectedStatus == http.StatusMovedPermanently {
+				// Success cases (including redirects)
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedStatus, w.Code)
+				if tt.expectedStatus == http.StatusOK {
+					assert.Equal(t, tt.expectedBody, w.Body.String())
+				}
+			} else {
+				// For error cases, the error is returned from Response function
+				assert.Error(t, err)
+				httpErr, ok := err.(interface{ StatusCode() int })
+				if assert.True(t, ok, "error should implement StatusCode() method") {
+					assert.Equal(t, tt.expectedStatus, httpErr.StatusCode())
+				}
+			}
 		})
 	}
 }
@@ -237,9 +257,18 @@ func TestDirDefaultErrorHandler(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
+			if tt.expectedStatus == http.StatusOK {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedStatus, w.Code)
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			} else {
+				// For error cases, the error is returned from Response function
+				assert.Error(t, err)
+				httpErr, ok := err.(interface{ StatusCode() int })
+				if assert.True(t, ok, "error should implement StatusCode() method") {
+					assert.Equal(t, tt.expectedStatus, httpErr.StatusCode())
+				}
+			}
 		})
 	}
 }
@@ -285,7 +314,7 @@ func TestDirWithStripPrefix(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := static.Dir[*testContext](tmpDir, static.WithStripPrefix[*testContext](tt.stripPrefix))
+			handler := static.Dir[*testContext](tmpDir, static.WithStripPrefix(tt.stripPrefix))
 			req := httptest.NewRequest("GET", tt.urlPath, nil)
 			w := httptest.NewRecorder()
 			ctx := newTestContext(req, w)
@@ -293,38 +322,32 @@ func TestDirWithStripPrefix(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
+			if tt.expectedStatus == http.StatusOK {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expectedStatus, w.Code)
+				assert.Equal(t, tt.expectedBody, w.Body.String())
+			} else {
+				// For error cases, the error is returned from Response function
+				assert.Error(t, err)
+				httpErr, ok := err.(interface{ StatusCode() int })
+				if assert.True(t, ok, "error should implement StatusCode() method") {
+					assert.Equal(t, tt.expectedStatus, httpErr.StatusCode())
+				}
+			}
 		})
 	}
 }
 
-func TestDirWithErrorHandler(t *testing.T) {
+func TestDirErrorHandling(t *testing.T) {
 	t.Parallel()
 
 	// Create test directory
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "exists.txt"), []byte("exists"), 0644))
 
-	customErrorHandlerCalled := false
-	customErrorHandler := func(ctx *testContext, err error) handler.Response {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			customErrorHandlerCalled = true
-			if os.IsNotExist(err) {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("Custom 404 page"))
-			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Error: " + err.Error()))
-			}
-			return nil
-		}
-	}
+	handler := static.Dir[*testContext](tmpDir)
 
-	handler := static.Dir[*testContext](tmpDir, static.WithErrorHandler[*testContext](customErrorHandler))
-
-	t.Run("existing_file_uses_normal_handler", func(t *testing.T) {
+	t.Run("existing_file_returns_no_error", func(t *testing.T) {
 		t.Parallel()
 
 		req := httptest.NewRequest("GET", "/exists.txt", nil)
@@ -337,12 +360,9 @@ func TestDirWithErrorHandler(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "exists", w.Body.String())
-		// Custom handler should not be called for existing files
 	})
 
-	t.Run("nonexistent_file_uses_custom_handler", func(t *testing.T) {
-		customErrorHandlerCalled = false // Reset for this test
-
+	t.Run("nonexistent_file_returns_error", func(t *testing.T) {
 		req := httptest.NewRequest("GET", "/nonexistent.txt", nil)
 		w := httptest.NewRecorder()
 		ctx := newTestContext(req, w)
@@ -350,10 +370,12 @@ func TestDirWithErrorHandler(t *testing.T) {
 		response := handler(ctx)
 		err := response(w, req)
 
-		assert.NoError(t, err)
-		assert.Equal(t, http.StatusNotFound, w.Code)
-		assert.Equal(t, "Custom 404 page", w.Body.String())
-		assert.True(t, customErrorHandlerCalled)
+		// Should return an HTTPError
+		assert.Error(t, err)
+		httpErr, ok := err.(interface{ StatusCode() int })
+		if assert.True(t, ok, "error should implement StatusCode() method") {
+			assert.Equal(t, http.StatusNotFound, httpErr.StatusCode())
+		}
 	})
 }
 
@@ -446,8 +468,12 @@ func TestDirSecurityNoDirectoryListing(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err)
-			assert.Equal(t, http.StatusNotFound, w.Code)
+			// Should return an error for directories without index.html
+			assert.Error(t, err)
+			httpErr, ok := err.(interface{ StatusCode() int })
+			if assert.True(t, ok, "error should implement StatusCode() method") {
+				assert.Equal(t, http.StatusNotFound, httpErr.StatusCode())
+			}
 
 			// Make sure response doesn't contain file names (no directory listing)
 			body := w.Body.String()
@@ -519,11 +545,17 @@ func TestDirPathTraversalPrevention(t *testing.T) {
 			response := handler(ctx)
 			err := response(w, req)
 
-			assert.NoError(t, err, tt.description)
-			assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
-
-			// Ensure secret content is never served
-			if tt.expectedStatus == http.StatusNotFound {
+			if tt.expectedStatus == http.StatusOK {
+				assert.NoError(t, err, tt.description)
+				assert.Equal(t, tt.expectedStatus, w.Code, tt.description)
+			} else {
+				// For error cases, the error is returned from Response function
+				assert.Error(t, err, tt.description)
+				httpErr, ok := err.(interface{ StatusCode() int })
+				if assert.True(t, ok, "error should implement StatusCode() method: "+tt.description) {
+					assert.Equal(t, tt.expectedStatus, httpErr.StatusCode(), tt.description)
+				}
+				// Ensure secret content is never served
 				assert.NotContains(t, w.Body.String(), "secret content")
 			}
 		})
@@ -571,64 +603,40 @@ func TestDirCombinedOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("file content"), 0644))
 
-	customErrorHandler := func(ctx *testContext, err error) handler.Response {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			if os.IsNotExist(err) {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("Custom not found with prefix"))
-			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("Error: " + err.Error()))
-			}
-			return nil
-		}
-	}
-
 	handler := static.Dir[*testContext](tmpDir,
-		static.WithStripPrefix[*testContext]("/static"),
-		static.WithErrorHandler[*testContext](customErrorHandler),
+		static.WithStripPrefix("/static"),
 	)
 
-	tests := []struct {
-		name           string
-		urlPath        string
-		expectedStatus int
-		expectedBody   string
-	}{
-		{
-			name:           "existing_file_with_prefix",
-			urlPath:        "/static/file.txt",
-			expectedStatus: http.StatusOK,
-			expectedBody:   "file content",
-		},
-		{
-			name:           "nonexistent_file_with_prefix_uses_custom_404",
-			urlPath:        "/static/missing.txt",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "Custom not found with prefix",
-		},
-		{
-			name:           "file_without_prefix_uses_default_404",
-			urlPath:        "/file.txt",
-			expectedStatus: http.StatusNotFound,
-			expectedBody:   "404 page not found\n",
-		},
-	}
+	t.Run("existing_file_with_prefix", func(t *testing.T) {
+		t.Parallel()
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
+		req := httptest.NewRequest("GET", "/static/file.txt", nil)
+		w := httptest.NewRecorder()
+		ctx := newTestContext(req, w)
 
-			req := httptest.NewRequest("GET", tt.urlPath, nil)
-			w := httptest.NewRecorder()
-			ctx := newTestContext(req, w)
+		response := handler(ctx)
+		err := response(w, req)
 
-			response := handler(ctx)
-			err := response(w, req)
+		assert.NoError(t, err)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "file content", w.Body.String())
+	})
 
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedStatus, w.Code)
-			assert.Equal(t, tt.expectedBody, w.Body.String())
-		})
-	}
+	t.Run("file_without_prefix_returns_error", func(t *testing.T) {
+		t.Parallel()
+
+		req := httptest.NewRequest("GET", "/file.txt", nil)
+		w := httptest.NewRecorder()
+		ctx := newTestContext(req, w)
+
+		response := handler(ctx)
+		err := response(w, req)
+
+		// Should return an HTTPError for not found
+		assert.Error(t, err)
+		httpErr, ok := err.(interface{ StatusCode() int })
+		if assert.True(t, ok, "error should implement StatusCode() method") {
+			assert.Equal(t, http.StatusNotFound, httpErr.StatusCode())
+		}
+	})
 }

@@ -3,7 +3,6 @@ package static
 import (
 	"io/fs"
 	"net/http"
-	"strings"
 
 	"github.com/dmitrymomot/foundation/core/handler"
 )
@@ -103,7 +102,7 @@ func FS[C handler.Context](fsys fs.FS, opts ...FSOption) handler.HandlerFunc[C] 
 		panic("static.FS: filesystem is not accessible: " + err.Error())
 	}
 
-	fileServer := http.FileServer(neuteredFS{http.FS(config.fs)})
+	fileServer := http.FileServer(neuteredFileSystem{fs: http.FS(config.fs)})
 
 	if config.stripPrefix != "" {
 		fileServer = http.StripPrefix(config.stripPrefix, fileServer)
@@ -115,36 +114,4 @@ func FS[C handler.Context](fsys fs.FS, opts ...FSOption) handler.HandlerFunc[C] 
 			return nil
 		}
 	}
-}
-
-// neuteredFS wraps http.FileSystem for fs.FS implementations to disable directory listing.
-// It only allows directory access if an index.html file is present.
-type neuteredFS struct {
-	http.FileSystem
-}
-
-// Open implements http.FileSystem.Open with directory listing disabled.
-// Directories are only accessible if they contain an index.html file.
-func (nfs neuteredFS) Open(path string) (http.File, error) {
-	f, err := nfs.FileSystem.Open(path)
-	if err != nil {
-		return nil, err
-	}
-
-	s, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return nil, err
-	}
-
-	if s.IsDir() {
-		// Check if index.html exists in directory
-		index := strings.TrimSuffix(path, "/") + "/index.html"
-		if _, err := nfs.FileSystem.Open(index); err != nil {
-			_ = f.Close()
-			return nil, fs.ErrNotExist
-		}
-	}
-
-	return f, nil
 }
