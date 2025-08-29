@@ -389,6 +389,100 @@ func TestSPAStartupValidation(t *testing.T) {
 	})
 }
 
+// TestSPAPathTraversalPrevention tests that SPA handler prevents path traversal attacks
+func TestSPAPathTraversalPrevention(t *testing.T) {
+	t.Parallel()
+
+	// Create directory structure
+	tmpDir := t.TempDir()
+	publicDir := filepath.Join(tmpDir, "public")
+	require.NoError(t, os.Mkdir(publicDir, 0755))
+
+	// Secret file outside public directory
+	secretFile := filepath.Join(tmpDir, "secret.txt")
+	require.NoError(t, os.WriteFile(secretFile, []byte("SECRET DATA"), 0644))
+
+	// Index file for SPA
+	indexPath := filepath.Join(publicDir, "index.html")
+	indexContent := `<!DOCTYPE html><html><body>SPA</body></html>`
+	require.NoError(t, os.WriteFile(indexPath, []byte(indexContent), 0644))
+
+	// Public asset
+	require.NoError(t, os.WriteFile(filepath.Join(publicDir, "app.js"), []byte("console.log('app')"), 0644))
+
+	handler := static.SPA[*testContext](publicDir)
+
+	tests := []struct {
+		name           string
+		urlPath        string
+		shouldFallback bool // true if should serve index.html, false if should serve 404
+		description    string
+	}{
+		{
+			name:           "normal_asset_access",
+			urlPath:        "/app.js",
+			shouldFallback: false,
+			description:    "Normal assets should be served",
+		},
+		{
+			name:           "path_traversal_dots",
+			urlPath:        "/../secret.txt",
+			shouldFallback: true, // SPA fallback behavior for invalid paths
+			description:    "Path traversal with .. should fallback to index",
+		},
+		{
+			name:           "path_traversal_encoded_dots",
+			urlPath:        "/%2e%2e/secret.txt",
+			shouldFallback: true,
+			description:    "URL-encoded path traversal should fallback to index",
+		},
+		{
+			name:           "path_traversal_double_encoded",
+			urlPath:        "/%252e%252e/secret.txt",
+			shouldFallback: true,
+			description:    "Double-encoded path traversal should fallback to index",
+		},
+		{
+			name:           "path_traversal_multiple",
+			urlPath:        "/../../../../../../etc/passwd",
+			shouldFallback: true,
+			description:    "Multiple traversal attempts should fallback to index",
+		},
+		{
+			name:           "path_traversal_mixed",
+			urlPath:        "/assets/../../../secret.txt",
+			shouldFallback: true,
+			description:    "Mixed path traversal should fallback to index",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", tt.urlPath, nil)
+			w := httptest.NewRecorder()
+			ctx := newTestContext(req, w)
+
+			response := handler(ctx)
+			err := response(w, req)
+			assert.NoError(t, err)
+
+			body := w.Body.String()
+
+			// Verify no secret data is exposed
+			assert.NotContains(t, body, "SECRET DATA", "Secret file content should never be exposed")
+
+			if tt.urlPath == "/app.js" {
+				assert.Contains(t, body, "console.log", "Valid asset should be served")
+			} else if tt.shouldFallback {
+				// For invalid paths, SPA serves index.html
+				assert.Contains(t, body, "SPA", "Should serve index.html for invalid paths")
+			}
+		})
+	}
+}
+
 // TestWebsite tests basic Website handler functionality
 func TestWebsite(t *testing.T) {
 	t.Parallel()
@@ -716,6 +810,130 @@ func TestWebsiteStartupValidation(t *testing.T) {
 			static.Website[*testContext](validDir)
 		})
 	})
+}
+
+// TestWebsitePathTraversalPrevention tests that Website handler prevents path traversal attacks
+func TestWebsitePathTraversalPrevention(t *testing.T) {
+	t.Parallel()
+
+	// Create directory structure
+	tmpDir := t.TempDir()
+	publicDir := filepath.Join(tmpDir, "public")
+	require.NoError(t, os.Mkdir(publicDir, 0755))
+
+	// Secret file outside public directory
+	secretFile := filepath.Join(tmpDir, "secret.txt")
+	require.NoError(t, os.WriteFile(secretFile, []byte("SECRET DATA"), 0644))
+
+	// Website files
+	indexContent := `<!DOCTYPE html><html><body>Website Home</body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(publicDir, "index.html"), []byte(indexContent), 0644))
+
+	aboutContent := `<!DOCTYPE html><html><body>About Page</body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(publicDir, "about.html"), []byte(aboutContent), 0644))
+
+	notFoundContent := `<!DOCTYPE html><html><body>404 Not Found</body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(publicDir, "404.html"), []byte(notFoundContent), 0644))
+
+	// Create a subdirectory with index
+	subDir := filepath.Join(publicDir, "blog")
+	require.NoError(t, os.Mkdir(subDir, 0755))
+	blogIndexContent := `<!DOCTYPE html><html><body>Blog Index</body></html>`
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "index.html"), []byte(blogIndexContent), 0644))
+
+	handler := static.Website[*testContext](publicDir, static.WithNotFoundFile("404.html"))
+
+	tests := []struct {
+		name           string
+		urlPath        string
+		expectedBody   string
+		expectedStatus int
+		description    string
+	}{
+		{
+			name:           "normal_file_access",
+			urlPath:        "/about.html",
+			expectedBody:   "About Page",
+			expectedStatus: http.StatusOK,
+			description:    "Normal files should be accessible",
+		},
+		{
+			name:           "directory_index_access",
+			urlPath:        "/blog/",
+			expectedBody:   "Blog Index",
+			expectedStatus: http.StatusOK,
+			description:    "Directory index should be served",
+		},
+		{
+			name:           "path_traversal_dots",
+			urlPath:        "/../secret.txt",
+			expectedBody:   "404 Not Found",
+			expectedStatus: http.StatusNotFound,
+			description:    "Path traversal with .. should return 404",
+		},
+		{
+			name:           "path_traversal_encoded_dots",
+			urlPath:        "/%2e%2e/secret.txt",
+			expectedBody:   "404 Not Found",
+			expectedStatus: http.StatusNotFound,
+			description:    "URL-encoded path traversal should return 404",
+		},
+		{
+			name:           "path_traversal_double_encoded",
+			urlPath:        "/%252e%252e/secret.txt",
+			expectedBody:   "404 Not Found",
+			expectedStatus: http.StatusNotFound,
+			description:    "Double-encoded path traversal should return 404",
+		},
+		{
+			name:           "path_traversal_multiple",
+			urlPath:        "/../../../../../../etc/passwd",
+			expectedBody:   "404 Not Found",
+			expectedStatus: http.StatusNotFound,
+			description:    "Multiple traversal attempts should return 404",
+		},
+		{
+			name:           "path_traversal_from_subdir",
+			urlPath:        "/blog/../../secret.txt",
+			expectedBody:   "404 Not Found",
+			expectedStatus: http.StatusNotFound,
+			description:    "Traversal from subdirectory should return 404",
+		},
+		{
+			name:           "path_traversal_mixed_encoding",
+			urlPath:        "/blog/%2e%2e/../secret.txt",
+			expectedBody:   "404 Not Found",
+			expectedStatus: http.StatusNotFound,
+			description:    "Mixed encoding traversal should return 404",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			req := httptest.NewRequest("GET", tt.urlPath, nil)
+			w := httptest.NewRecorder()
+			ctx := newTestContext(req, w)
+
+			response := handler(ctx)
+			err := response(w, req)
+			assert.NoError(t, err)
+
+			// Check status code if it's a 404 scenario
+			if tt.expectedStatus == http.StatusNotFound {
+				assert.Equal(t, http.StatusNotFound, w.Code)
+			}
+
+			body := w.Body.String()
+
+			// Verify no secret data is exposed
+			assert.NotContains(t, body, "SECRET DATA", "Secret file content should never be exposed")
+
+			// Verify expected content is served
+			assert.Contains(t, body, tt.expectedBody, tt.description)
+		})
+	}
 }
 
 // TestWebsiteCombinedOptions tests Website handler with all options combined
