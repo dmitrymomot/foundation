@@ -519,6 +519,139 @@ func TestMemoryStorage_Concurrency(t *testing.T) {
 	})
 }
 
+func TestMemoryStorage_GetPendingTaskByName(t *testing.T) {
+	storage := queue.NewMemoryStorage()
+	defer storage.Close()
+
+	t.Run("finds pending task by name", func(t *testing.T) {
+		task := &queue.Task{
+			ID:          uuid.New(),
+			Queue:       queue.DefaultQueueName,
+			TaskType:    queue.TaskTypePeriodic,
+			TaskName:    "daily-report",
+			Status:      queue.TaskStatusPending,
+			Priority:    queue.PriorityMedium,
+			ScheduledAt: time.Now(),
+			CreatedAt:   time.Now(),
+		}
+		err := storage.CreateTask(context.Background(), task)
+		require.NoError(t, err)
+
+		found, err := storage.GetPendingTaskByName(context.Background(), "daily-report")
+		require.NoError(t, err)
+		require.NotNil(t, found)
+		assert.Equal(t, task.ID, found.ID)
+		assert.Equal(t, "daily-report", found.TaskName)
+		assert.Equal(t, queue.TaskStatusPending, found.Status)
+	})
+
+	t.Run("returns nil when no matching task", func(t *testing.T) {
+		found, err := storage.GetPendingTaskByName(context.Background(), "non-existent")
+		require.NoError(t, err)
+		assert.Nil(t, found)
+	})
+
+	t.Run("only returns pending tasks", func(t *testing.T) {
+		// Create tasks with different statuses but same name
+		pendingTask := &queue.Task{
+			ID:          uuid.New(),
+			Queue:       queue.DefaultQueueName,
+			TaskType:    queue.TaskTypePeriodic,
+			TaskName:    "status-test",
+			Status:      queue.TaskStatusPending,
+			Priority:    queue.PriorityMedium,
+			ScheduledAt: time.Now().Add(-time.Minute),
+			CreatedAt:   time.Now(),
+		}
+		err := storage.CreateTask(context.Background(), pendingTask)
+		require.NoError(t, err)
+
+		// Claim the task to change its status to processing
+		workerID := uuid.New()
+		claimed, err := storage.ClaimTask(context.Background(), workerID, []string{queue.DefaultQueueName}, 5*time.Minute)
+		require.NoError(t, err)
+		require.NotNil(t, claimed)
+
+		// Now create another pending task with same name
+		pendingTask2 := &queue.Task{
+			ID:          uuid.New(),
+			Queue:       queue.DefaultQueueName,
+			TaskType:    queue.TaskTypePeriodic,
+			TaskName:    "status-test",
+			Status:      queue.TaskStatusPending,
+			Priority:    queue.PriorityMedium,
+			ScheduledAt: time.Now(),
+			CreatedAt:   time.Now(),
+		}
+		err = storage.CreateTask(context.Background(), pendingTask2)
+		require.NoError(t, err)
+
+		// Should find the pending one, not the processing one
+		found, err := storage.GetPendingTaskByName(context.Background(), "status-test")
+		require.NoError(t, err)
+		require.NotNil(t, found)
+		assert.Equal(t, pendingTask2.ID, found.ID)
+		assert.Equal(t, queue.TaskStatusPending, found.Status)
+	})
+
+	t.Run("returns first match when multiple pending tasks with same name", func(t *testing.T) {
+		// Create multiple pending tasks with same name
+		var taskIDs []uuid.UUID
+		for i := 0; i < 3; i++ {
+			task := &queue.Task{
+				ID:          uuid.New(),
+				Queue:       queue.DefaultQueueName,
+				TaskType:    queue.TaskTypePeriodic,
+				TaskName:    "duplicate-name",
+				Status:      queue.TaskStatusPending,
+				Priority:    queue.PriorityMedium,
+				ScheduledAt: time.Now().Add(time.Duration(i) * time.Minute),
+				CreatedAt:   time.Now(),
+			}
+			taskIDs = append(taskIDs, task.ID)
+			err := storage.CreateTask(context.Background(), task)
+			require.NoError(t, err)
+		}
+
+		// Should find one of them
+		found, err := storage.GetPendingTaskByName(context.Background(), "duplicate-name")
+		require.NoError(t, err)
+		require.NotNil(t, found)
+		assert.Equal(t, "duplicate-name", found.TaskName)
+		assert.Contains(t, taskIDs, found.ID)
+	})
+
+	t.Run("returns copy preventing external modifications", func(t *testing.T) {
+		task := &queue.Task{
+			ID:          uuid.New(),
+			Queue:       queue.DefaultQueueName,
+			TaskType:    queue.TaskTypePeriodic,
+			TaskName:    "immutable-test",
+			Status:      queue.TaskStatusPending,
+			Priority:    queue.PriorityMedium,
+			ScheduledAt: time.Now(),
+			CreatedAt:   time.Now(),
+		}
+		err := storage.CreateTask(context.Background(), task)
+		require.NoError(t, err)
+
+		found, err := storage.GetPendingTaskByName(context.Background(), "immutable-test")
+		require.NoError(t, err)
+		require.NotNil(t, found)
+
+		// Modify the returned task
+		found.TaskName = "modified"
+		found.Priority = queue.PriorityMax
+
+		// Original should remain unchanged
+		found2, err := storage.GetPendingTaskByName(context.Background(), "immutable-test")
+		require.NoError(t, err)
+		require.NotNil(t, found2)
+		assert.Equal(t, "immutable-test", found2.TaskName)
+		assert.Equal(t, queue.PriorityMedium, found2.Priority)
+	})
+}
+
 // Helper function
 func stringPtr(s string) *string {
 	return &s

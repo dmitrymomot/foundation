@@ -256,6 +256,25 @@ func (ms *MemoryStorage) ExtendLock(ctx context.Context, taskID uuid.UUID, durat
 	return nil
 }
 
+// GetPendingTaskByName implements SchedulerRepository
+func (ms *MemoryStorage) GetPendingTaskByName(ctx context.Context, taskName string) (*Task, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	// Search through pending tasks for matching name
+	for _, taskID := range ms.byStatus[TaskStatusPending] {
+		task := ms.tasks[taskID]
+		if task.TaskName == taskName {
+			// Return a copy to prevent external modifications
+			taskCopy := *task
+			return &taskCopy, nil
+		}
+	}
+
+	// No matching task found
+	return nil, nil
+}
+
 // Helper methods
 
 func (ms *MemoryStorage) removeFromStatusIndex(taskID uuid.UUID, status TaskStatus) {
