@@ -319,10 +319,11 @@ func (m *mux[C]) Mount(pattern string, sub Router[C]) {
 		panic("foundation: can only mount *mux[C] routers")
 	}
 
-	// Always inherit parent's error handler and logger for consistency
+	// Always inherit parent's error handler, logger, and context factory for consistency
 	// This ensures mounted subrouters behave predictably
 	subMux.errorHandler = m.errorHandler
 	subMux.logger = m.logger
+	subMux.newContext = m.newContext
 
 	// Stub handler - actual routing is handled by the tree traversal
 	mountHandler := func(ctx C) handler.Response {

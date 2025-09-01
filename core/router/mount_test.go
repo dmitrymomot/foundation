@@ -192,6 +192,61 @@ func TestMountedSubrouterInheritance(t *testing.T) {
 	assert.Contains(t, w.Body.String(), "custom error")
 }
 
+func TestMountedSubrouterInheritsContextFactory(t *testing.T) {
+	t.Parallel()
+
+	// Custom context type for testing
+	type CustomContext struct {
+		*router.Context
+		CustomValue string
+	}
+
+	// Context factory
+	factoryCalled := false
+	contextFactory := func(w http.ResponseWriter, r *http.Request, params map[string]string) *CustomContext {
+		factoryCalled = true
+		// We can't call the private newContext, so we create a minimal implementation
+		// In real usage, users would embed *router.Context properly
+		return &CustomContext{
+			Context:     &router.Context{}, // This won't work perfectly but shows the concept
+			CustomValue: "test-value",
+		}
+	}
+
+	// Create main router with custom context factory
+	mainRouter := router.New[*CustomContext](router.WithContextFactory(contextFactory))
+
+	// Create subrouter WITHOUT setting context factory
+	// This would panic without the fix since it needs a custom context factory
+	subRouter := router.New[*CustomContext]()
+
+	// Add route to subrouter that uses custom context
+	var receivedContext *CustomContext
+	subRouter.Get("/test", func(ctx *CustomContext) handler.Response {
+		receivedContext = ctx
+		return func(w http.ResponseWriter, r *http.Request) error {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(ctx.CustomValue))
+			return nil
+		}
+	})
+
+	// Mount should inherit the context factory
+	mainRouter.Mount("/api", subRouter)
+
+	// Test the mounted route
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	w := httptest.NewRecorder()
+
+	mainRouter.ServeHTTP(w, req)
+
+	assert.True(t, factoryCalled, "Context factory should have been called")
+	assert.NotNil(t, receivedContext, "Should have received context")
+	assert.Equal(t, "test-value", receivedContext.CustomValue)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "test-value", w.Body.String())
+}
+
 func TestMountAtRoot(t *testing.T) {
 	t.Parallel()
 
