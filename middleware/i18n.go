@@ -226,3 +226,59 @@ func GetTranslator(ctx context.Context) (*i18n.Translator, bool) {
 	translator, ok := ctx.Value(i18nTranslatorContextKey{}).(*i18n.Translator)
 	return translator, ok
 }
+
+// SetTranslator stores an i18n translator in the context.
+// Returns a new context with the translator stored.
+// Works with any context.Context, not just handler.Context.
+//
+// This helper is useful for scenarios where you need to manually inject
+// a translator into the context outside of the middleware flow, such as:
+// - Background jobs and workers
+// - CLI tools and scripts
+// - Unit tests
+// - Custom authentication flows where language is determined after middleware
+// - WebSocket connections with dynamic language switching
+//
+// Usage examples:
+//
+//	// In a background job processor
+//	func ProcessUserNotification(ctx context.Context, userID string) error {
+//		user, err := db.GetUser(ctx, userID)
+//		if err != nil {
+//			return err
+//		}
+//
+//		// Create translator with user's preferred language
+//		translator := i18n.NewTranslator(i18nInstance, user.Language, "notifications")
+//		ctx = middleware.SetTranslator(ctx, translator)
+//
+//		// Now any code using this context can access the translator
+//		return sendNotification(ctx, user)
+//	}
+//
+//	// In unit tests
+//	func TestMyHandler(t *testing.T) {
+//		i18nInstance, _ := i18n.New([]string{"en", "es"}, "en")
+//		translator := i18n.NewTranslator(i18nInstance, "es", "test")
+//
+//		ctx := context.Background()
+//		ctx = middleware.SetTranslator(ctx, translator)
+//
+//		// Test handler with Spanish translations
+//		result := myHandler(ctx)
+//		assert.Equal(t, "Hola", result.Message)
+//	}
+//
+//	// In WebSocket handlers with dynamic language switching
+//	func HandleWebSocketMessage(ctx context.Context, msg Message) {
+//		if msg.Type == "change_language" {
+//			translator := i18n.NewTranslator(i18nInstance, msg.Language, "websocket")
+//			ctx = middleware.SetTranslator(ctx, translator)
+//		}
+//
+//		// Process message with updated language context
+//		processMessage(ctx, msg)
+//	}
+func SetTranslator(ctx context.Context, translator *i18n.Translator) context.Context {
+	return context.WithValue(ctx, i18nTranslatorContextKey{}, translator)
+}

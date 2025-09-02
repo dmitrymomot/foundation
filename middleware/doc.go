@@ -22,7 +22,7 @@
 //   - Generic functions with handler.Context type parameters
 //   - Basic constructor functions (e.g., JWT[C](), ClientIP[C]())
 //   - Advanced WithConfig constructors for custom configuration
-//   - Context helper functions for retrieving stored values (e.g., GetClientIP())
+//   - Context helper functions for retrieving and storing values (e.g., GetClientIP(), SetTranslator())
 //   - Optional skip conditions, validation functions, and error handlers
 //
 // # Basic Usage
