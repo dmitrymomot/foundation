@@ -45,8 +45,9 @@
 //
 // Utility Components:
 //   - OTP(otp) - Styled one-time password display
-//   - Logo() - Logo placeholder component
-//   - Footer() - Email footer component
+//   - Logo(logoURL, alt) - Logo component with image URL and alt text
+//   - Footer() - Email footer component (accepts children content)
+//   - FooterLink(text, url) - Footer link with proper styling and separator
 //
 // # Button Usage
 //
@@ -81,6 +82,82 @@
 //			}
 //		}
 //	}
+//
+// # Complete Example
+//
+// Here's a comprehensive welcome email template that demonstrates maximum component usage:
+//
+// Create a welcome.templ file:
+//
+//	package emails
+//
+//	import "github.com/dmitrymomot/foundation/core/email/templates/components"
+//
+//	templ WelcomeEmail(userName, verificationCode, dashboardURL, supportURL string) {
+//		@components.Layout() {
+//			@components.Logo("https://example.com/logo.png", "Company Logo")
+//			@components.Header("Welcome to Our Platform!", "You're all set to get started")
+//
+//			@components.Text() {
+//				Hi { userName },
+//			}
+//			@components.Text() {
+//				Welcome to our platform! We're excited to have you on board. Your account has been
+//				successfully created and you're just one step away from accessing all features.
+//			}
+//
+//			@components.TextWarning() {
+//				Important: Please verify your email address to activate your account.
+//			}
+//
+//			@components.Text() {
+//				Use the verification code below to complete your account setup:
+//			}
+//			@components.OTP(verificationCode)
+//			@components.TextSecondary() {
+//				This verification code will expire in 10 minutes for security reasons.
+//			}
+//
+//			@components.Text() {
+//				Once verified, you can access your dashboard and start exploring:
+//			}
+//
+//			@components.ButtonGroup() {
+//				@components.PrimaryButton("Go to Dashboard", dashboardURL)
+//				@components.SuccessButton("Get Started Guide", dashboardURL + "/guide")
+//			}
+//
+//			@components.Text() {
+//				If you didn't create this account or have any questions, please contact our support team.
+//			}
+//
+//			@components.ButtonGroup() {
+//				@components.DangerButton("Report Issue", supportURL)
+//			}
+//
+//			@components.TextSecondary() {
+//				Thanks for choosing our platform. We're here to help you succeed!
+//			}
+//
+//			@components.Footer() {
+//				Copyright © 2024 Company Name. All rights reserved.
+//				@components.FooterLink("Privacy Policy", "https://example.com/privacy")
+//				@components.FooterLink("Terms of Service", "https://example.com/terms")
+//			}
+//		}
+//	}
+//
+// This example demonstrates:
+//   - Complete email structure with Layout wrapper
+//   - Logo placement at the top
+//   - Header with title and subtitle for clear messaging
+//   - Multiple Text components with different semantic purposes
+//   - TextWarning for important notices
+//   - TextSecondary for less prominent information
+//   - OTP component for verification codes
+//   - Multiple ButtonGroup sections with different button types
+//   - Footer component for consistent email closure
+//   - Proper content flow for a welcome email user journey
 //
 // # Email Client Compatibility
 //
