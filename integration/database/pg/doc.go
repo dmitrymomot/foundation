@@ -177,34 +177,65 @@
 //
 // # Transaction Management
 //
-// The package works seamlessly with pgx transaction management:
+// The package works seamlessly with pgx transaction management, and provides
+// small context helpers to propagate a transaction through your application
+// layers so repositories can participate in the same DB transaction.
 //
-//	func createUserWithProfile(ctx context.Context, pool *pgxpool.Pool, name, bio string) error {
+// Use WithTx to attach a pgx.Tx to a context and TxFromContext to retrieve it:
+//
+//	// In your business logic where you need atomic DB + enqueue (outbox-style):
+//	func createOrder(ctx context.Context, pool *pgxpool.Pool, enq *queue.Enqueuer, params CreateOrderParams) error {
 //		tx, err := pool.Begin(ctx)
 //		if err != nil {
 //			return err
 //		}
-//		defer tx.Rollback(ctx) // Safe to call even after commit
+//		defer tx.Rollback(ctx) // Safe even after commit
 //
-//		// Insert user and get ID
-//		var userID int64
-//		err = tx.QueryRow(ctx, "INSERT INTO users (name) VALUES ($1) RETURNING id", name).Scan(&userID)
+//		ctx = pg.WithTx(ctx, tx)
+//
+//		// 1) Domain writes using tx
+//		var orderID uuid.UUID
+//		err = tx.QueryRow(ctx, "INSERT INTO orders (customer_id, total) VALUES ($1,$2) RETURNING id", params.CustomerID, params.Total).Scan(&orderID)
 //		if err != nil {
 //			return err
 //		}
 //
-//		// Insert profile with user ID
-//		_, err = tx.Exec(ctx, "INSERT INTO profiles (user_id, bio) VALUES ($1, $2)", userID, bio)
-//		if err != nil {
-//			if pg.IsTxClosedError(err) {
-//				log.Printf("Transaction was already closed")
-//			}
+//		// 2) Enqueue task within the same transaction
+//		type OrderCreated struct { ID uuid.UUID `json:"id"` }
+//		if err := enq.Enqueue(ctx, OrderCreated{ID: orderID}, queue.WithQueue("orders")); err != nil {
 //			return err
 //		}
 //
 //		return tx.Commit(ctx)
 //	}
 //
+// In your repository/storage implementation, check the context for a transaction:
+//
+//	type Storage struct {
+//		pool *pgxpool.Pool
+//	}
+//
+//	func (s *Storage) CreateTask(ctx context.Context, task *queue.Task) error {
+//		const q = `INSERT INTO tasks (id, queue, task_type, task_name, payload, status, priority, retry_count, max_retries, scheduled_at, created_at)
+//			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`
+//		if tx, ok := pg.TxFromContext(ctx); ok {
+//			_, err := tx.Exec(ctx, q,
+//				task.ID, task.Queue, task.TaskType, task.TaskName,
+//				task.Payload, task.Status, task.Priority, task.RetryCount,
+//				task.MaxRetries, task.ScheduledAt, task.CreatedAt,
+//			)
+//			return err
+//		}
+//		_, err := s.pool.Exec(ctx, q,
+//			task.ID, task.Queue, task.TaskType, task.TaskName,
+//			task.Payload, task.Status, task.Priority, task.RetryCount,
+//			task.MaxRetries, task.ScheduledAt, task.CreatedAt,
+//		)
+//		return err
+//	}
+//
 // Use the provided error classification functions to handle transaction-specific errors
-// and implement appropriate retry or recovery logic.
+// and implement appropriate retry or recovery logic. Because workers run in separate
+// sessions, they will not see uncommitted rows; once the transaction commits, the enqueued
+// task becomes visible to workers.
 package pg
