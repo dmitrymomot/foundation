@@ -36,6 +36,41 @@ func ValidSlug(field, value string) Rule {
 	}
 }
 
+// ValidSlugNotReserved validates URL-safe slugs and ensures they are not in the reserved list.
+// The reserved slug check is case-insensitive.
+func ValidSlugNotReserved(field, value string, reserved ...string) Rule {
+	return Rule{
+		Check: func() bool {
+			// First check if it's a valid slug format
+			if strings.TrimSpace(value) == "" {
+				return false
+			}
+			if !slugRegex.MatchString(value) || strings.HasPrefix(value, "-") || strings.HasSuffix(value, "-") {
+				return false
+			}
+
+			// Then check if it's not reserved (case-insensitive)
+			valueLower := strings.ToLower(value)
+			for _, r := range reserved {
+				if strings.ToLower(r) == valueLower {
+					return false
+				}
+			}
+
+			return true
+		},
+		Error: ValidationError{
+			Field:          field,
+			Message:        fmt.Sprintf("slug '%s' is reserved or invalid", value),
+			TranslationKey: "validation.slug_reserved",
+			TranslationValues: map[string]any{
+				"field": field,
+				"value": value,
+			},
+		},
+	}
+}
+
 func ValidUsername(field, value string, minLen int, maxLen int) Rule {
 	return Rule{
 		Check: func() bool {

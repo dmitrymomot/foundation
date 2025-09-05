@@ -55,6 +55,129 @@ func TestValidSlug(t *testing.T) {
 	})
 }
 
+func TestValidSlugNotReserved(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid non-reserved slugs", func(t *testing.T) {
+		reserved := []string{"admin", "api", "login", "root", "system"}
+		validSlugs := []string{
+			"hello-world",
+			"my-product",
+			"user-profile",
+			"product-123",
+			"blog-post",
+		}
+
+		for _, slug := range validSlugs {
+			rule := validator.ValidSlugNotReserved("slug", slug, reserved...)
+			err := validator.Apply(rule)
+			assert.NoError(t, err, "Slug should be valid and not reserved: %s", slug)
+		}
+	})
+
+	t.Run("reserved slugs should be rejected", func(t *testing.T) {
+		reserved := []string{"admin", "api", "login"}
+
+		for _, slug := range reserved {
+			rule := validator.ValidSlugNotReserved("slug", slug, reserved...)
+			err := validator.Apply(rule)
+			assert.Error(t, err, "Slug should be rejected as reserved: %s", slug)
+
+			validationErr := validator.ExtractValidationErrors(err)
+			require.NotNil(t, validationErr)
+			assert.Equal(t, "validation.slug_reserved", validationErr[0].TranslationKey)
+			assert.Contains(t, validationErr[0].Message, slug)
+		}
+	})
+
+	t.Run("case-insensitive reserved slug check", func(t *testing.T) {
+		reserved := []string{"admin", "api", "login"}
+		testCases := []string{
+			"Admin",
+			"ADMIN",
+			"aDmIn",
+			"API",
+			"Api",
+			"LOGIN",
+			"Login",
+		}
+
+		for _, slug := range testCases {
+			rule := validator.ValidSlugNotReserved("slug", slug, reserved...)
+			err := validator.Apply(rule)
+			assert.Error(t, err, "Slug should be rejected as reserved (case-insensitive): %s", slug)
+		}
+	})
+
+	t.Run("invalid slug format should be rejected", func(t *testing.T) {
+		reserved := []string{"admin", "api"}
+		invalidSlugs := []string{
+			"",
+			"   ",
+			"Hello-World", // uppercase (not a valid slug)
+			"hello_world", // underscore
+			"hello world", // space
+			"-hello",      // starts with hyphen
+			"hello-",      // ends with hyphen
+			"hello@world", // special character
+		}
+
+		for _, slug := range invalidSlugs {
+			rule := validator.ValidSlugNotReserved("slug", slug, reserved...)
+			err := validator.Apply(rule)
+			assert.Error(t, err, "Invalid slug format should be rejected: %s", slug)
+
+			validationErr := validator.ExtractValidationErrors(err)
+			require.NotNil(t, validationErr)
+			assert.Equal(t, "validation.slug_reserved", validationErr[0].TranslationKey)
+		}
+	})
+
+	t.Run("empty reserved list", func(t *testing.T) {
+		// With no reserved slugs, it should behave like ValidSlug
+		validSlugs := []string{
+			"admin",
+			"api",
+			"login",
+			"hello-world",
+		}
+
+		for _, slug := range validSlugs {
+			rule := validator.ValidSlugNotReserved("slug", slug)
+			err := validator.Apply(rule)
+			assert.NoError(t, err, "Slug should be valid when no reserved list: %s", slug)
+		}
+	})
+
+	t.Run("reserved list with different cases", func(t *testing.T) {
+		// Reserved list itself can have mixed cases
+		reserved := []string{"ADMIN", "Api", "login"}
+		testSlugs := []string{
+			"admin", // should match ADMIN
+			"api",   // should match Api
+			"LOGIN", // should match login
+		}
+
+		for _, slug := range testSlugs {
+			rule := validator.ValidSlugNotReserved("slug", slug, reserved...)
+			err := validator.Apply(rule)
+			assert.Error(t, err, "Slug should match reserved word regardless of case: %s", slug)
+		}
+	})
+
+	t.Run("slice expansion for reserved list", func(t *testing.T) {
+		reserved := []string{"admin", "api", "login", "root", "system"}
+
+		rule := validator.ValidSlugNotReserved("slug", "admin", reserved...)
+		err := validator.Apply(rule)
+		assert.Error(t, err, "Should work with slice expansion")
+
+		rule = validator.ValidSlugNotReserved("slug", "my-product", reserved...)
+		err = validator.Apply(rule)
+		assert.NoError(t, err, "Valid slug should pass with slice expansion")
+	})
+}
+
 func TestValidUsername(t *testing.T) {
 	t.Parallel()
 	t.Run("valid usernames", func(t *testing.T) {
