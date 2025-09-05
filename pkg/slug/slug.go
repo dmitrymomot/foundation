@@ -2,6 +2,7 @@ package slug
 
 import (
 	"crypto/rand"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -17,6 +18,7 @@ type config struct {
 	stripChars    string
 	customReplace map[string]string
 	suffixLength  int
+	reservedSlugs []string // stored in lowercase for case-insensitive matching
 }
 
 // defaultConfig returns the default configuration.
@@ -27,7 +29,8 @@ func defaultConfig() *config {
 		lowercase:     true,
 		stripChars:    "",
 		customReplace: nil,
-		suffixLength:  0, // no suffix by default
+		suffixLength:  0,   // no suffix by default
+		reservedSlugs: nil, // no reserved slugs by default
 	}
 }
 
@@ -76,6 +79,20 @@ func CustomReplace(replacements map[string]string) Option {
 func WithSuffix(length int) Option {
 	return func(c *config) {
 		c.suffixLength = length
+	}
+}
+
+// ReservedSlugs sets a list of reserved slugs that cannot be used.
+// If the generated slug matches any reserved slug (case-insensitive),
+// a random suffix will be automatically appended.
+// Example: slug.Make("admin", ReservedSlugs("admin", "api")) returns "admin-x7g3k2"
+func ReservedSlugs(slugs ...string) Option {
+	return func(c *config) {
+		// Store reserved slugs in lowercase for case-insensitive comparison
+		c.reservedSlugs = make([]string, len(slugs))
+		for i, s := range slugs {
+			c.reservedSlugs[i] = strings.ToLower(s)
+		}
 	}
 }
 
@@ -156,10 +173,32 @@ func Make(s string, opts ...Option) string {
 
 	result := strings.TrimSuffix(b.String(), cfg.separator)
 
-	// Add random suffix for collision avoidance if requested
-	if cfg.suffixLength > 0 {
+	// Check if slug is reserved (case-insensitive)
+	needsSuffix := cfg.suffixLength > 0
+	if !needsSuffix && len(cfg.reservedSlugs) > 0 {
+		// Check if the generated slug matches any reserved slug
+		if slices.Contains(cfg.reservedSlugs, strings.ToLower(result)) {
+			needsSuffix = true
+		}
+	}
+
+	// Add random suffix for collision avoidance if requested or if slug is reserved
+	if needsSuffix {
 		actualSuffixLen := cfg.suffixLength
-		if cfg.maxLength > 0 && cfg.suffixLength > cfg.maxLength {
+		if actualSuffixLen == 0 {
+			// Default suffix length when avoiding reserved slugs
+			actualSuffixLen = 6
+		}
+
+		// For reserved slugs with max length constraint, adjust suffix to fit
+		if cfg.maxLength > 0 && cfg.suffixLength == 0 {
+			// This is a reserved slug case (no explicit suffix length set)
+			availableSpace := cfg.maxLength - len([]rune(result)) - len([]rune(cfg.separator))
+			if availableSpace < actualSuffixLen && availableSpace > 0 {
+				actualSuffixLen = availableSpace
+			}
+		} else if cfg.maxLength > 0 && actualSuffixLen > cfg.maxLength {
+			// Explicit suffix is longer than max length
 			actualSuffixLen = cfg.maxLength
 		}
 

@@ -251,6 +251,153 @@ func TestNormalizeDiacritic(t *testing.T) {
 	}
 }
 
+func TestReservedSlugs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		opts     []slug.Option
+		validate func(t *testing.T, result string)
+	}{
+		{
+			name:  "basic reserved slug",
+			input: "admin",
+			opts:  []slug.Option{slug.ReservedSlugs("admin", "api", "login")},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "admin", result)
+				assert.True(t, strings.HasPrefix(result, "admin-"))
+				parts := strings.Split(result, "-")
+				assert.Len(t, parts, 2)
+				assert.Len(t, parts[1], 6) // default suffix length
+			},
+		},
+		{
+			name:  "case-insensitive reserved slug (uppercase input)",
+			input: "ADMIN",
+			opts:  []slug.Option{slug.ReservedSlugs("admin")},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "admin", result)
+				assert.True(t, strings.HasPrefix(result, "admin-"))
+			},
+		},
+		{
+			name:  "case-insensitive reserved slug (mixed case input)",
+			input: "AdMiN",
+			opts:  []slug.Option{slug.ReservedSlugs("admin")},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "admin", result)
+				assert.True(t, strings.HasPrefix(result, "admin-"))
+			},
+		},
+		{
+			name:  "reserved slug with uppercase output",
+			input: "ADMIN",
+			opts:  []slug.Option{slug.ReservedSlugs("admin"), slug.Lowercase(false)},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "ADMIN", result)
+				assert.True(t, strings.HasPrefix(result, "ADMIN-"))
+				parts := strings.Split(result, "-")
+				assert.Regexp(t, "^[a-zA-Z0-9]+$", parts[1]) // mixed case suffix when Lowercase(false)
+			},
+		},
+		{
+			name:  "non-reserved slug passes through",
+			input: "product",
+			opts:  []slug.Option{slug.ReservedSlugs("admin", "api", "login")},
+			validate: func(t *testing.T, result string) {
+				assert.Equal(t, "product", result)
+			},
+		},
+		{
+			name:  "reserved slug with custom separator",
+			input: "api",
+			opts:  []slug.Option{slug.ReservedSlugs("api"), slug.Separator("_")},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "api", result)
+				assert.True(t, strings.HasPrefix(result, "api_"))
+				parts := strings.Split(result, "_")
+				assert.Len(t, parts, 2)
+			},
+		},
+		{
+			name:  "reserved slug with explicit suffix",
+			input: "login",
+			opts:  []slug.Option{slug.ReservedSlugs("login"), slug.WithSuffix(8)},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "login", result)
+				assert.True(t, strings.HasPrefix(result, "login-"))
+				parts := strings.Split(result, "-")
+				assert.Len(t, parts, 2)
+				assert.Len(t, parts[1], 8) // explicit suffix length
+			},
+		},
+		{
+			name:  "reserved slug with max length",
+			input: "admin",
+			opts:  []slug.Option{slug.ReservedSlugs("admin"), slug.MaxLength(10)},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "admin", result)
+				assert.LessOrEqual(t, len(result), 10)
+				// With maxLength=10, "admin-" takes 6 chars, leaving 4 for suffix
+				parts := strings.Split(result, "-")
+				if len(parts) == 2 {
+					assert.Len(t, parts[1], 4)
+				}
+			},
+		},
+		{
+			name:  "reserved slug too long for max length",
+			input: "administrator",
+			opts:  []slug.Option{slug.ReservedSlugs("administrator"), slug.MaxLength(10)},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "administrator", result)
+				assert.LessOrEqual(t, len(result), 10)
+			},
+		},
+		{
+			name:  "multiple reserved slugs",
+			input: "api endpoint",
+			opts:  []slug.Option{slug.ReservedSlugs("api-endpoint", "api", "endpoint")},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "api-endpoint", result)
+				assert.True(t, strings.HasPrefix(result, "api-endpoint-"))
+			},
+		},
+		{
+			name:  "reserved slug from slice expansion",
+			input: "config",
+			opts:  []slug.Option{slug.ReservedSlugs([]string{"config", "system", "root"}...)},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "config", result)
+				assert.True(t, strings.HasPrefix(result, "config-"))
+			},
+		},
+		{
+			name:  "empty reserved slug list",
+			input: "admin",
+			opts:  []slug.Option{slug.ReservedSlugs()},
+			validate: func(t *testing.T, result string) {
+				assert.Equal(t, "admin", result)
+			},
+		},
+		{
+			name:  "reserved slug case variations in list",
+			input: "admin",
+			opts:  []slug.Option{slug.ReservedSlugs("ADMIN", "Admin", "admin")},
+			validate: func(t *testing.T, result string) {
+				assert.NotEqual(t, "admin", result)
+				assert.True(t, strings.HasPrefix(result, "admin-"))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := slug.Make(tt.input, tt.opts...)
+			tt.validate(t, result)
+		})
+	}
+}
+
 func BenchmarkMake(b *testing.B) {
 	testCases := []struct {
 		name  string
