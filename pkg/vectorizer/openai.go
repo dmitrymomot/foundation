@@ -51,7 +51,7 @@ func WithOpenAIDimensions(dims int) OpenAIOption {
 // WithOpenAIMaxBatchSize sets the maximum batch size for batch operations.
 func WithOpenAIMaxBatchSize(size int) OpenAIOption {
 	return func(o *OpenAI) {
-		if size > 0 && size <= 2048 {
+		if size > 0 && size <= 2048 { // OpenAI API limit
 			o.maxBatch = size
 		}
 	}
@@ -80,7 +80,6 @@ func NewOpenAI(apiKey string, opts ...OpenAIOption) (*OpenAI, error) {
 		maxBatch: 100,
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -97,7 +96,6 @@ func NewOpenAI(apiKey string, opts ...OpenAIOption) (*OpenAI, error) {
 		}
 	}
 
-	// Validate dimensions for models
 	if err := o.validateDimensions(); err != nil {
 		return nil, err
 	}
@@ -135,7 +133,6 @@ func (o *OpenAI) Embed(ctx context.Context, text string) ([]float32, error) {
 		},
 	}
 
-	// Set dimensions for v3 models
 	params.Dimensions = openai.Int(int64(o.dimensions))
 
 	resp, err := o.client.Embeddings.New(ctx, params)
@@ -147,7 +144,7 @@ func (o *OpenAI) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("no embedding returned")
 	}
 
-	// Convert float64 to float32
+	// Convert API response (float64) to our standard format (float32)
 	embedding := make([]float32, len(resp.Data[0].Embedding))
 	for i, v := range resp.Data[0].Embedding {
 		embedding[i] = float32(v)
@@ -166,7 +163,6 @@ func (o *OpenAI) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, fmt.Errorf("%w: got %d texts, max is %d", ErrBatchTooLarge, len(texts), o.maxBatch)
 	}
 
-	// Convert texts to the union type
 	inputs := make([]string, len(texts))
 	copy(inputs, texts)
 
@@ -177,7 +173,6 @@ func (o *OpenAI) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 		},
 	}
 
-	// Set dimensions for v3 models
 	params.Dimensions = openai.Int(int64(o.dimensions))
 
 	resp, err := o.client.Embeddings.New(ctx, params)
@@ -189,7 +184,7 @@ func (o *OpenAI) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, fmt.Errorf("expected %d embeddings, got %d", len(texts), len(resp.Data))
 	}
 
-	// Extract embeddings in order and convert float64 to float32
+	// Convert API response (float64) to our standard format (float32)
 	result := make([][]float32, len(resp.Data))
 	for i, data := range resp.Data {
 		embedding := make([]float32, len(data.Embedding))

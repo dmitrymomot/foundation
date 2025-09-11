@@ -52,7 +52,7 @@ func WithGoogleDimensions(dims int) GoogleOption {
 // WithGoogleMaxBatchSize sets the maximum batch size for batch operations.
 func WithGoogleMaxBatchSize(size int) GoogleOption {
 	return func(g *Google) {
-		if size > 0 && size <= 100 {
+		if size > 0 && size <= 100 { // Google API limit
 			g.maxBatch = size
 		}
 	}
@@ -92,7 +92,6 @@ func NewGoogle(ctx context.Context, apiKey string, opts ...GoogleOption) (*Googl
 		backend:    genai.BackendGeminiAPI,
 	}
 
-	// Apply options first to get any backend/project/location settings
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -111,7 +110,6 @@ func NewGoogle(ctx context.Context, apiKey string, opts ...GoogleOption) (*Googl
 	}
 	g.client = client
 
-	// Validate model and dimensions
 	if err := g.validateConfiguration(); err != nil {
 		return nil, err
 	}
@@ -134,7 +132,6 @@ func NewGoogleVertexAI(ctx context.Context, project, location string, opts ...Go
 		location:   location,
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -152,7 +149,6 @@ func NewGoogleVertexAI(ctx context.Context, project, location string, opts ...Go
 	}
 	g.client = client
 
-	// Validate model and dimensions
 	if err := g.validateConfiguration(); err != nil {
 		return nil, err
 	}
@@ -183,7 +179,6 @@ func (g *Google) Embed(ctx context.Context, text string) ([]float32, error) {
 	}
 
 	config := &genai.EmbedContentConfig{}
-	// Configure dimensions if supported
 	if g.supportsConfigurableDimensions() {
 		dims := int32(g.dimensions)
 		config.OutputDimensionality = &dims
@@ -212,7 +207,6 @@ func (g *Google) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, fmt.Errorf("%w: got %d texts, max is %d", ErrBatchTooLarge, len(texts), g.maxBatch)
 	}
 
-	// Create contents for each text
 	contents := make([]*genai.Content, len(texts))
 	for i, text := range texts {
 		contents[i] = &genai.Content{
@@ -221,7 +215,6 @@ func (g *Google) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 	}
 
 	config := &genai.EmbedContentConfig{}
-	// Configure dimensions if supported
 	if g.supportsConfigurableDimensions() {
 		dims := int32(g.dimensions)
 		config.OutputDimensionality = &dims
@@ -236,7 +229,6 @@ func (g *Google) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 		return nil, fmt.Errorf("expected %d embeddings, got %d", len(texts), len(resp.Embeddings))
 	}
 
-	// Extract embeddings in order
 	result := make([][]float32, len(resp.Embeddings))
 	for i, emb := range resp.Embeddings {
 		if emb == nil || emb.Values == nil {
