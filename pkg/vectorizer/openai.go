@@ -2,6 +2,7 @@ package vectorizer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -137,11 +138,11 @@ func (o *OpenAI) Embed(ctx context.Context, text string) ([]float32, error) {
 
 	resp, err := o.client.Embeddings.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embedding: %w", err)
+		return nil, errors.Join(ErrEmbeddingFailed, err)
 	}
 
 	if len(resp.Data) == 0 {
-		return nil, fmt.Errorf("no embedding returned")
+		return nil, ErrNoEmbeddingReturned
 	}
 
 	// Convert API response (float64) to our standard format (float32)
@@ -177,11 +178,11 @@ func (o *OpenAI) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 
 	resp, err := o.client.Embeddings.New(ctx, params)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embeddings: %w", err)
+		return nil, errors.Join(ErrEmbeddingFailed, err)
 	}
 
 	if len(resp.Data) != len(texts) {
-		return nil, fmt.Errorf("expected %d embeddings, got %d", len(texts), len(resp.Data))
+		return nil, ErrEmbeddingCountMismatch
 	}
 
 	// Convert API response (float64) to our standard format (float32)

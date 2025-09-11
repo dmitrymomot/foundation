@@ -2,6 +2,7 @@ package vectorizer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -106,7 +107,7 @@ func NewGoogle(ctx context.Context, apiKey string, opts ...GoogleOption) (*Googl
 
 	client, err := genai.NewClient(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Google AI client: %w", err)
+		return nil, errors.Join(ErrClientCreationFailed, err)
 	}
 	g.client = client
 
@@ -145,7 +146,7 @@ func NewGoogleVertexAI(ctx context.Context, project, location string, opts ...Go
 
 	client, err := genai.NewClient(ctx, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Google Vertex AI client: %w", err)
+		return nil, errors.Join(ErrClientCreationFailed, err)
 	}
 	g.client = client
 
@@ -186,11 +187,11 @@ func (g *Google) Embed(ctx context.Context, text string) ([]float32, error) {
 
 	resp, err := g.client.Models.EmbedContent(ctx, "models/"+g.model, []*genai.Content{content}, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embedding: %w", err)
+		return nil, errors.Join(ErrEmbeddingFailed, err)
 	}
 
 	if resp == nil || len(resp.Embeddings) == 0 || resp.Embeddings[0] == nil {
-		return nil, fmt.Errorf("no embedding returned")
+		return nil, ErrNoEmbeddingReturned
 	}
 
 	return resp.Embeddings[0].Values, nil
@@ -222,17 +223,17 @@ func (g *Google) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 
 	resp, err := g.client.Models.EmbedContent(ctx, "models/"+g.model, contents, config)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embeddings: %w", err)
+		return nil, errors.Join(ErrEmbeddingFailed, err)
 	}
 
 	if len(resp.Embeddings) != len(texts) {
-		return nil, fmt.Errorf("expected %d embeddings, got %d", len(texts), len(resp.Embeddings))
+		return nil, ErrEmbeddingCountMismatch
 	}
 
 	result := make([][]float32, len(resp.Embeddings))
 	for i, emb := range resp.Embeddings {
 		if emb == nil || emb.Values == nil {
-			return nil, fmt.Errorf("empty embedding at index %d", i)
+			return nil, ErrEmptyEmbedding
 		}
 		result[i] = emb.Values
 	}
