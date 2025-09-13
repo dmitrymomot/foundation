@@ -12,7 +12,8 @@ import (
 // Supports both anonymous and authenticated states.
 type Session[Data any] struct {
 	ID        uuid.UUID `json:"id"`         // Stable session identifier
-	Token     string    `json:"token"`      // Rotatable secure token
+	Token     string    `json:"-"`          // Raw secure token (not exposed in JSON)
+	TokenHash string    `json:"-"`          // SHA-256 hash of the secure token (not exposed)
 	DeviceID  uuid.UUID `json:"device_id"`  // Persistent device/browser ID
 	UserID    uuid.UUID `json:"user_id"`    // User ID (uuid.Nil for anonymous)
 	Data      Data      `json:"data"`       // Application-defined data
@@ -35,9 +36,9 @@ func (s Session[Data]) IsExpired() bool {
 // Implementations can use cookies, Redis, databases, etc.
 // All methods use value semantics to ensure thread safety.
 type Store[Data any] interface {
-	// Get retrieves a session by its token.
+	// Get retrieves a session by its token hash.
 	// Returns a copy of the session to ensure thread safety.
-	Get(ctx context.Context, token string) (Session[Data], error)
+	Get(ctx context.Context, tokenHash string) (Session[Data], error)
 
 	// Store saves or updates a session.
 	// Takes a copy of the session to ensure thread safety.
