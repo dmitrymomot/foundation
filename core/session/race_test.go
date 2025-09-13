@@ -1,6 +1,8 @@
 package session_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http/httptest"
 	"sync"
 	"testing"
@@ -12,6 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// hashToken creates a SHA-256 hash of the token for testing - mirrors the internal implementation
+func hashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
+}
+
 // TestValueSemanticsPreventRace verifies that value semantics prevent race conditions
 func TestValueSemanticsPreventRace(t *testing.T) {
 	t.Parallel()
@@ -20,9 +28,12 @@ func TestValueSemanticsPreventRace(t *testing.T) {
 	transport := &MockTransport{}
 
 	// Create a session that will be returned by the store
+	testToken := "test-token"
+	testTokenHash := hashToken(testToken)
 	testSession := session.Session[TestData]{
 		ID:        uuid.New(),
-		Token:     "test-token",
+		Token:     testToken,
+		TokenHash: testTokenHash,
 		DeviceID:  uuid.New(),
 		UserID:    uuid.Nil,
 		Data:      TestData{},
@@ -32,16 +43,16 @@ func TestValueSemanticsPreventRace(t *testing.T) {
 	}
 
 	// Store.Get returns a copy each time (value semantics)
-	store.On("Get", mock.Anything, "test-token").Return(testSession, nil)
+	store.On("Get", mock.Anything, testTokenHash).Return(testSession, nil)
 
 	// Store.Store receives a copy each time (value semantics)
 	store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
 		// Just verify it's a valid session
-		return s.Token == "test-token"
+		return s.TokenHash == testTokenHash
 	})).Return(nil)
 
-	transport.On("Extract", mock.Anything).Return("test-token", nil)
-	transport.On("Embed", mock.Anything, mock.Anything, "test-token", mock.Anything).Return(nil)
+	transport.On("Extract", mock.Anything).Return(testToken, nil)
+	transport.On("Embed", mock.Anything, mock.Anything, testToken, mock.Anything).Return(nil)
 
 	manager, err := session.New(
 		session.WithStore[TestData](store),

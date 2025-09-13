@@ -170,7 +170,7 @@ func TestManagerLoad(t *testing.T) {
 
 		token := "existing-token"
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(session.Session[TestData]{}, session.ErrSessionNotFound)
+		store.On("Get", mock.Anything, hashToken(token)).Return(session.Session[TestData]{}, session.ErrSessionNotFound)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -210,7 +210,7 @@ func TestManagerLoad(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -256,7 +256,7 @@ func TestManagerLoad(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(expiredSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(expiredSession, nil)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -289,7 +289,7 @@ func TestManagerLoad(t *testing.T) {
 		storeError := errors.New("database connection failed")
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(session.Session[TestData]{}, storeError)
+		store.On("Get", mock.Anything, hashToken(token)).Return(session.Session[TestData]{}, storeError)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -329,7 +329,7 @@ func TestManagerLoad(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 		// Expect auto-touch to update the session
 		store.On("Store", mock.Anything, mock.Anything).Return(nil)
 		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
@@ -365,9 +365,11 @@ func TestManagerSave(t *testing.T) {
 		store := &MockStore[TestData]{}
 		transport := &MockTransport{}
 
+		testToken := "test-token"
 		sess := session.Session[TestData]{
 			ID:        uuid.New(),
-			Token:     "test-token",
+			Token:     testToken,
+			TokenHash: hashToken(testToken),
 			DeviceID:  uuid.New(),
 			UserID:    uuid.New(),
 			Data:      TestData{Username: "testuser"},
@@ -378,7 +380,7 @@ func TestManagerSave(t *testing.T) {
 
 		store.On("Store", mock.Anything, mock.Anything).Return(nil)
 
-		transport.On("Embed", mock.Anything, mock.Anything, sess.Token, mock.Anything).Return(nil)
+		transport.On("Embed", mock.Anything, mock.Anything, testToken, mock.Anything).Return(nil)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -403,9 +405,11 @@ func TestManagerSave(t *testing.T) {
 		store := &MockStore[TestData]{}
 		transport := &MockTransport{}
 
+		testToken := "test-token"
 		sess := session.Session[TestData]{
 			ID:        uuid.New(),
-			Token:     "test-token",
+			Token:     testToken,
+			TokenHash: hashToken(testToken),
 			DeviceID:  uuid.New(),
 			UserID:    uuid.New(),
 			Data:      TestData{Username: "testuser"},
@@ -442,9 +446,11 @@ func TestManagerSave(t *testing.T) {
 		store := &MockStore[TestData]{}
 		transport := &MockTransport{}
 
+		testToken := "test-token"
 		sess := session.Session[TestData]{
 			ID:        uuid.New(),
-			Token:     "test-token",
+			Token:     testToken,
+			TokenHash: hashToken(testToken),
 			DeviceID:  uuid.New(),
 			UserID:    uuid.New(),
 			Data:      TestData{Username: "testuser"},
@@ -455,7 +461,7 @@ func TestManagerSave(t *testing.T) {
 
 		transportError := errors.New("transport embed failed")
 		store.On("Store", mock.Anything, mock.Anything).Return(nil)
-		transport.On("Embed", mock.Anything, mock.Anything, sess.Token, mock.Anything).Return(transportError)
+		transport.On("Embed", mock.Anything, mock.Anything, testToken, mock.Anything).Return(transportError)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -530,7 +536,7 @@ func TestManagerAuth(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(existingSession, nil)
 
 		// Mock Save behavior - expect token to be different
 		store.On("Store", mock.Anything, mock.Anything).Return(nil)
@@ -589,8 +595,9 @@ func TestManagerAuth(t *testing.T) {
 		transport := &MockTransport{}
 
 		loadError := errors.New("load failed")
-		transport.On("Extract", mock.Anything).Return("some-token", nil)
-		store.On("Get", mock.Anything, "some-token").Return(session.Session[TestData]{}, loadError)
+		someToken := "some-token"
+		transport.On("Extract", mock.Anything).Return(someToken, nil)
+		store.On("Get", mock.Anything, hashToken(someToken)).Return(session.Session[TestData]{}, loadError)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -637,7 +644,7 @@ func TestManagerLogout(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(authenticatedSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(authenticatedSession, nil)
 
 		// Mock Delete old session
 		store.On("Delete", mock.Anything, authenticatedSession.ID).Return(nil)
@@ -693,7 +700,7 @@ func TestManagerLogout(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(authenticatedSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(authenticatedSession, nil)
 
 		// Mock Delete old session
 		store.On("Delete", mock.Anything, authenticatedSession.ID).Return(nil)
@@ -748,7 +755,7 @@ func TestManagerLogout(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(authenticatedSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(authenticatedSession, nil)
 
 		// Mock Delete failure - should not stop logout process
 		deleteError := errors.New("delete failed")
@@ -801,7 +808,7 @@ func TestManagerDelete(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 		store.On("Delete", mock.Anything, existingSession.ID).Return(nil)
 		transport.On("Revoke", mock.Anything, mock.Anything).Return(nil)
 
@@ -858,7 +865,7 @@ func TestManagerDelete(t *testing.T) {
 		token := "nonexistent-token"
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(session.Session[TestData]{}, session.ErrSessionNotFound)
+		store.On("Get", mock.Anything, hashToken(token)).Return(session.Session[TestData]{}, session.ErrSessionNotFound)
 		transport.On("Revoke", mock.Anything, mock.Anything).Return(nil)
 
 		manager, err := session.New(
@@ -898,7 +905,7 @@ func TestManagerDelete(t *testing.T) {
 
 		deleteError := errors.New("delete failed")
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 		store.On("Delete", mock.Anything, existingSession.ID).Return(deleteError)
 		// Transport.Revoke should NOT be called when store.Delete fails with non-NotFound error
 
@@ -946,7 +953,7 @@ func TestManagerTouch(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 		store.On("Store", mock.Anything, mock.Anything).Return(nil)
 		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
 
@@ -989,7 +996,7 @@ func TestManagerTouch(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(recentlyUpdatedSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(recentlyUpdatedSession, nil)
 		// Store and Embed should NOT be called due to throttling
 
 		manager, err := session.New(
@@ -1049,7 +1056,7 @@ func TestManagerTouch(t *testing.T) {
 
 		token := "nonexistent-token"
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(session.Session[TestData]{}, session.ErrSessionNotFound)
+		store.On("Get", mock.Anything, hashToken(token)).Return(session.Session[TestData]{}, session.ErrSessionNotFound)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -1092,7 +1099,7 @@ func TestManagerTokenRotation(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(existingSession, nil)
 
 		// Mock Save behavior - capture the stored session to verify token changed
 		var capturedSession session.Session[TestData]
@@ -1154,7 +1161,7 @@ func TestManagerDeviceIDPreservation(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(expiredToken, nil)
-		store.On("Get", mock.Anything, expiredToken).Return(expiredSession, nil)
+		store.On("Get", mock.Anything, hashToken(expiredToken)).Return(expiredSession, nil)
 
 		manager, err := session.New(
 			session.WithStore[TestData](store),
@@ -1199,7 +1206,7 @@ func TestManagerDeviceIDPreservation(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(authenticatedSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(authenticatedSession, nil)
 
 		// Mock Delete old session
 		store.On("Delete", mock.Anything, authenticatedSession.ID).Return(nil)
@@ -1263,7 +1270,7 @@ func TestManagerSessionLifecycle(t *testing.T) {
 
 		// Mock Load behavior
 		transport.On("Extract", mock.Anything).Return(oldToken, nil)
-		store.On("Get", mock.Anything, oldToken).Return(anonSession, nil)
+		store.On("Get", mock.Anything, hashToken(oldToken)).Return(anonSession, nil)
 
 		// Mock Save behavior - capture to verify IDs preserved
 		var capturedSession session.Session[TestData]
@@ -1433,7 +1440,7 @@ func TestManagerAutoTouch(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 		// Expect auto-touch to trigger store and transport updates
 		store.On("Store", mock.Anything, mock.Anything).Return(nil)
 		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
@@ -1480,7 +1487,7 @@ func TestManagerAutoTouch(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(recentSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(recentSession, nil)
 		// Should NOT call Store or Embed due to throttling
 
 		manager, err := session.New(
@@ -1527,7 +1534,7 @@ func TestManagerAutoTouch(t *testing.T) {
 		}
 
 		transport.On("Extract", mock.Anything).Return(token, nil)
-		store.On("Get", mock.Anything, token).Return(existingSession, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
 		// Auto-touch fails but Load should still succeed
 		store.On("Store", mock.Anything, mock.Anything).Return(errors.New("touch store failed"))
 
