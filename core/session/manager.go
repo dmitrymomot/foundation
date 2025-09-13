@@ -2,8 +2,12 @@ package session
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,6 +20,7 @@ type Manager[Data any] struct {
 	store     Store[Data]
 	transport Transport
 	config    *Config
+	logger    *slog.Logger
 }
 
 // ManagerOption is a functional option for configuring the session manager.
@@ -61,6 +66,13 @@ func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 		return nil, ErrNoTransport
 	}
 
+	// Set logger from config or use no-op logger
+	if m.config.Logger != nil {
+		m.logger = m.config.Logger
+	} else {
+		m.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+
 	return m, nil
 }
 
@@ -73,7 +85,9 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (Session[Da
 		return m.createNew()
 	}
 
-	session, err := m.store.Get(r.Context(), token)
+	// Hash the token before looking it up in the store
+	tokenHash := hashToken(token)
+	session, err := m.store.Get(r.Context(), tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return m.createNew()
@@ -81,7 +95,13 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (Session[Da
 		return Session[Data]{}, err
 	}
 
+	// Set the raw token in the session for transport use
+	session.Token = token
+
 	if session.IsExpired() {
+		m.logger.Debug("session expired, creating new with same device ID",
+			slog.String("old_session_id", session.ID.String()),
+			slog.String("device_id", session.DeviceID.String()))
 		// Create new but preserve DeviceID for analytics continuity
 		newSession, err := m.createNew()
 		if err != nil {
@@ -93,7 +113,12 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (Session[Da
 
 	// Auto-touch if enabled
 	if m.config.TouchInterval > 0 {
-		_ = m.touch(w, r, session) // Best effort, ignore errors
+		if err := m.touch(w, r, session); err != nil {
+			// Log but don't fail the request
+			m.logger.Warn("failed to auto-touch session",
+				slog.String("session_id", session.ID.String()),
+				slog.String("error", err.Error()))
+		}
 	}
 
 	return session, nil
@@ -107,7 +132,7 @@ func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session Ses
 		return err
 	}
 
-	// Embed token in response (use existing token, don't regenerate)
+	// Embed raw token in response
 	ttl := time.Until(session.ExpiresAt)
 	return m.transport.Embed(w, r, session.Token, ttl)
 }
@@ -121,12 +146,15 @@ func (m *Manager[Data]) Touch(w http.ResponseWriter, r *http.Request) error {
 		return nil // No session to touch
 	}
 
-	// Get session directly
-	session, err := m.store.Get(r.Context(), token)
+	// Hash token and get session
+	tokenHash := hashToken(token)
+	session, err := m.store.Get(r.Context(), tokenHash)
 	if err != nil {
 		return nil // Best effort - don't fail
 	}
 
+	// Set the raw token for transport use
+	session.Token = token
 	return m.touch(w, r, session)
 }
 
@@ -145,11 +173,14 @@ func (m *Manager[Data]) touch(w http.ResponseWriter, r *http.Request, session Se
 
 	// Update storage
 	if err := m.store.Store(r.Context(), session); err != nil {
-		// Could log error but continue - best effort
+		// Log error but continue - best effort
+		m.logger.Warn("failed to update session expiration in storage",
+			slog.String("session_id", session.ID.String()),
+			slog.String("error", err.Error()))
 		return nil
 	}
 
-	// Update transport (refreshes cookie MaxAge) - use existing token
+	// Update transport (refreshes cookie MaxAge) - use raw token
 	ttl := time.Until(session.ExpiresAt)
 	return m.transport.Embed(w, r, session.Token, ttl)
 }
@@ -174,9 +205,15 @@ func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid
 	}
 
 	session.Token = newToken
+	session.TokenHash = hashToken(newToken)
 	session.UserID = userID
 	session.UpdatedAt = time.Now()
 	session.ExpiresAt = time.Now().Add(m.config.TTL)
+
+	m.logger.Info("session authenticated",
+		slog.String("session_id", session.ID.String()),
+		slog.String("user_id", userID.String()),
+		slog.String("device_id", session.DeviceID.String()))
 
 	// Save authenticated session
 	return m.Save(w, r, session)
@@ -222,7 +259,13 @@ func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...L
 		opt(cfg)
 	}
 
-	_ = m.store.Delete(r.Context(), session.ID)
+	if err := m.store.Delete(r.Context(), session.ID); err != nil {
+		// Log but continue - new session will be created anyway
+		m.logger.Warn("failed to delete old session during logout",
+			slog.String("session_id", session.ID.String()),
+			slog.String("user_id", session.UserID.String()),
+			slog.String("error", err.Error()))
+	}
 
 	// Create new anonymous session
 	newSession, err := m.createNew()
@@ -261,7 +304,9 @@ func (m *Manager[Data]) Delete(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 
-	session, err := m.store.Get(r.Context(), token)
+	// Hash token to look up session
+	tokenHash := hashToken(token)
+	session, err := m.store.Get(r.Context(), tokenHash)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			// Already deleted, clear transport
@@ -295,6 +340,7 @@ func (m *Manager[Data]) createNew() (Session[Data], error) {
 	session := Session[Data]{
 		ID:        uuid.New(),
 		Token:     token,
+		TokenHash: hashToken(token),
 		DeviceID:  uuid.New(),
 		UserID:    uuid.Nil, // Anonymous
 		Data:      data,
@@ -302,6 +348,10 @@ func (m *Manager[Data]) createNew() (Session[Data], error) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+
+	m.logger.Debug("created new anonymous session",
+		slog.String("session_id", session.ID.String()),
+		slog.String("device_id", session.DeviceID.String()))
 
 	return session, nil
 }
@@ -314,4 +364,10 @@ func generateToken() (string, error) {
 		return "", ErrTokenGeneration
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// hashToken creates a SHA-256 hash of the token for secure storage.
+func hashToken(token string) string {
+	hash := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(hash[:])
 }
