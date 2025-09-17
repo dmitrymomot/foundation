@@ -373,9 +373,9 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 	s.httpServer = &http.Server{
 		Addr:           s.config.HTTPAddr,
 		Handler:        s.createHTTPHandler(),
-		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
-		IdleTimeout:    60 * time.Second,
+		ReadTimeout:    DefaultReadTimeout,
+		WriteTimeout:   DefaultWriteTimeout,
+		IdleTimeout:    DefaultIdleTimeout,
 		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
 	}
 
@@ -389,9 +389,9 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 		Addr:           s.config.HTTPSAddr,
 		Handler:        handler,
 		TLSConfig:      tlsConfig,
-		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
-		IdleTimeout:    60 * time.Second,
+		ReadTimeout:    DefaultReadTimeout,
+		WriteTimeout:   DefaultWriteTimeout,
+		IdleTimeout:    DefaultIdleTimeout,
 		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
 	}
 
@@ -490,8 +490,9 @@ func (s *AutoCertServer[C]) getCertificate(hello *tls.ClientHelloInfo) (*tls.Cer
 		return nil, fmt.Errorf("no server name provided")
 	}
 
-	// Check if domain is registered
-	ctx := context.Background()
+	// Check if domain is registered with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	info, err := s.config.DomainStore.GetDomain(ctx, domain)
 	if err != nil {
 		return nil, fmt.Errorf("domain lookup failed: %w", err)
@@ -515,7 +516,7 @@ func (s *AutoCertServer[C]) Shutdown(ctx context.Context) error {
 
 	s.config.Logger.InfoContext(ctx, "shutting down servers")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), DefaultShutdownTimeout)
 	defer cancel()
 
 	var httpErr, httpsErr error
