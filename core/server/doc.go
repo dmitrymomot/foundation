@@ -70,27 +70,34 @@
 //		log.Fatal(err)
 //	}
 //
-// # HTTPS with Custom TLS Configuration
+// # HTTPS with TLS Configuration
 //
-// Enable HTTPS with custom TLS configuration:
-//
-//	import "crypto/tls"
+// Use built-in TLS presets for secure HTTPS:
 //
 //	type AppContext = router.Context
-//
-//	tlsConfig := &tls.Config{
-//		MinVersion: tls.VersionTLS12,
-//		CipherSuites: []uint16{
-//			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-//			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-//		},
-//	}
 //
 //	r := router.New[*AppContext]()
 //	r.Get("/", func(ctx *AppContext) handler.Response {
 //		return response.HTML("<h1>Secure Server</h1>")
 //	})
 //
+//	// Option 1: Use default secure configuration
+//	srv := server.New(":8443",
+//		server.WithTLS(server.DefaultTLSConfig()),
+//		server.WithLogger(logger),
+//	)
+//
+//	// Option 2: Use strict configuration for high security
+//	srv := server.New(":8443",
+//		server.WithTLS(server.StrictTLSConfig()),
+//		server.WithLogger(logger),
+//	)
+//
+//	// Option 3: Customize with options
+//	tlsConfig := server.NewTLSConfig(
+//		server.WithTLSCertificate("cert.pem", "key.pem"),
+//		server.WithTLSMinVersion(tls.VersionTLS13),
+//	)
 //	srv := server.New(":8443",
 //		server.WithTLS(tlsConfig),
 //		server.WithLogger(logger),
@@ -252,17 +259,9 @@
 //			Level: slog.LevelInfo,
 //		}))
 //
-//		tlsConfig := &tls.Config{
-//			MinVersion:               tls.VersionTLS12,
-//			PreferServerCipherSuites: true,
-//			CipherSuites: []uint16{
-//				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-//				tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-//			},
-//		}
-//
+//		// Use intermediate TLS config for production (broader compatibility)
 //		srv := server.New(":8443",
-//			server.WithTLS(tlsConfig),
+//			server.WithTLS(server.IntermediateTLSConfig()),
 //			server.WithLogger(logger),
 //			server.WithShutdownTimeout(30*time.Second),
 //		)
