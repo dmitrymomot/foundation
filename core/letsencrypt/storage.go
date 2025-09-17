@@ -15,7 +15,6 @@ type Storage struct {
 
 // NewStorage creates a new certificate storage handler.
 func NewStorage(dir string) (*Storage, error) {
-	// Ensure directory exists
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create certificate directory: %w", err)
 	}
@@ -33,7 +32,7 @@ func (s *Storage) List() ([]string, error) {
 	var domains []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			// Skip special files like acme_account+key
+			// Exclude autocert metadata files (contain + or _)
 			name := entry.Name()
 			if name != "" && !strings.Contains(name, "+") && !strings.Contains(name, "_") {
 				domains = append(domains, name)
@@ -74,15 +73,13 @@ func (s *Storage) Read(domain string) ([]byte, error) {
 func (s *Storage) Write(domain string, data []byte) error {
 	path := filepath.Join(s.dir, domain)
 
-	// Write to temporary file first
 	tmpPath := path + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
 		return fmt.Errorf("failed to write certificate for %s: %w", domain, err)
 	}
 
-	// Atomic rename
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath) // Clean up temp file
+		os.Remove(tmpPath)
 		return fmt.Errorf("failed to save certificate for %s: %w", domain, err)
 	}
 

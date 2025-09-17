@@ -239,12 +239,10 @@ func buildProvisioningHTML(info *DomainInfo) string {
 </body>
 </html>`
 
-	// Simple template replacement
 	result := strings.ReplaceAll(tmpl, "{{.Domain}}", template.HTMLEscapeString(info.Domain))
 	return result
 }
 
-// buildFailedHTML generates the failed status page
 func buildFailedHTML(info *DomainInfo) string {
 	tmpl := `<!DOCTYPE html>
 <html lang="en">
@@ -320,7 +318,6 @@ func buildFailedHTML(info *DomainInfo) string {
 </body>
 </html>`
 
-	// Simple template replacement
 	result := strings.ReplaceAll(tmpl, "{{.Domain}}", template.HTMLEscapeString(info.Domain))
 	result = strings.ReplaceAll(result, "{{.Error}}", template.HTMLEscapeString(info.Error))
 	return result
@@ -369,7 +366,6 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 	s.running = true
 	s.mu.Unlock()
 
-	// Create HTTP server for challenges and redirects
 	s.httpServer = &http.Server{
 		Addr:           s.config.HTTPAddr,
 		Handler:        s.createHTTPHandler(),
@@ -379,7 +375,6 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
 	}
 
-	// Create HTTPS server with TLS config
 	tlsConfig := &tls.Config{
 		GetCertificate: s.getCertificate,
 		MinVersion:     tls.VersionTLS12,
@@ -395,10 +390,8 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
 	}
 
-	// Start servers
 	errCh := make(chan error, 2)
 
-	// Start HTTP server
 	go func() {
 		s.config.Logger.InfoContext(ctx, "starting HTTP server", "addr", s.config.HTTPAddr)
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
@@ -406,7 +399,6 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 		}
 	}()
 
-	// Start HTTPS server
 	go func() {
 		s.config.Logger.InfoContext(ctx, "starting HTTPS server", "addr", s.config.HTTPSAddr)
 		if err := s.httpsServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
@@ -414,7 +406,6 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 		}
 	}()
 
-	// Wait for context cancellation or error
 	select {
 	case err := <-errCh:
 		s.Shutdown(ctx)
@@ -428,18 +419,15 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 // It handles ACME challenges and redirects to HTTPS when appropriate.
 func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Handle ACME challenges first
 		if s.config.CertManager.HandleChallenge(w, r) {
 			return
 		}
 
-		// Extract domain from host
 		domain := r.Host
 		if idx := strings.LastIndex(domain, ":"); idx != -1 {
 			domain = domain[:idx]
 		}
 
-		// Check domain registration
 		ctx := r.Context()
 		info, err := s.config.DomainStore.GetDomain(ctx, domain)
 		if err != nil {
@@ -454,15 +442,12 @@ func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
 			return
 		}
 
-		// Check if certificate exists
 		if s.config.CertManager.Exists(domain) {
-			// Redirect to HTTPS
 			url := "https://" + r.Host + r.URL.String()
 			http.Redirect(w, r, url, http.StatusMovedPermanently)
 			return
 		}
 
-		// No certificate yet, show status page based on domain status
 		switch info.Status {
 		case StatusProvisioning:
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -474,7 +459,6 @@ func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			w.Write([]byte(buildFailedHTML(info)))
 		default:
-			// Active but no cert, treat as provisioning
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusAccepted)
 			w.Write([]byte(buildProvisioningHTML(info)))
@@ -490,7 +474,7 @@ func (s *AutoCertServer[C]) getCertificate(hello *tls.ClientHelloInfo) (*tls.Cer
 		return nil, fmt.Errorf("no server name provided")
 	}
 
-	// Check if domain is registered with timeout
+	// Use timeout to prevent slow domain lookups from blocking TLS handshake
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	info, err := s.config.DomainStore.GetDomain(ctx, domain)
@@ -501,7 +485,6 @@ func (s *AutoCertServer[C]) getCertificate(hello *tls.ClientHelloInfo) (*tls.Cer
 		return nil, fmt.Errorf("domain not registered: %s", domain)
 	}
 
-	// Only return certificate if it exists
 	return s.config.CertManager.GetCertificate(hello)
 }
 
@@ -521,12 +504,10 @@ func (s *AutoCertServer[C]) Shutdown(ctx context.Context) error {
 
 	var httpErr, httpsErr error
 
-	// Shutdown HTTP server
 	if s.httpServer != nil {
 		httpErr = s.httpServer.Shutdown(shutdownCtx)
 	}
 
-	// Shutdown HTTPS server
 	if s.httpsServer != nil {
 		httpsErr = s.httpsServer.Shutdown(shutdownCtx)
 	}

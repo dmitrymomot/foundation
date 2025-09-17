@@ -52,7 +52,6 @@ func NewManager(cfg Config) (*Manager, error) {
 		cache:   cache,
 	}
 
-	// Configure autocert manager
 	m.acme = &autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
@@ -70,7 +69,7 @@ func (m *Manager) hostPolicy(ctx context.Context, host string) error {
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
 		host = host[:idx]
 	}
-	// We allow all hosts here since certificate generation is explicit
+	// Allow all hosts since certificate generation is explicit
 	return nil
 }
 
@@ -81,12 +80,10 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Force new certificate generation by getting it
 	hello := &tls.ClientHelloInfo{
 		ServerName: domain,
 	}
 
-	// Retry logic with exponential backoff
 	const maxRetries = 3
 	backoff := time.Second * 5
 
@@ -99,13 +96,12 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 
 		lastErr = err
 
-		// Check if error is retryable (network errors, rate limits)
 		if attempt < maxRetries && isRetryableError(err) {
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("context canceled during certificate generation for %s: %w", domain, ctx.Err())
 			case <-time.After(backoff):
-				backoff *= 2 // Exponential backoff
+				backoff *= 2
 				continue
 			}
 		}
@@ -115,13 +111,13 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 	return fmt.Errorf("failed to generate certificate for %s after %d attempts: %w", domain, maxRetries, lastErr)
 }
 
-// isRetryableError checks if an error is retryable (network errors, rate limits)
+// isRetryableError determines if an error indicates a transient failure worth retrying.
+// Returns true for network timeouts, connection failures, and rate limiting responses.
 func isRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check for common retryable error patterns
 	errStr := err.Error()
 	retryablePatterns := []string{
 		"connection refused",
@@ -149,12 +145,10 @@ func (m *Manager) Renew(ctx context.Context, domain string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Delete the existing certificate to force renewal
 	if err := m.cache.Delete(ctx, domain); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to delete existing certificate: %w", err)
 	}
 
-	// Generate new certificate
 	hello := &tls.ClientHelloInfo{
 		ServerName: domain,
 	}
@@ -202,7 +196,6 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 		return nil, fmt.Errorf("no server name provided")
 	}
 
-	// Only return existing certificates, don't generate new ones
 	ctx := context.Background()
 	certBytes, err := m.cache.Get(ctx, domain)
 	if err != nil {
@@ -220,12 +213,10 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 // HandleChallenge handles ACME HTTP-01 challenges.
 // Returns true if the request was an ACME challenge.
 func (m *Manager) HandleChallenge(w http.ResponseWriter, r *http.Request) bool {
-	// Check if this is an ACME challenge request
 	if !strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
 		return false
 	}
 
-	// Use autocert's HTTP handler for challenges
 	m.acme.HTTPHandler(nil).ServeHTTP(w, r)
 	return true
 }
@@ -236,7 +227,7 @@ func (m *Manager) CertDir() string {
 }
 
 // certPath returns the file path for a domain's certificate.
+// Uses autocert.DirCache naming convention where domain is the filename.
 func (m *Manager) certPath(domain string) string {
-	// autocert.DirCache uses domain name as filename
 	return filepath.Join(m.certDir, domain)
 }

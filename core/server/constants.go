@@ -3,10 +3,10 @@ package server
 import "time"
 
 const (
-	// DefaultReadTimeout is the default timeout for reading the request.
+	// DefaultReadTimeout is the default timeout for reading requests.
 	DefaultReadTimeout = 15 * time.Second
 
-	// DefaultWriteTimeout is the default timeout for writing the response.
+	// DefaultWriteTimeout is the default timeout for writing responses.
 	DefaultWriteTimeout = 15 * time.Second
 
 	// DefaultIdleTimeout is the default timeout for idle connections.
