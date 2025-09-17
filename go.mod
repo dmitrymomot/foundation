@@ -30,7 +30,7 @@ require (
 require (
 	cloud.google.com/go v0.122.0 // indirect
 	cloud.google.com/go/auth v0.16.5 // indirect
-	cloud.google.com/go/compute/metadata v0.8.1 // indirect
+	cloud.google.com/go/compute/metadata v0.8.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.1 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.7 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.7 // indirect

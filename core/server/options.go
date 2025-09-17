@@ -36,18 +36,19 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	}
 }
 
-// WithAutoCert configures the server for automatic HTTPS with Let's Encrypt.
-// This option returns an AutoCertServer instead of modifying the base Server.
+// WithAutoCert is deprecated. Use NewAutoCertServer directly instead.
+// This is kept for documentation purposes only.
+//
 // Usage:
 //
-//	autoCertServer, err := server.NewAutoCertServer(&server.AutoCertConfig{
-//	    CertManager:   certManager,
-//	    DomainStore:   domainStore,
-//	    StatusHandler: statusHandler,
-//	    HTTPAddr:      ":80",
-//	    HTTPSAddr:     ":443",
-//	})
-func WithAutoCert(config *AutoCertConfig) Option {
+//	config := &server.AutoCertConfig[MyContext]{
+//	    CertManager: certManager,
+//	    DomainStore: domainStore,
+//	    HTTPAddr:    ":80",
+//	    HTTPSAddr:   ":443",
+//	}
+//	autoCertServer, err := server.NewAutoCertServer(config)
+func WithAutoCert() Option {
 	// This is a placeholder for documentation.
 	// AutoCertServer should be created directly using NewAutoCertServer.
 	return func(s *Server) {
