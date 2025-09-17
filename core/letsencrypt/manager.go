@@ -244,9 +244,11 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 		return nil, ErrInvalidDomain
 	}
 
-	// Use context.TODO() as this implements tls.Config.GetCertificate interface
-	// which doesn't provide a context parameter
-	ctx := context.TODO()
+	// Use the context from the TLS handshake, or background if not available
+	ctx := hello.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	certBytes, err := m.cache.Get(ctx, domain)
 	if err != nil {
 		return nil, errors.Join(ErrCertificateNotFound, fmt.Errorf("domain %s", domain), err)
