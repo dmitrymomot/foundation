@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/dmitrymomot/foundation/core/cookie"
 	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/dmitrymomot/foundation/core/sessiontransport"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // createTestCookieManager creates a real cookie manager for testing

@@ -4,9 +4,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/session"
 )
 
 // TestData represents custom session data for testing

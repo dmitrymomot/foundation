@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/foundation/core/session"
-	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/core/sessiontransport"
 )
 
 const testSigningKey = "test-secret-key-at-least-32-bytes-long"
