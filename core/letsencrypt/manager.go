@@ -5,13 +5,15 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 )
 
@@ -77,9 +79,12 @@ func NewManager(cfg Config, opts ...ManagerOption) (*Manager, error) {
 // hostPolicy is used internally to control which domains can get certificates.
 // Since we manage certificates explicitly, this just allows all requests.
 func (m *Manager) hostPolicy(ctx context.Context, host string) error {
-	// Remove port if present
+	// Remove port if present (validation only, host not used further)
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		host = host[:idx]
+		// Validate host has content before port
+		if idx == 0 {
+			return fmt.Errorf("invalid host: %s", host)
+		}
 	}
 	// Allow all hosts since certificate generation is explicit
 	return nil
@@ -124,25 +129,57 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 
 // IsRetryableError determines if an error indicates a transient failure worth retrying.
 // Returns true for network timeouts, connection failures, and rate limiting responses.
+// This function checks for specific error types and patterns, handling wrapped errors properly.
 func IsRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	errStr := err.Error()
+	// Check for specific error types using errors.As
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		// Network timeouts are retryable
+		return true
+	}
+
+	// Check for specific ACME/Let's Encrypt errors
+	var acmeErr *acme.Error
+	if errors.As(err, &acmeErr) {
+		// Rate limiting (429) or service unavailable (503)
+		if acmeErr.StatusCode == http.StatusTooManyRequests ||
+			acmeErr.StatusCode == http.StatusServiceUnavailable {
+			return true
+		}
+	}
+
+	// Check for syscall errors
+	var syscallErr *os.SyscallError
+	if errors.As(err, &syscallErr) {
+		// Connection refused, network unreachable, etc.
+		if syscallErr.Err == syscall.ECONNREFUSED ||
+			syscallErr.Err == syscall.ENETUNREACH ||
+			syscallErr.Err == syscall.ETIMEDOUT {
+			return true
+		}
+	}
+
+	// Fallback to string matching for other error types
+	errStr := strings.ToLower(err.Error())
 	retryablePatterns := []string{
 		"connection refused",
 		"network is unreachable",
 		"no such host",
 		"timeout",
 		"rate limit",
-		"429", // Too Many Requests
-		"503", // Service Unavailable
+		"too many requests",
+		"service unavailable",
 		"temporary failure",
+		"i/o timeout",
+		"connection reset",
 	}
 
 	for _, pattern := range retryablePatterns {
-		if strings.Contains(strings.ToLower(errStr), pattern) {
+		if strings.Contains(errStr, pattern) {
 			return true
 		}
 	}
@@ -173,11 +210,10 @@ func (m *Manager) Renew(ctx context.Context, domain string) error {
 }
 
 // Delete removes the certificate for a domain.
-func (m *Manager) Delete(domain string) error {
+func (m *Manager) Delete(ctx context.Context, domain string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	ctx := context.Background()
 	if err := m.cache.Delete(ctx, domain); err != nil {
 		return errors.Join(errors.New("delete failed"), fmt.Errorf("domain %s", domain), err)
 	}
@@ -190,6 +226,7 @@ func (m *Manager) Exists(domain string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	// Use context.Background() as this is a non-blocking check
 	ctx := context.Background()
 	_, err := m.cache.Get(ctx, domain)
 	return err == nil
@@ -207,7 +244,9 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 		return nil, ErrInvalidDomain
 	}
 
-	ctx := context.Background()
+	// Use context.TODO() as this implements tls.Config.GetCertificate interface
+	// which doesn't provide a context parameter
+	ctx := context.TODO()
 	certBytes, err := m.cache.Get(ctx, domain)
 	if err != nil {
 		return nil, errors.Join(ErrCertificateNotFound, fmt.Errorf("domain %s", domain), err)
@@ -235,10 +274,4 @@ func (m *Manager) HandleChallenge(w http.ResponseWriter, r *http.Request) bool {
 // CertDir returns the directory where certificates are stored.
 func (m *Manager) CertDir() string {
 	return m.certDir
-}
-
-// certPath returns the file path for a domain's certificate.
-// Uses autocert.DirCache naming convention where domain is the filename.
-func (m *Manager) certPath(domain string) string {
-	return filepath.Join(m.certDir, domain)
 }

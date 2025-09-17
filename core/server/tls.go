@@ -142,13 +142,45 @@ func WithTLSClientAuth(clientAuthType tls.ClientAuthType) TLSConfigOption {
 func WithTLSMinVersion(version uint16) TLSConfigOption {
 	return func(cfg *tls.Config) error {
 		// Validate TLS version is within acceptable range
-		switch version {
-		case tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12, tls.VersionTLS13:
-			cfg.MinVersion = version
-			return nil
-		default:
+		if !isValidTLSVersion(version) {
 			return fmt.Errorf("%w: 0x%04x", ErrInvalidTLSVersion, version)
 		}
+
+		// Ensure MinVersion <= MaxVersion if MaxVersion is set
+		if cfg.MaxVersion > 0 && version > cfg.MaxVersion {
+			return fmt.Errorf("minimum TLS version (0x%04x) cannot be greater than maximum version (0x%04x)", version, cfg.MaxVersion)
+		}
+
+		cfg.MinVersion = version
+		return nil
+	}
+}
+
+// WithTLSMaxVersion sets the maximum TLS version.
+func WithTLSMaxVersion(version uint16) TLSConfigOption {
+	return func(cfg *tls.Config) error {
+		// Validate TLS version is within acceptable range
+		if !isValidTLSVersion(version) {
+			return fmt.Errorf("%w: 0x%04x", ErrInvalidTLSVersion, version)
+		}
+
+		// Ensure MinVersion <= MaxVersion if MinVersion is set
+		if cfg.MinVersion > 0 && version < cfg.MinVersion {
+			return fmt.Errorf("maximum TLS version (0x%04x) cannot be less than minimum version (0x%04x)", version, cfg.MinVersion)
+		}
+
+		cfg.MaxVersion = version
+		return nil
+	}
+}
+
+// isValidTLSVersion checks if a TLS version is valid and supported.
+func isValidTLSVersion(version uint16) bool {
+	switch version {
+	case tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12, tls.VersionTLS13:
+		return true
+	default:
+		return false
 	}
 }
 

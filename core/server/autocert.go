@@ -408,7 +408,11 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 
 	select {
 	case err := <-errCh:
-		s.Shutdown(ctx)
+		if shutdownErr := s.Shutdown(ctx); shutdownErr != nil {
+			s.config.Logger.ErrorContext(ctx, "shutdown error during error handling",
+				"shutdown_error", shutdownErr,
+				"original_error", err)
+		}
 		return err
 	case <-ctx.Done():
 		return s.Shutdown(ctx)
@@ -453,15 +457,27 @@ func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 			w.WriteHeader(http.StatusAccepted)
-			w.Write([]byte(buildProvisioningHTML(info)))
+			if _, err := w.Write([]byte(buildProvisioningHTML(info))); err != nil {
+				s.config.Logger.ErrorContext(ctx, "failed to write provisioning HTML",
+					"domain", domain,
+					"error", err)
+			}
 		case StatusFailed:
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte(buildFailedHTML(info)))
+			if _, err := w.Write([]byte(buildFailedHTML(info))); err != nil {
+				s.config.Logger.ErrorContext(ctx, "failed to write failed HTML",
+					"domain", domain,
+					"error", err)
+			}
 		default:
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusAccepted)
-			w.Write([]byte(buildProvisioningHTML(info)))
+			if _, err := w.Write([]byte(buildProvisioningHTML(info))); err != nil {
+				s.config.Logger.ErrorContext(ctx, "failed to write default HTML",
+					"domain", domain,
+					"error", err)
+			}
 		}
 	})
 }

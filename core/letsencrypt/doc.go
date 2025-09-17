@@ -66,7 +66,7 @@
 //		}
 //
 //		// Delete certificate
-//		err = manager.Delete("example.com")
+//		err = manager.Delete(ctx, "example.com")
 //		if err != nil {
 //			log.Printf("Deletion failed: %v", err)
 //		}

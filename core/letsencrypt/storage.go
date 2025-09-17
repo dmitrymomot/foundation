@@ -79,35 +79,67 @@ func (s *Storage) Write(domain string, data []byte) error {
 	}
 
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // Best effort cleanup
 		return fmt.Errorf("failed to save certificate for %s: %w", domain, err)
 	}
 
 	return nil
 }
 
-// Copy copies a certificate from one domain to another.
+// Copy copies a certificate from one domain to another using atomic operations.
 func (s *Storage) Copy(srcDomain, dstDomain string) error {
 	srcPath := filepath.Join(s.dir, srcDomain)
 	dstPath := filepath.Join(s.dir, dstDomain)
+	tmpPath := dstPath + ".tmp"
 
 	src, err := os.Open(srcPath)
 	if err != nil {
 		return fmt.Errorf("failed to open source certificate: %w", err)
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
-	dst, err := os.Create(dstPath)
+	dst, err := os.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("failed to create destination certificate: %w", err)
+		return fmt.Errorf("failed to create temporary destination: %w", err)
 	}
-	defer dst.Close()
+
+	// Ensure cleanup on error
+	defer func() {
+		if dst != nil {
+			_ = dst.Close()
+		}
+	}()
 
 	if _, err := io.Copy(dst, src); err != nil {
+		_ = os.Remove(tmpPath) // Clean up temp file
 		return fmt.Errorf("failed to copy certificate: %w", err)
 	}
 
-	return dst.Chmod(0600)
+	if err := dst.Chmod(0600); err != nil {
+		_ = os.Remove(tmpPath) // Clean up temp file
+		return fmt.Errorf("failed to set permissions: %w", err)
+	}
+
+	// Sync to ensure data is written to disk
+	if err := dst.Sync(); err != nil {
+		_ = os.Remove(tmpPath) // Clean up temp file
+		return fmt.Errorf("failed to sync data: %w", err)
+	}
+
+	// Close before rename
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(tmpPath) // Clean up temp file
+		return fmt.Errorf("failed to close destination: %w", err)
+	}
+	dst = nil // Mark as closed
+
+	// Atomic rename
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		_ = os.Remove(tmpPath) // Clean up temp file
+		return fmt.Errorf("failed to finalize copy: %w", err)
+	}
+
+	return nil
 }
 
 // Dir returns the storage directory path.

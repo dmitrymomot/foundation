@@ -259,7 +259,7 @@ func TestManagerDelete(t *testing.T) {
 	assert.True(t, m.Exists("example.com"))
 
 	// Delete it
-	err = m.Delete("example.com")
+	err = m.Delete(context.Background(), "example.com")
 	assert.NoError(t, err)
 
 	// Verify it no longer exists
