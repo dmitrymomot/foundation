@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/dmitrymomot/foundation/core/i18n"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/i18n"
 )
 
 func TestNew(t *testing.T) {

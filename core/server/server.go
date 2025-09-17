@@ -13,13 +13,13 @@ import (
 // Server wraps http.Server with graceful shutdown and configuration options.
 // Safe for concurrent use.
 type Server struct {
-	mu        sync.RWMutex  // Protects all fields
-	addr      string        // Listen address
-	server    *http.Server  // Underlying HTTP server
-	logger    *slog.Logger  // Server logger
-	shutdown  time.Duration // Graceful shutdown timeout
-	tlsConfig *tls.Config   // TLS configuration
-	running   bool          // Server state
+	mu        sync.RWMutex
+	addr      string
+	server    *http.Server
+	logger    *slog.Logger
+	shutdown  time.Duration
+	tlsConfig *tls.Config
+	running   bool
 }
 
 // New creates a new Server with the given address and options.
@@ -28,7 +28,7 @@ func New(addr string, opts ...Option) *Server {
 	s := &Server{
 		addr:     addr,
 		logger:   slog.Default(),
-		shutdown: 30 * time.Second, // Reasonable default for graceful shutdown
+		shutdown: DefaultShutdownTimeout,
 	}
 
 	for _, opt := range opts {
@@ -51,14 +51,14 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 	s.server = &http.Server{
 		Addr:           s.addr,
 		Handler:        handler,
-		ReadTimeout:    15 * time.Second,
-		WriteTimeout:   15 * time.Second,
-		IdleTimeout:    60 * time.Second,
+		ReadTimeout:    DefaultReadTimeout,
+		WriteTimeout:   DefaultWriteTimeout,
+		IdleTimeout:    DefaultIdleTimeout,
 		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
 		TLSConfig:      s.tlsConfig,
 	}
 
-	// Capture TLS config while holding the lock to avoid race conditions
+	// Avoid race condition by capturing TLS config under lock
 	hasTLS := s.tlsConfig != nil
 	s.mu.Unlock()
 

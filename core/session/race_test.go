@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/session"
 )
 
 // hashToken creates a SHA-256 hash of the token for testing - mirrors the internal implementation
