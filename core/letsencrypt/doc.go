@@ -1,113 +1,284 @@
-// Package letsencrypt provides a Let's Encrypt certificate manager implementation.
+// Package letsencrypt provides Let's Encrypt certificate management with explicit
+// control over certificate operations. No automatic generation or background jobs.
 //
-// This package offers explicit control over SSL/TLS certificates without any automatic generation
-// or background jobs. It's designed for production environments where you need full control over
-// when and how certificates are created, renewed, or deleted.
+// The Manager type satisfies the server.CertificateManager interface for integration
+// with the foundation server package while maintaining full control over when and how
+// certificates are created, renewed, or deleted.
 //
-// The Manager type satisfies the server.CertificateManager interface without explicitly
-// depending on it, following the dependency inversion principle.
+// # Types
+//
+//   - Manager: Certificate operations with explicit control
+//   - Config: Manager configuration
+//   - Storage: Low-level certificate file operations
+//
+// # Errors
+//
+//   - ErrCertificateNotFound: Certificate not found for domain
+//   - ErrInvalidDomain: Invalid domain name
+//   - ErrCertificateExpired: Certificate expired
+//   - ErrGenerationFailed: Certificate generation failed
 //
 // # Features
 //
-//   - Explicit certificate operations (Generate, Renew, Delete)
-//   - No automatic certificate generation or renewal
+//   - Explicit operations: Generate, Renew, Delete
 //   - ACME HTTP-01 challenge support
-//   - Certificate caching on disk
-//   - Let's Encrypt staging environment support
+//   - Atomic disk storage with caching
+//   - Production and staging environments
+//   - Retry logic with exponential backoff
+//   - Thread-safe operations
 //
 // # Basic Usage
 //
-//	// Create certificate manager
-//	manager, err := letsencrypt.NewManager(letsencrypt.Config{
-//	    Email:   "admin@example.com",
-//	    CertDir: "/var/cache/certs",
-//	    Staging: false, // Use production Let's Encrypt
-//	})
-//	if err != nil {
-//	    log.Fatal(err)
+//	import (
+//		"context"
+//		"fmt"
+//		"log"
+//
+//		"github.com/dmitrymomot/foundation/core/letsencrypt"
+//	)
+//
+//	func main() {
+//		manager, err := letsencrypt.NewManager(letsencrypt.Config{
+//			Email:   "admin@example.com",
+//			CertDir: "/var/cache/certs",
+//		})
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		ctx := context.Background()
+//
+//		// Generate certificate (30-60 seconds)
+//		err = manager.Generate(ctx, "example.com")
+//		if err != nil {
+//			log.Printf("Generation failed: %v", err)
+//			return
+//		}
+//
+//		if manager.Exists("example.com") {
+//			fmt.Println("Certificate ready")
+//		}
+//
+//		// Renew certificate
+//		err = manager.Renew(ctx, "example.com")
+//		if err != nil {
+//			log.Printf("Renewal failed: %v", err)
+//		}
+//
+//		// Delete certificate
+//		err = manager.Delete("example.com")
+//		if err != nil {
+//			log.Printf("Deletion failed: %v", err)
+//		}
 //	}
-//
-//	// Generate a certificate (blocking operation, ~30-60 seconds)
-//	err = manager.Generate(ctx, "example.com")
-//	if err != nil {
-//	    log.Printf("Certificate generation failed: %v", err)
-//	}
-//
-//	// Check if certificate exists
-//	if manager.Exists("example.com") {
-//	    fmt.Println("Certificate ready")
-//	}
-//
-//	// Renew a certificate
-//	err = manager.Renew(ctx, "example.com")
-//
-//	// Delete a certificate
-//	err = manager.Delete("example.com")
 //
 // # Server Integration
 //
 // Use with the foundation/core/server package for automatic HTTPS:
 //
-//	import "github.com/dmitrymomot/foundation/core/server"
+//	import (
+//		"context"
+//		"log"
 //
-//	// Create certificate manager
-//	certManager := letsencrypt.NewManager(letsencrypt.Config{
-//	    Email:   "admin@example.com",
-//	    CertDir: "/var/cache/certs",
-//	})
+//		"github.com/dmitrymomot/foundation/core/handler"
+//		"github.com/dmitrymomot/foundation/core/letsencrypt"
+//		"github.com/dmitrymomot/foundation/core/response"
+//		"github.com/dmitrymomot/foundation/core/router"
+//		"github.com/dmitrymomot/foundation/core/server"
+//	)
 //
-//	// Configure server with AutoCert
-//	config := &server.AutoCertConfig[MyContext]{
-//	    CertManager:         certManager,  // Satisfies CertificateManager interface
-//	    DomainStore:         myDomainStore, // Your DomainStore implementation
-//	    ProvisioningHandler: myProvisioningHandler,
-//	    HTTPAddr:            ":80",
-//	    HTTPSAddr:           ":443",
+//	type AppContext = router.Context
+//
+//	func main() {
+//		certManager, err := letsencrypt.NewManager(letsencrypt.Config{
+//			Email:   "admin@example.com",
+//			CertDir: "/var/cache/certs",
+//		})
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		type MyDomainStore struct{}
+//		func (s *MyDomainStore) GetDomain(ctx context.Context, domain string) (*server.DomainInfo, error) {
+//			return &server.DomainInfo{
+//				Domain:   domain,
+//				TenantID: "tenant-123",
+//				Status:   server.StatusActive,
+//			}, nil
+//		}
+//
+//		r := router.New[*AppContext]()
+//		r.Get("/", func(ctx *AppContext) handler.Response {
+//			return response.HTML("<h1>Secure App</h1>")
+//		})
+//
+//		config := &server.AutoCertConfig[*AppContext]{
+//			CertManager: certManager,
+//			DomainStore: &MyDomainStore{},
+//			HTTPAddr:    ":80",
+//			HTTPSAddr:   ":443",
+//		}
+//
+//		srv, err := server.NewAutoCertServer(config)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		ctx := context.Background()
+//		if err := srv.Run(ctx, r); err != nil {
+//			log.Fatal(err)
+//		}
 //	}
 //
-//	srv, err := server.NewAutoCertServer(config)
-//	if err != nil {
-//	    log.Fatal(err)
+// # Storage Operations
+//
+// The Storage type provides low-level certificate file operations:
+//
+//	import (
+//		"fmt"
+//		"log"
+//
+//		"github.com/dmitrymomot/foundation/core/letsencrypt"
+//	)
+//
+//	func main() {
+//		storage, err := letsencrypt.NewStorage("/var/cache/certs")
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		// List certificate domains
+//		domains, err := storage.List()
+//		if err != nil {
+//			log.Printf("List failed: %v", err)
+//		}
+//
+//		if storage.Exists("example.com") {
+//			fmt.Println("Certificate found")
+//		}
+//
+//		// Read certificate data
+//		certData, err := storage.Read("example.com")
+//		if err != nil {
+//			log.Printf("Read failed: %v", err)
+//		}
+//
+//		// Copy certificate
+//		err = storage.Copy("example.com", "www.example.com")
+//		if err != nil {
+//			log.Printf("Copy failed: %v", err)
+//		}
+//
+//		err = storage.Delete("example.com")
+//		if err != nil {
+//			log.Printf("Delete failed: %v", err)
+//		}
 //	}
 //
-//	// Run server (handles both HTTP and HTTPS)
-//	srv.Run(ctx, myApp)
+// # Storage Structure
 //
-// # Certificate Storage
-//
-// Certificates are stored on disk in the specified directory:
+// Certificates stored with atomic writes:
 //
 //	/var/cache/certs/
 //	├── acme_account+key     # ACME account key
-//	└── example.com          # Certificate and key for example.com
-//	└── tenant.example.com   # Certificate and key for tenant subdomain
+//	├── example.com          # Certificate and key
+//	├── www.example.com      # Subdomain certificate
+//	└── api.example.com      # API subdomain certificate
 //
-// # Certificate Methods
+// Each file contains certificate chain and private key in PEM format.
 //
-// The Manager provides these methods that satisfy server.CertificateManager:
+// # Manager Methods
 //
-//   - GetCertificate: Retrieves certificate for TLS handshake
-//   - HandleChallenge: Handles ACME HTTP-01 challenges
-//   - Exists: Checks if certificate exists
+// server.CertificateManager interface:
 //
-// Additional management methods:
+//   - GetCertificate: TLS handshake certificate retrieval
+//   - HandleChallenge: ACME HTTP-01 challenge handling
+//   - Exists: Check certificate existence
 //
-//   - Generate: Explicitly create new certificate
-//   - Renew: Force certificate renewal
-//   - Delete: Remove certificate from disk
+// Management operations:
 //
-// # Security Considerations
+//   - Generate: Create new certificate with retry logic
+//   - Renew: Force renewal by regenerating
+//   - Delete: Remove certificate from storage
+//   - CertDir: Get storage directory path
 //
-//   - Never generate certificates automatically
-//   - Always validate domain ownership before generating certificates
-//   - Use staging environment for development and testing
-//   - Monitor certificate expiration dates
-//   - Implement rate limiting for certificate operations
+// # ACME Challenge Handling
 //
-// # Limitations
+// ACME HTTP-01 challenges require port 80 access for validation:
 //
-//   - Requires ports 80 and 443 to be available
-//   - Domain must point to server IP before certificate generation
-//   - Let's Encrypt rate limits apply (50 certificates per domain per week)
-//   - No wildcard certificate support (requires DNS-01 challenge)
+//	import (
+//		"net/http"
+//
+//		"github.com/dmitrymomot/foundation/core/handler"
+//		"github.com/dmitrymomot/foundation/core/response"
+//		"github.com/dmitrymomot/foundation/core/router"
+//	)
+//
+//	type AppContext = router.Context
+//
+//	r := router.New[*AppContext]()
+//	r.Handle("/*", func(ctx *AppContext) handler.Response {
+//		// Handle ACME challenges first
+//		if manager.HandleChallenge(ctx.Response(), ctx.Request()) {
+//			return nil
+//		}
+//		return response.Text("Hello, World!")
+//	})
+//
+//	http.ListenAndServe(":80", r)
+//
+// # Error Handling Patterns
+//
+// The package provides specific error types for different scenarios:
+//
+//	import (
+//		"errors"
+//		"log"
+//
+//		"github.com/dmitrymomot/foundation/core/letsencrypt"
+//	)
+//
+//	err := manager.Generate(ctx, "example.com")
+//	if err != nil {
+//		switch {
+//		case errors.Is(err, letsencrypt.ErrCertificateNotFound):
+//			log.Println("Certificate not found")
+//		case errors.Is(err, letsencrypt.ErrInvalidDomain):
+//			log.Println("Invalid domain")
+//		case errors.Is(err, letsencrypt.ErrGenerationFailed):
+//			log.Println("Generation failed")
+//		default:
+//			log.Printf("Unexpected error: %v", err)
+//		}
+//	}
+//
+// # Retry Logic
+//
+// Built-in retry with exponential backoff for:
+//
+//   - Network connectivity issues
+//   - DNS resolution problems
+//   - Rate limiting (429)
+//   - Service unavailable (503)
+//
+// Automatic retries: 3 attempts with 5-second initial backoff.
+//
+// # Security
+//
+//   - Explicit operations only (no automatic generation)
+//   - Validate domain ownership before generation
+//   - Use staging environment for testing
+//   - Monitor expiration dates
+//   - Rate limit operations
+//   - Files stored with 0600 permissions
+//   - Atomic writes prevent corruption
+//
+// # Production Notes
+//
+//   - Requires ports 80 and 443 available
+//   - Domain must point to server IP
+//   - Rate limits: 50 certificates per domain per week
+//   - Generation time: 30-60 seconds
+//   - No wildcard support (needs DNS-01)
+//   - Monitor disk space and expiration dates
 package letsencrypt
