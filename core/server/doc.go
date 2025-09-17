@@ -94,10 +94,13 @@
 //	)
 //
 //	// Option 3: Customize with options
-//	tlsConfig := server.NewTLSConfig(
+//	tlsConfig, err := server.NewTLSConfig(
 //		server.WithTLSCertificate("cert.pem", "key.pem"),
 //		server.WithTLSMinVersion(tls.VersionTLS13),
 //	)
+//	if err != nil {
+//		log.Fatalf("Failed to create TLS config: %v", err)
+//	}
 //	srv := server.New(":8443",
 //		server.WithTLS(tlsConfig),
 //		server.WithLogger(logger),

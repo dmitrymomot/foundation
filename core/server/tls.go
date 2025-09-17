@@ -2,6 +2,22 @@ package server
 
 import (
 	"crypto/tls"
+	"errors"
+	"fmt"
+)
+
+var (
+	// ErrEmptyCertPath is returned when certificate or key file paths are empty.
+	ErrEmptyCertPath = errors.New("certificate or key file path cannot be empty")
+
+	// ErrEmptyServerName is returned when server name is empty.
+	ErrEmptyServerName = errors.New("server name cannot be empty")
+
+	// ErrInvalidTLSVersion is returned when an invalid TLS version is specified.
+	ErrInvalidTLSVersion = errors.New("invalid TLS version")
+
+	// ErrInvalidClientAuthType is returned when an invalid client auth type is specified.
+	ErrInvalidClientAuthType = errors.New("invalid client auth type")
 )
 
 // DefaultTLSConfig returns a secure default TLS configuration following
@@ -87,54 +103,83 @@ func StrictTLSConfig() *tls.Config {
 }
 
 // TLSConfigOption represents a functional option for customizing TLS configuration.
-type TLSConfigOption func(*tls.Config)
+type TLSConfigOption func(*tls.Config) error
 
 // WithTLSCertificate adds a certificate to the TLS configuration.
 func WithTLSCertificate(certFile, keyFile string) TLSConfigOption {
-	return func(cfg *tls.Config) {
+	return func(cfg *tls.Config) error {
+		if certFile == "" || keyFile == "" {
+			return ErrEmptyCertPath
+		}
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			return // Silently ignore errors in options
+			return fmt.Errorf("failed to load certificate: %w", err)
 		}
 		cfg.Certificates = append(cfg.Certificates, cert)
+		return nil
 	}
 }
 
 // WithTLSClientAuth configures client certificate authentication.
 func WithTLSClientAuth(clientAuthType tls.ClientAuthType) TLSConfigOption {
-	return func(cfg *tls.Config) {
-		cfg.ClientAuth = clientAuthType
+	return func(cfg *tls.Config) error {
+		// Validate client auth type is within valid range (0-4)
+		switch clientAuthType {
+		case tls.NoClientCert,
+			tls.RequestClientCert,
+			tls.RequireAnyClientCert,
+			tls.VerifyClientCertIfGiven,
+			tls.RequireAndVerifyClientCert:
+			cfg.ClientAuth = clientAuthType
+			return nil
+		default:
+			return fmt.Errorf("%w: %d", ErrInvalidClientAuthType, clientAuthType)
+		}
 	}
 }
 
 // WithTLSMinVersion sets the minimum TLS version.
 func WithTLSMinVersion(version uint16) TLSConfigOption {
-	return func(cfg *tls.Config) {
-		cfg.MinVersion = version
+	return func(cfg *tls.Config) error {
+		// Validate TLS version is within acceptable range
+		switch version {
+		case tls.VersionTLS10, tls.VersionTLS11, tls.VersionTLS12, tls.VersionTLS13:
+			cfg.MinVersion = version
+			return nil
+		default:
+			return fmt.Errorf("%w: 0x%04x", ErrInvalidTLSVersion, version)
+		}
 	}
 }
 
 // WithTLSServerName sets the expected server name for verification.
 func WithTLSServerName(serverName string) TLSConfigOption {
-	return func(cfg *tls.Config) {
+	return func(cfg *tls.Config) error {
+		if serverName == "" {
+			return ErrEmptyServerName
+		}
 		cfg.ServerName = serverName
+		return nil
 	}
 }
 
 // WithTLSInsecureSkipVerify disables certificate verification.
 // WARNING: Use only for testing. Never use in production.
 func WithTLSInsecureSkipVerify() TLSConfigOption {
-	return func(cfg *tls.Config) {
+	return func(cfg *tls.Config) error {
 		cfg.InsecureSkipVerify = true
+		return nil
 	}
 }
 
 // NewTLSConfig creates a new TLS configuration with the given options,
 // starting from a secure default configuration.
-func NewTLSConfig(opts ...TLSConfigOption) *tls.Config {
+func NewTLSConfig(opts ...TLSConfigOption) (*tls.Config, error) {
 	cfg := DefaultTLSConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		if err := opt(cfg); err != nil {
+			return nil, err
+		}
 	}
-	return cfg
+	return cfg, nil
 }
