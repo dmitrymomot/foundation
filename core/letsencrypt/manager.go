@@ -3,6 +3,7 @@ package letsencrypt
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,7 +24,7 @@ type Manager struct {
 	email   string
 	certDir string
 	acme    *autocert.Manager
-	cache   autocert.DirCache
+	cache   autocert.Cache
 }
 
 // Config holds configuration for the certificate manager.
@@ -38,28 +39,34 @@ type Config struct {
 // NewManager creates a new certificate manager.
 func NewManager(cfg Config) (*Manager, error) {
 	if cfg.Email == "" {
-		return nil, fmt.Errorf("email is required for Let's Encrypt account")
+		return nil, ErrEmailRequired
 	}
 	if cfg.CertDir == "" {
-		return nil, fmt.Errorf("certificate directory is required")
+		return nil, ErrCertDirRequired
 	}
 
 	cache := autocert.DirCache(cfg.CertDir)
-
-	m := &Manager{
-		email:   cfg.Email,
-		certDir: cfg.CertDir,
-		cache:   cache,
-	}
-
-	m.acme = &autocert.Manager{
+	acmeManager := &autocert.Manager{
 		Cache:      cache,
 		Prompt:     autocert.AcceptTOS,
 		Email:      cfg.Email,
-		HostPolicy: m.hostPolicy,
+		HostPolicy: autocert.HostWhitelist(), // Default policy
 	}
 
-	return m, nil
+	return newManager(cfg.Email, cfg.CertDir, acmeManager, cache), nil
+}
+
+// newManager creates a manager with injected dependencies (for testing).
+func newManager(email, certDir string, acme *autocert.Manager, cache autocert.Cache) *Manager {
+	m := &Manager{
+		email:   email,
+		certDir: certDir,
+		acme:    acme,
+		cache:   cache,
+	}
+
+	acme.HostPolicy = m.hostPolicy
+	return m
 }
 
 // hostPolicy is used internally to control which domains can get certificates.
@@ -96,10 +103,10 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 
 		lastErr = err
 
-		if attempt < maxRetries && isRetryableError(err) {
+		if attempt < maxRetries && IsRetryableError(err) {
 			select {
 			case <-ctx.Done():
-				return fmt.Errorf("context canceled during certificate generation for %s: %w", domain, ctx.Err())
+				return errors.Join(ErrGenerationFailed, fmt.Errorf("context canceled for domain %s", domain), ctx.Err())
 			case <-time.After(backoff):
 				backoff *= 2
 				continue
@@ -108,12 +115,12 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 		break
 	}
 
-	return fmt.Errorf("failed to generate certificate for %s after %d attempts: %w", domain, maxRetries, lastErr)
+	return errors.Join(ErrGenerationFailed, fmt.Errorf("failed after %d attempts for domain %s", maxRetries, domain), lastErr)
 }
 
-// isRetryableError determines if an error indicates a transient failure worth retrying.
+// IsRetryableError determines if an error indicates a transient failure worth retrying.
 // Returns true for network timeouts, connection failures, and rate limiting responses.
-func isRetryableError(err error) bool {
+func IsRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -146,7 +153,7 @@ func (m *Manager) Renew(ctx context.Context, domain string) error {
 	defer m.mu.Unlock()
 
 	if err := m.cache.Delete(ctx, domain); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to delete existing certificate: %w", err)
+		return errors.Join(errors.New("failed to delete existing certificate"), err)
 	}
 
 	hello := &tls.ClientHelloInfo{
@@ -155,7 +162,7 @@ func (m *Manager) Renew(ctx context.Context, domain string) error {
 
 	_, err := m.acme.GetCertificate(hello)
 	if err != nil {
-		return fmt.Errorf("failed to renew certificate for %s: %w", domain, err)
+		return errors.Join(ErrGenerationFailed, fmt.Errorf("renewal failed for domain %s", domain), err)
 	}
 
 	return nil
@@ -168,7 +175,7 @@ func (m *Manager) Delete(domain string) error {
 
 	ctx := context.Background()
 	if err := m.cache.Delete(ctx, domain); err != nil {
-		return fmt.Errorf("failed to delete certificate for %s: %w", domain, err)
+		return errors.Join(errors.New("delete failed"), fmt.Errorf("domain %s", domain), err)
 	}
 
 	return nil
@@ -193,18 +200,18 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 
 	domain := hello.ServerName
 	if domain == "" {
-		return nil, fmt.Errorf("no server name provided")
+		return nil, ErrInvalidDomain
 	}
 
 	ctx := context.Background()
 	certBytes, err := m.cache.Get(ctx, domain)
 	if err != nil {
-		return nil, fmt.Errorf("certificate not found for %s: %w", domain, err)
+		return nil, errors.Join(ErrCertificateNotFound, fmt.Errorf("domain %s", domain), err)
 	}
 
 	cert, err := tls.X509KeyPair(certBytes, certBytes)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load certificate for %s: %w", domain, err)
+		return nil, errors.Join(errors.New("failed to load certificate"), fmt.Errorf("domain %s", domain), err)
 	}
 
 	return &cert, nil
