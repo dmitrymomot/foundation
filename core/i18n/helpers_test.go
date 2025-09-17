@@ -4,8 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dmitrymomot/foundation/core/i18n"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/dmitrymomot/foundation/core/i18n"
 )
 
 func TestParseAcceptLanguage(t *testing.T) {
