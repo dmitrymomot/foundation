@@ -20,11 +20,13 @@ import (
 // This implementation satisfies the server.CertificateManager interface
 // without explicitly depending on it.
 type Manager struct {
-	mu      sync.RWMutex
-	email   string
-	certDir string
-	acme    *autocert.Manager
-	cache   autocert.Cache
+	mu           sync.RWMutex
+	email        string
+	certDir      string
+	acme         ACMEProvider
+	cache        autocert.Cache
+	maxRetries   int
+	retryBackoff time.Duration
 }
 
 // Config holds configuration for the certificate manager.
@@ -37,7 +39,7 @@ type Config struct {
 }
 
 // NewManager creates a new certificate manager.
-func NewManager(cfg Config) (*Manager, error) {
+func NewManager(cfg Config, opts ...ManagerOption) (*Manager, error) {
 	if cfg.Email == "" {
 		return nil, ErrEmailRequired
 	}
@@ -45,28 +47,31 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, ErrCertDirRequired
 	}
 
-	cache := autocert.DirCache(cfg.CertDir)
-	acmeManager := &autocert.Manager{
-		Cache:      cache,
-		Prompt:     autocert.AcceptTOS,
-		Email:      cfg.Email,
-		HostPolicy: autocert.HostWhitelist(), // Default policy
-	}
-
-	return newManager(cfg.Email, cfg.CertDir, acmeManager, cache), nil
-}
-
-// newManager creates a manager with injected dependencies (for testing).
-func newManager(email, certDir string, acme *autocert.Manager, cache autocert.Cache) *Manager {
+	// Create manager with defaults
 	m := &Manager{
-		email:   email,
-		certDir: certDir,
-		acme:    acme,
-		cache:   cache,
+		email:        cfg.Email,
+		certDir:      cfg.CertDir,
+		cache:        autocert.DirCache(cfg.CertDir),
+		maxRetries:   3,
+		retryBackoff: 5 * time.Second,
 	}
 
-	acme.HostPolicy = m.hostPolicy
-	return m
+	// Apply options first
+	for _, opt := range opts {
+		opt(m)
+	}
+
+	// Create default ACME provider if none was injected
+	if m.acme == nil {
+		m.acme = &autocert.Manager{
+			Cache:      m.cache,
+			Prompt:     autocert.AcceptTOS,
+			Email:      cfg.Email,
+			HostPolicy: m.hostPolicy,
+		}
+	}
+
+	return m, nil
 }
 
 // hostPolicy is used internally to control which domains can get certificates.
@@ -91,11 +96,10 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 		ServerName: domain,
 	}
 
-	const maxRetries = 3
-	backoff := time.Second * 5
+	backoff := m.retryBackoff
 
 	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= m.maxRetries; attempt++ {
 		_, err := m.acme.GetCertificate(hello)
 		if err == nil {
 			return nil
@@ -103,7 +107,7 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 
 		lastErr = err
 
-		if attempt < maxRetries && IsRetryableError(err) {
+		if attempt < m.maxRetries && IsRetryableError(err) {
 			select {
 			case <-ctx.Done():
 				return errors.Join(ErrGenerationFailed, fmt.Errorf("context canceled for domain %s", domain), ctx.Err())
@@ -115,7 +119,7 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 		break
 	}
 
-	return errors.Join(ErrGenerationFailed, fmt.Errorf("failed after %d attempts for domain %s", maxRetries, domain), lastErr)
+	return errors.Join(ErrGenerationFailed, fmt.Errorf("failed after %d attempts for domain %s", m.maxRetries, domain), lastErr)
 }
 
 // IsRetryableError determines if an error indicates a transient failure worth retrying.
