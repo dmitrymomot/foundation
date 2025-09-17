@@ -2,8 +2,14 @@ package letsencrypt_test
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,8 +20,142 @@ import (
 
 	"github.com/dmitrymomot/foundation/core/letsencrypt"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/acme/autocert"
 )
+
+// MockACMEProvider is a mock implementation of ACMEProvider using testify/mock
+type MockACMEProvider struct {
+	mock.Mock
+}
+
+func (m *MockACMEProvider) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	args := m.Called(hello)
+	if cert := args.Get(0); cert != nil {
+		return cert.(*tls.Certificate), args.Error(1)
+	}
+	return nil, args.Error(1)
+}
+
+func (m *MockACMEProvider) HTTPHandler(fallback http.Handler) http.Handler {
+	args := m.Called(fallback)
+	if handler := args.Get(0); handler != nil {
+		return handler.(http.Handler)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+}
+
+// MockCache is a mock implementation of autocert.Cache using testify/mock
+type MockCache struct {
+	mock.Mock
+	// Keep internal data for simple Get/Put operations when not mocked
+	data map[string][]byte
+	mu   sync.Mutex
+}
+
+func NewMockCache() *MockCache {
+	return &MockCache{
+		data: make(map[string][]byte),
+	}
+}
+
+func (m *MockCache) Get(ctx context.Context, key string) ([]byte, error) {
+	// If expectations are set, use them
+	if len(m.ExpectedCalls) > 0 {
+		args := m.Called(ctx, key)
+		if data := args.Get(0); data != nil {
+			return data.([]byte), args.Error(1)
+		}
+		return nil, args.Error(1)
+	}
+
+	// Otherwise use simple in-memory storage
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	data, ok := m.data[key]
+	if !ok {
+		return nil, autocert.ErrCacheMiss
+	}
+	return data, nil
+}
+
+func (m *MockCache) Put(ctx context.Context, key string, data []byte) error {
+	// If expectations are set, use them
+	if len(m.ExpectedCalls) > 0 {
+		args := m.Called(ctx, key, data)
+		return args.Error(0)
+	}
+
+	// Otherwise use simple in-memory storage
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data[key] = data
+	return nil
+}
+
+func (m *MockCache) Delete(ctx context.Context, key string) error {
+	// If expectations are set, use them
+	if len(m.ExpectedCalls) > 0 {
+		args := m.Called(ctx, key)
+		return args.Error(0)
+	}
+
+	// Otherwise use simple in-memory storage
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.data, key)
+	return nil
+}
+
+// generateTestCertificate creates a valid self-signed certificate for testing
+func generateTestCertificate(domain string) ([]byte, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+
+	template := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: domain,
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{domain},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, err
+	}
+
+	// Encode certificate
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certDER,
+	})
+
+	// Encode private key
+	privDER, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return nil, err
+	}
+
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privDER,
+	})
+
+	// Combine cert and key (as autocert does)
+	combined := append(certPEM, keyPEM...)
+	return combined, nil
+}
 
 func TestNewManager(t *testing.T) {
 	tests := []struct {
@@ -214,45 +354,42 @@ func TestIsRetryableError(t *testing.T) {
 
 func TestManagerGenerateWithRetry(t *testing.T) {
 	t.Run("successful generation on first attempt", func(t *testing.T) {
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				assert.Equal(t, "example.com", hello.ServerName)
-				return &tls.Certificate{}, nil
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.MatchedBy(func(hello *tls.ClientHelloInfo) bool {
+			return hello.ServerName == "example.com"
+		})).Return(&tls.Certificate{}, nil).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 		)
 		require.NoError(t, err)
 
 		err = m.Generate(context.Background(), "example.com")
 		assert.NoError(t, err)
-		assert.Equal(t, 1, mock.CallCount())
+
+		mockProvider.AssertExpectations(t)
 	})
 
 	t.Run("retry on transient failure then succeed", func(t *testing.T) {
-		attempts := 0
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				attempts++
-				if attempts < 3 {
-					return nil, errors.New("connection refused")
-				}
-				return &tls.Certificate{}, nil
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+
+		// First two calls fail with retryable error
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(nil, errors.New("connection refused")).Twice()
+		// Third call succeeds
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(&tls.Certificate{}, nil).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 			letsencrypt.WithRetryConfig(3, 10*time.Millisecond), // Fast retry for testing
 		)
 		require.NoError(t, err)
@@ -262,25 +399,25 @@ func TestManagerGenerateWithRetry(t *testing.T) {
 		duration := time.Since(start)
 
 		assert.NoError(t, err)
-		assert.Equal(t, 3, attempts)
 		// Should have delays: 10ms + 20ms = 30ms minimum
 		assert.GreaterOrEqual(t, duration, 30*time.Millisecond)
 		assert.Less(t, duration, 1*time.Second)
+
+		mockProvider.AssertExpectations(t)
+		mockProvider.AssertNumberOfCalls(t, "GetCertificate", 3)
 	})
 
 	t.Run("context cancellation during retry", func(t *testing.T) {
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return nil, errors.New("connection refused")
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(nil, errors.New("connection refused")).Maybe()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 			letsencrypt.WithRetryConfig(3, 100*time.Millisecond), // Longer than context timeout
 		)
 		require.NoError(t, err)
@@ -295,18 +432,16 @@ func TestManagerGenerateWithRetry(t *testing.T) {
 	})
 
 	t.Run("non-retryable error fails immediately", func(t *testing.T) {
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return nil, errors.New("unauthorized")
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(nil, errors.New("unauthorized")).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 		)
 		require.NoError(t, err)
 
@@ -317,26 +452,24 @@ func TestManagerGenerateWithRetry(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, letsencrypt.ErrGenerationFailed)
 		assert.Contains(t, err.Error(), "unauthorized")
-		assert.Equal(t, 1, mock.CallCount())
 		// Should fail immediately without retries
 		assert.Less(t, duration, 1*time.Second)
+
+		mockProvider.AssertExpectations(t)
+		mockProvider.AssertNumberOfCalls(t, "GetCertificate", 1)
 	})
 
 	t.Run("max retries exhausted", func(t *testing.T) {
-		attempts := 0
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				attempts++
-				return nil, errors.New("timeout")
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(nil, errors.New("timeout")).Times(3)
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 			letsencrypt.WithRetryConfig(3, 10*time.Millisecond), // Fast retry for testing
 		)
 		require.NoError(t, err)
@@ -345,28 +478,27 @@ func TestManagerGenerateWithRetry(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, letsencrypt.ErrGenerationFailed)
 		assert.Contains(t, err.Error(), "failed after 3 attempts")
-		assert.Equal(t, 3, attempts)
+
+		mockProvider.AssertExpectations(t)
 	})
 }
 
 func TestManagerRenew(t *testing.T) {
 	t.Run("successful renewal", func(t *testing.T) {
-		cache := newMockCache()
+		cache := NewMockCache()
 		cache.Put(context.Background(), "example.com", []byte("old-cert"))
 
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				assert.Equal(t, "example.com", hello.ServerName)
-				return &tls.Certificate{}, nil
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.MatchedBy(func(hello *tls.ClientHelloInfo) bool {
+			return hello.ServerName == "example.com"
+		})).Return(&tls.Certificate{}, nil).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 			letsencrypt.WithCache(cache),
 		)
 		require.NoError(t, err)
@@ -380,23 +512,23 @@ func TestManagerRenew(t *testing.T) {
 		// Verify old cert was deleted
 		_, err = cache.Get(context.Background(), "example.com")
 		assert.Error(t, err)
+
+		mockProvider.AssertExpectations(t)
 	})
 
 	t.Run("cache deletion failure", func(t *testing.T) {
-		cache := &mockCache{
-			deleteFunc: func(ctx context.Context, key string) error {
-				return errors.New("permission denied")
-			},
-		}
+		cache := new(MockCache)
+		cache.On("Delete", mock.Anything, "example.com").
+			Return(errors.New("permission denied")).Once()
 
-		mock := &mockACMEProvider{}
+		mockProvider := new(MockACMEProvider)
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 			letsencrypt.WithCache(cache),
 		)
 		require.NoError(t, err)
@@ -405,23 +537,23 @@ func TestManagerRenew(t *testing.T) {
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to delete existing certificate")
 		assert.Contains(t, err.Error(), "permission denied")
+
+		cache.AssertExpectations(t)
 	})
 
 	t.Run("generation failure during renewal", func(t *testing.T) {
-		cache := newMockCache()
+		cache := NewMockCache()
 
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return nil, errors.New("ACME server error")
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(nil, errors.New("ACME server error")).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 			letsencrypt.WithCache(cache),
 		)
 		require.NoError(t, err)
@@ -431,6 +563,8 @@ func TestManagerRenew(t *testing.T) {
 		assert.ErrorIs(t, err, letsencrypt.ErrGenerationFailed)
 		assert.Contains(t, err.Error(), "renewal failed")
 		assert.Contains(t, err.Error(), "ACME server error")
+
+		mockProvider.AssertExpectations(t)
 	})
 }
 
@@ -440,7 +574,7 @@ func TestManagerGetCertificateSuccess(t *testing.T) {
 		certPEM, err := generateTestCertificate("example.com")
 		require.NoError(t, err)
 
-		cache := newMockCache()
+		cache := NewMockCache()
 		cache.Put(context.Background(), "example.com", certPEM)
 
 		m, err := letsencrypt.NewManager(
@@ -462,7 +596,7 @@ func TestManagerGetCertificateSuccess(t *testing.T) {
 	})
 
 	t.Run("malformed certificate data", func(t *testing.T) {
-		cache := newMockCache()
+		cache := NewMockCache()
 		cache.Put(context.Background(), "example.com", []byte("invalid-cert-data"))
 
 		m, err := letsencrypt.NewManager(
@@ -487,17 +621,13 @@ func TestManagerGetCertificateSuccess(t *testing.T) {
 
 func TestManagerConcurrentOperations(t *testing.T) {
 	t.Run("concurrent generate calls", func(t *testing.T) {
-		var mu sync.Mutex
-		calls := make(map[string]int)
+		mockProvider := new(MockACMEProvider)
 
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				mu.Lock()
-				calls[hello.ServerName]++
-				mu.Unlock()
-				time.Sleep(100 * time.Millisecond) // Simulate work
-				return &tls.Certificate{}, nil
-			},
+		// Set up expectations for each domain
+		for _, domain := range []string{"site1.com", "site2.com", "site3.com"} {
+			mockProvider.On("GetCertificate", mock.MatchedBy(func(hello *tls.ClientHelloInfo) bool {
+				return hello.ServerName == domain
+			})).Return(&tls.Certificate{}, nil).Once()
 		}
 
 		m, err := letsencrypt.NewManager(
@@ -505,7 +635,7 @@ func TestManagerConcurrentOperations(t *testing.T) {
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 		)
 		require.NoError(t, err)
 
@@ -522,20 +652,14 @@ func TestManagerConcurrentOperations(t *testing.T) {
 		}
 
 		wg.Wait()
-
-		// Verify each domain was processed
-		mu.Lock()
-		defer mu.Unlock()
-		for _, domain := range domains {
-			assert.Equal(t, 1, calls[domain], "Domain %s should be called exactly once", domain)
-		}
+		mockProvider.AssertExpectations(t)
 	})
 
 	t.Run("concurrent read operations", func(t *testing.T) {
 		certPEM, err := generateTestCertificate("example.com")
 		require.NoError(t, err)
 
-		cache := newMockCache()
+		cache := NewMockCache()
 		cache.Put(context.Background(), "example.com", certPEM)
 
 		m, err := letsencrypt.NewManager(
@@ -567,28 +691,27 @@ func TestManagerConcurrentOperations(t *testing.T) {
 
 func TestManagerWithOptions(t *testing.T) {
 	t.Run("with custom ACME provider", func(t *testing.T) {
-		mock := &mockACMEProvider{
-			getCertFunc: func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return &tls.Certificate{}, nil
-			},
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("GetCertificate", mock.Anything).
+			Return(&tls.Certificate{}, nil).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 		)
 		require.NoError(t, err)
 
 		err = m.Generate(context.Background(), "example.com")
 		assert.NoError(t, err)
-		assert.Equal(t, 1, mock.CallCount())
+
+		mockProvider.AssertExpectations(t)
 	})
 
 	t.Run("with custom cache", func(t *testing.T) {
-		cache := newMockCache()
+		cache := NewMockCache()
 		cache.Put(context.Background(), "test.com", []byte("test-cert"))
 
 		m, err := letsencrypt.NewManager(
@@ -610,7 +733,7 @@ func TestManagerHostPolicyWithPort(t *testing.T) {
 		certPEM, err := generateTestCertificate("example.com")
 		require.NoError(t, err)
 
-		cache := newMockCache()
+		cache := NewMockCache()
 		cache.Put(context.Background(), "example.com", certPEM)
 
 		m, err := letsencrypt.NewManager(
@@ -637,23 +760,21 @@ func TestManagerHostPolicyWithPort(t *testing.T) {
 
 func TestManagerHandleChallengeWithMock(t *testing.T) {
 	t.Run("ACME challenge with mock provider", func(t *testing.T) {
-		handlerCalled := false
 		mockHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			handlerCalled = true
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("challenge-response"))
 		})
 
-		mock := &mockACMEProvider{
-			httpHandler: mockHandler,
-		}
+		mockProvider := new(MockACMEProvider)
+		mockProvider.On("HTTPHandler", mock.Anything).
+			Return(mockHandler).Once()
 
 		m, err := letsencrypt.NewManager(
 			letsencrypt.Config{
 				Email:   "test@example.com",
 				CertDir: t.TempDir(),
 			},
-			letsencrypt.WithACMEProvider(mock),
+			letsencrypt.WithACMEProvider(mockProvider),
 		)
 		require.NoError(t, err)
 
@@ -662,8 +783,9 @@ func TestManagerHandleChallengeWithMock(t *testing.T) {
 
 		handled := m.HandleChallenge(w, req)
 		assert.True(t, handled)
-		assert.True(t, handlerCalled)
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "challenge-response", w.Body.String())
+
+		mockProvider.AssertExpectations(t)
 	})
 }
