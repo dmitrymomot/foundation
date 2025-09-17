@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/acme/autocert"
 )
@@ -20,7 +22,6 @@ type Manager struct {
 	mu      sync.RWMutex
 	email   string
 	certDir string
-	staging bool
 	acme    *autocert.Manager
 	cache   autocert.DirCache
 }
@@ -32,9 +33,6 @@ type Config struct {
 
 	// CertDir is the directory to store certificates.
 	CertDir string
-
-	// Staging uses Let's Encrypt staging environment if true.
-	Staging bool
 }
 
 // NewManager creates a new certificate manager.
@@ -51,7 +49,6 @@ func NewManager(cfg Config) (*Manager, error) {
 	m := &Manager{
 		email:   cfg.Email,
 		certDir: cfg.CertDir,
-		staging: cfg.Staging,
 		cache:   cache,
 	}
 
@@ -61,13 +58,6 @@ func NewManager(cfg Config) (*Manager, error) {
 		Prompt:     autocert.AcceptTOS,
 		Email:      cfg.Email,
 		HostPolicy: m.hostPolicy,
-	}
-
-	// Use staging environment if requested
-	if cfg.Staging {
-		// For staging, we need to use a different approach
-		// The autocert package doesn't expose Client directly
-		// We'll handle this differently in production
 	}
 
 	return m, nil
@@ -86,6 +76,7 @@ func (m *Manager) hostPolicy(ctx context.Context, host string) error {
 
 // Generate creates a new certificate for the domain.
 // This is a blocking operation that may take 30-60 seconds.
+// It includes retry logic with exponential backoff for transient failures.
 func (m *Manager) Generate(ctx context.Context, domain string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -95,12 +86,61 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 		ServerName: domain,
 	}
 
-	_, err := m.acme.GetCertificate(hello)
-	if err != nil {
-		return fmt.Errorf("failed to generate certificate for %s: %w", domain, err)
+	// Retry logic with exponential backoff
+	const maxRetries = 3
+	backoff := time.Second * 5
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		_, err := m.acme.GetCertificate(hello)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		// Check if error is retryable (network errors, rate limits)
+		if attempt < maxRetries && isRetryableError(err) {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context canceled during certificate generation for %s: %w", domain, ctx.Err())
+			case <-time.After(backoff):
+				backoff *= 2 // Exponential backoff
+				continue
+			}
+		}
+		break
 	}
 
-	return nil
+	return fmt.Errorf("failed to generate certificate for %s after %d attempts: %w", domain, maxRetries, lastErr)
+}
+
+// isRetryableError checks if an error is retryable (network errors, rate limits)
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for common retryable error patterns
+	errStr := err.Error()
+	retryablePatterns := []string{
+		"connection refused",
+		"network is unreachable",
+		"no such host",
+		"timeout",
+		"rate limit",
+		"429", // Too Many Requests
+		"503", // Service Unavailable
+		"temporary failure",
+	}
+
+	for _, pattern := range retryablePatterns {
+		if strings.Contains(strings.ToLower(errStr), pattern) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Renew forces renewal of an existing certificate.
@@ -110,8 +150,8 @@ func (m *Manager) Renew(ctx context.Context, domain string) error {
 	defer m.mu.Unlock()
 
 	// Delete the existing certificate to force renewal
-	if err := m.cache.Delete(ctx, domain); err != nil {
-		// Ignore error if certificate doesn't exist
+	if err := m.cache.Delete(ctx, domain); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to delete existing certificate: %w", err)
 	}
 
 	// Generate new certificate
@@ -166,7 +206,7 @@ func (m *Manager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, 
 	ctx := context.Background()
 	certBytes, err := m.cache.Get(ctx, domain)
 	if err != nil {
-		return nil, fmt.Errorf("certificate not found for %s", domain)
+		return nil, fmt.Errorf("certificate not found for %s: %w", domain, err)
 	}
 
 	cert, err := tls.X509KeyPair(certBytes, certBytes)

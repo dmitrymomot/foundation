@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Storage provides low-level certificate file operations.
@@ -34,7 +35,7 @@ func (s *Storage) List() ([]string, error) {
 		if !entry.IsDir() {
 			// Skip special files like acme_account+key
 			name := entry.Name()
-			if name != "" && !contains(name, "+") && !contains(name, "_") {
+			if name != "" && !strings.Contains(name, "+") && !strings.Contains(name, "_") {
 				domains = append(domains, name)
 			}
 		}
@@ -115,14 +116,4 @@ func (s *Storage) Copy(srcDomain, dstDomain string) error {
 // Dir returns the storage directory path.
 func (s *Storage) Dir() string {
 	return s.dir
-}
-
-// contains checks if a string contains a substring.
-func contains(s, substr string) bool {
-	for i := 0; i < len(s); i++ {
-		if i+len(substr) <= len(s) && s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
