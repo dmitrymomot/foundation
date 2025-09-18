@@ -34,8 +34,12 @@
 //	github.com/dmitrymomot/foundation/core/config        - Type-safe environment variable loading
 //	github.com/dmitrymomot/foundation/core/cookie        - Secure HTTP cookie management with encryption
 //	github.com/dmitrymomot/foundation/core/email         - Email sending interface with template support
+//	github.com/dmitrymomot/foundation/core/email/templates - Email template rendering using templ
+//	github.com/dmitrymomot/foundation/core/email/templates/components - Reusable email template components
 //	github.com/dmitrymomot/foundation/core/handler       - Type-safe HTTP handler abstractions
+//	github.com/dmitrymomot/foundation/core/health        - HTTP handlers for service health monitoring
 //	github.com/dmitrymomot/foundation/core/i18n          - Internationalization with CLDR plural rules
+//	github.com/dmitrymomot/foundation/core/letsencrypt   - Let's Encrypt certificate management with explicit control
 //	github.com/dmitrymomot/foundation/core/logger        - Structured logging built on slog
 //	github.com/dmitrymomot/foundation/core/queue         - Job queue system with workers and scheduling
 //	github.com/dmitrymomot/foundation/core/response      - HTTP response utilities (JSON, HTML, SSE, WebSocket)
@@ -44,6 +48,7 @@
 //	github.com/dmitrymomot/foundation/core/server        - HTTP server with graceful shutdown
 //	github.com/dmitrymomot/foundation/core/session       - Generic session management system
 //	github.com/dmitrymomot/foundation/core/sessiontransport - Session transport implementations (cookie, JWT)
+//	github.com/dmitrymomot/foundation/core/static        - Handlers for serving static files, directories, and SPAs
 //	github.com/dmitrymomot/foundation/core/storage       - Local filesystem storage with security features
 //	github.com/dmitrymomot/foundation/core/validator     - Rule-based data validation system
 //
@@ -71,6 +76,7 @@
 //	github.com/dmitrymomot/foundation/pkg/token          - Compact URL-safe token generation with HMAC signatures
 //	github.com/dmitrymomot/foundation/pkg/totp           - RFC 6238 TOTP authentication with encrypted secrets
 //	github.com/dmitrymomot/foundation/pkg/useragent      - User-Agent parsing for browser and device detection
+//	github.com/dmitrymomot/foundation/pkg/vectorizer     - Text to vector embeddings using AI providers (OpenAI, Google AI)
 //	github.com/dmitrymomot/foundation/pkg/webhook        - Reliable HTTP webhook delivery with retries
 //
 // # Integration Packages
