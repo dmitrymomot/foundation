@@ -16,40 +16,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/server"
 )
 
-// MockContext implements handler.Context for testing
-type MockContext struct {
-	context.Context
-	req    *http.Request
-	rw     http.ResponseWriter
-	params map[string]string
-	values map[any]any
-}
-
-func (m *MockContext) Request() *http.Request {
-	return m.req
-}
-
-func (m *MockContext) ResponseWriter() http.ResponseWriter {
-	return m.rw
-}
-
-func (m *MockContext) Param(key string) string {
-	if m.params == nil {
-		return ""
-	}
-	return m.params[key]
-}
-
-func (m *MockContext) SetValue(key, val any) {
-	if m.values == nil {
-		m.values = make(map[any]any)
-	}
-	m.values[key] = val
-}
+// MockContext was removed since we no longer use generic handlers
 
 // MockCertificateManager implements server.CertificateManager for testing
 type MockCertificateManager struct {
@@ -121,33 +91,25 @@ func (m *MockDomainStore) GetDomain(ctx context.Context, domain string) (*server
 }
 
 // Test handlers for custom responses
-func testProvisioningHandler() server.ProvisioningHandler[*MockContext] {
-	return func(ctx *MockContext, info *server.DomainInfo) handler.Response {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			w.WriteHeader(http.StatusAccepted)
-			_, err := w.Write([]byte("custom-provisioning"))
-			return err
-		}
+func testProvisioningHandler() server.ProvisioningHandler {
+	return func(w http.ResponseWriter, r *http.Request, info *server.DomainInfo) {
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte("custom-provisioning"))
 	}
 }
 
-func testFailedHandler() server.FailedHandler[*MockContext] {
-	return func(ctx *MockContext, info *server.DomainInfo) handler.Response {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, err := w.Write([]byte("custom-failed"))
-			return err
-		}
+func testFailedHandler() server.FailedHandler {
+	return func(w http.ResponseWriter, r *http.Request, info *server.DomainInfo) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("custom-failed"))
 	}
 }
 
-func testNotFoundHandler() server.NotFoundHandler[*MockContext] {
-	return func(ctx *MockContext) handler.Response {
-		return func(w http.ResponseWriter, r *http.Request) error {
-			w.WriteHeader(http.StatusNotFound)
-			_, err := w.Write([]byte("custom-notfound"))
-			return err
-		}
+func testNotFoundHandler() server.NotFoundHandler {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("custom-notfound"))
+
 	}
 }
 
@@ -157,34 +119,34 @@ func TestNewAutoCertServer(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		config  *server.AutoCertConfig[*MockContext]
-		wantErr string
+		config  *server.AutoCertConfig
+		wantErr error
 	}{
 		{
 			name: "missing certificate manager",
-			config: &server.AutoCertConfig[*MockContext]{
+			config: &server.AutoCertConfig{
 				DomainStore: &MockDomainStore{},
 			},
-			wantErr: "certificate manager is required",
+			wantErr: server.ErrNoCertManager,
 		},
 		{
 			name: "missing domain store",
-			config: &server.AutoCertConfig[*MockContext]{
+			config: &server.AutoCertConfig{
 				CertManager: &MockCertificateManager{},
 			},
-			wantErr: "domain store is required",
+			wantErr: server.ErrNoDomainStore,
 		},
 		{
 			name: "valid config with defaults",
-			config: &server.AutoCertConfig[*MockContext]{
+			config: &server.AutoCertConfig{
 				CertManager: &MockCertificateManager{},
 				DomainStore: &MockDomainStore{},
 			},
-			wantErr: "",
+			wantErr: nil,
 		},
 		{
 			name: "custom handlers and addresses",
-			config: &server.AutoCertConfig[*MockContext]{
+			config: &server.AutoCertConfig{
 				CertManager:         &MockCertificateManager{},
 				DomainStore:         &MockDomainStore{},
 				ProvisioningHandler: testProvisioningHandler(),
@@ -193,16 +155,16 @@ func TestNewAutoCertServer(t *testing.T) {
 				HTTPAddr:            ":8080",
 				HTTPSAddr:           ":8443",
 			},
-			wantErr: "",
+			wantErr: nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			srv, err := server.NewAutoCertServer(tt.config)
-			if tt.wantErr != "" {
+			if tt.wantErr != nil {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
+				assert.ErrorIs(t, err, tt.wantErr)
 				assert.Nil(t, srv)
 			} else {
 				require.NoError(t, err)
@@ -293,7 +255,7 @@ func TestAutoCertServer_GetCertificate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := &server.AutoCertConfig[*MockContext]{
+			config := &server.AutoCertConfig{
 				CertManager: tt.certManager,
 				DomainStore: tt.domainStore,
 			}
@@ -431,7 +393,7 @@ func TestAutoCertServer_HTTPHandler(t *testing.T) {
 				domainStore.domains[tt.host] = tt.domainInfo
 			}
 
-			config := &server.AutoCertConfig[*MockContext]{
+			config := &server.AutoCertConfig{
 				CertManager: certManager,
 				DomainStore: domainStore,
 				HTTPAddr:    ":8080",
@@ -512,7 +474,7 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 	t.Parallel()
 
 	t.Run("successful run and shutdown", func(t *testing.T) {
-		config := &server.AutoCertConfig[*MockContext]{
+		config := &server.AutoCertConfig{
 			CertManager: &MockCertificateManager{},
 			DomainStore: &MockDomainStore{},
 			HTTPAddr:    fmt.Sprintf(":%d", getFreePort(t)),
@@ -547,7 +509,7 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 	})
 
 	t.Run("double run returns error", func(t *testing.T) {
-		config := &server.AutoCertConfig[*MockContext]{
+		config := &server.AutoCertConfig{
 			CertManager: &MockCertificateManager{},
 			DomainStore: &MockDomainStore{},
 			HTTPAddr:    fmt.Sprintf(":%d", getFreePort(t)),
@@ -580,7 +542,7 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 	})
 
 	t.Run("shutdown without run is safe", func(t *testing.T) {
-		config := &server.AutoCertConfig[*MockContext]{
+		config := &server.AutoCertConfig{
 			CertManager: &MockCertificateManager{},
 			DomainStore: &MockDomainStore{},
 		}
@@ -599,39 +561,33 @@ func TestDefaultHandlers(t *testing.T) {
 	t.Parallel()
 
 	t.Run("default provisioning handler", func(t *testing.T) {
-		handler := server.DefaultProvisioningHandler[*MockContext]()
-		ctx := &MockContext{Context: context.Background()}
+		handler := server.DefaultProvisioningHandler(nil)
 		info := &server.DomainInfo{
 			Domain: "test.example.com",
 			Status: server.StatusProvisioning,
 		}
 
-		resp := handler(ctx, info)
 		// Create a test response writer to capture the output
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		err := resp(rec, req)
-		assert.NoError(t, err)
+		handler(rec, req, info)
 		assert.Equal(t, http.StatusAccepted, rec.Code)
 		assert.Contains(t, rec.Body.String(), "test.example.com")
 		assert.Contains(t, rec.Body.String(), "Setting up secure connection")
 	})
 
 	t.Run("default failed handler", func(t *testing.T) {
-		handler := server.DefaultFailedHandler[*MockContext]()
-		ctx := &MockContext{Context: context.Background()}
+		handler := server.DefaultFailedHandler(nil)
 		info := &server.DomainInfo{
 			Domain: "failed.example.com",
 			Status: server.StatusFailed,
 			Error:  "Rate limit exceeded",
 		}
 
-		resp := handler(ctx, info)
 		// Create a test response writer to capture the output
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		err := resp(rec, req)
-		assert.NoError(t, err)
+		handler(rec, req, info)
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 		assert.Contains(t, rec.Body.String(), "failed.example.com")
 		assert.Contains(t, rec.Body.String(), "Rate limit exceeded")
@@ -639,15 +595,12 @@ func TestDefaultHandlers(t *testing.T) {
 	})
 
 	t.Run("default not found handler", func(t *testing.T) {
-		handler := server.DefaultNotFoundHandler[*MockContext]()
-		ctx := &MockContext{Context: context.Background()}
+		handler := server.DefaultNotFoundHandler(nil)
 
-		resp := handler(ctx)
 		// Create a test response writer to capture the output
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		err := resp(rec, req)
-		assert.NoError(t, err)
+		handler(rec, req)
 		assert.Equal(t, http.StatusNotFound, rec.Code)
 		assert.Contains(t, rec.Body.String(), "404")
 		assert.Contains(t, rec.Body.String(), "Domain Not Found")
