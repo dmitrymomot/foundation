@@ -6,20 +6,6 @@ import (
 	"fmt"
 )
 
-var (
-	// ErrEmptyCertPath is returned when certificate or key file paths are empty.
-	ErrEmptyCertPath = errors.New("certificate or key file path cannot be empty")
-
-	// ErrEmptyServerName is returned when server name is empty.
-	ErrEmptyServerName = errors.New("server name cannot be empty")
-
-	// ErrInvalidTLSVersion is returned when an invalid TLS version is specified.
-	ErrInvalidTLSVersion = errors.New("invalid TLS version")
-
-	// ErrInvalidClientAuthType is returned when an invalid client auth type is specified.
-	ErrInvalidClientAuthType = errors.New("invalid client auth type")
-)
-
 // DefaultTLSConfig returns a secure default TLS configuration following
 // Mozilla's Modern compatibility recommendations.
 // Supports TLS 1.2+ with strong cipher suites.
@@ -113,7 +99,7 @@ func WithTLSCertificate(certFile, keyFile string) TLSConfigOption {
 		}
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			return fmt.Errorf("failed to load certificate: %w", err)
+			return errors.Join(ErrFailedLoadCert, err)
 		}
 		cfg.Certificates = append(cfg.Certificates, cert)
 		return nil
@@ -133,7 +119,7 @@ func WithTLSClientAuth(clientAuthType tls.ClientAuthType) TLSConfigOption {
 			cfg.ClientAuth = clientAuthType
 			return nil
 		default:
-			return fmt.Errorf("%w: %d", ErrInvalidClientAuthType, clientAuthType)
+			return errors.Join(ErrInvalidClientAuthType, fmt.Errorf("%d", clientAuthType))
 		}
 	}
 }
@@ -143,12 +129,12 @@ func WithTLSMinVersion(version uint16) TLSConfigOption {
 	return func(cfg *tls.Config) error {
 		// Validate TLS version is within acceptable range
 		if !isValidTLSVersion(version) {
-			return fmt.Errorf("%w: 0x%04x", ErrInvalidTLSVersion, version)
+			return errors.Join(ErrInvalidTLSVersion, fmt.Errorf("0x%04x", version))
 		}
 
 		// Ensure MinVersion <= MaxVersion if MaxVersion is set
 		if cfg.MaxVersion > 0 && version > cfg.MaxVersion {
-			return fmt.Errorf("minimum TLS version (0x%04x) cannot be greater than maximum version (0x%04x)", version, cfg.MaxVersion)
+			return ErrTLSVersionMismatch
 		}
 
 		cfg.MinVersion = version
@@ -161,12 +147,12 @@ func WithTLSMaxVersion(version uint16) TLSConfigOption {
 	return func(cfg *tls.Config) error {
 		// Validate TLS version is within acceptable range
 		if !isValidTLSVersion(version) {
-			return fmt.Errorf("%w: 0x%04x", ErrInvalidTLSVersion, version)
+			return errors.Join(ErrInvalidTLSVersion, fmt.Errorf("0x%04x", version))
 		}
 
 		// Ensure MinVersion <= MaxVersion if MinVersion is set
 		if cfg.MinVersion > 0 && version < cfg.MinVersion {
-			return fmt.Errorf("maximum TLS version (0x%04x) cannot be less than minimum version (0x%04x)", version, cfg.MinVersion)
+			return ErrTLSVersionMismatch
 		}
 
 		cfg.MaxVersion = version

@@ -3,16 +3,14 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
+	"errors"
 	"html/template"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/dmitrymomot/foundation/core/handler"
-	"github.com/dmitrymomot/foundation/core/response"
 )
 
 // CertificateManager defines the interface for certificate operations
@@ -70,20 +68,20 @@ const (
 	StatusFailed DomainStatus = "failed"
 )
 
-// Handler function types for status pages using generic context
+// Handler function types for status pages
 type (
 	// ProvisioningHandler handles requests when certificate is being generated
-	ProvisioningHandler[C handler.Context] func(ctx C, info *DomainInfo) handler.Response
+	ProvisioningHandler func(w http.ResponseWriter, r *http.Request, info *DomainInfo)
 
 	// FailedHandler handles requests when certificate generation failed
-	FailedHandler[C handler.Context] func(ctx C, info *DomainInfo) handler.Response
+	FailedHandler func(w http.ResponseWriter, r *http.Request, info *DomainInfo)
 
 	// NotFoundHandler handles requests for unregistered domains
-	NotFoundHandler[C handler.Context] func(ctx C) handler.Response
+	NotFoundHandler func(w http.ResponseWriter, r *http.Request)
 )
 
 // AutoCertConfig holds configuration for automatic HTTPS with certificates.
-type AutoCertConfig[C handler.Context] struct {
+type AutoCertConfig struct {
 	// CertManager manages certificate operations
 	CertManager CertificateManager
 
@@ -91,13 +89,13 @@ type AutoCertConfig[C handler.Context] struct {
 	DomainStore DomainStore
 
 	// ProvisioningHandler handles requests during certificate provisioning
-	ProvisioningHandler ProvisioningHandler[C]
+	ProvisioningHandler ProvisioningHandler
 
 	// FailedHandler handles requests when certificate generation failed
-	FailedHandler FailedHandler[C]
+	FailedHandler FailedHandler
 
 	// NotFoundHandler handles requests for unregistered domains
-	NotFoundHandler NotFoundHandler[C]
+	NotFoundHandler NotFoundHandler
 
 	// HTTPAddr is the address for the HTTP server (default ":80")
 	HTTPAddr string
@@ -110,30 +108,34 @@ type AutoCertConfig[C handler.Context] struct {
 }
 
 // AutoCertServer provides automatic HTTPS with certificate management.
-type AutoCertServer[C handler.Context] struct {
+type AutoCertServer struct {
 	mu          sync.RWMutex
-	config      *AutoCertConfig[C]
+	config      *AutoCertConfig
 	httpServer  *http.Server
 	httpsServer *http.Server
 	running     bool
 }
 
 // NewAutoCertServer creates a new server with automatic HTTPS support.
-func NewAutoCertServer[C handler.Context](cfg *AutoCertConfig[C]) (*AutoCertServer[C], error) {
+func NewAutoCertServer(cfg *AutoCertConfig) (*AutoCertServer, error) {
 	if cfg.CertManager == nil {
-		return nil, fmt.Errorf("certificate manager is required")
+		return nil, ErrNoCertManager
 	}
 	if cfg.DomainStore == nil {
-		return nil, fmt.Errorf("domain store is required")
+		return nil, ErrNoDomainStore
+	}
+	// Initialize logger with no-op logger by default (discards all logs)
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	if cfg.ProvisioningHandler == nil {
-		cfg.ProvisioningHandler = DefaultProvisioningHandler[C]()
+		cfg.ProvisioningHandler = DefaultProvisioningHandler(cfg.Logger)
 	}
 	if cfg.FailedHandler == nil {
-		cfg.FailedHandler = DefaultFailedHandler[C]()
+		cfg.FailedHandler = DefaultFailedHandler(cfg.Logger)
 	}
 	if cfg.NotFoundHandler == nil {
-		cfg.NotFoundHandler = DefaultNotFoundHandler[C]()
+		cfg.NotFoundHandler = DefaultNotFoundHandler(cfg.Logger)
 	}
 	if cfg.HTTPAddr == "" {
 		cfg.HTTPAddr = ":80"
@@ -141,35 +143,59 @@ func NewAutoCertServer[C handler.Context](cfg *AutoCertConfig[C]) (*AutoCertServ
 	if cfg.HTTPSAddr == "" {
 		cfg.HTTPSAddr = ":443"
 	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
-	}
 
-	return &AutoCertServer[C]{
+	return &AutoCertServer{
 		config: cfg,
 	}, nil
 }
 
 // DefaultProvisioningHandler returns a default provisioning page handler.
-func DefaultProvisioningHandler[C handler.Context]() ProvisioningHandler[C] {
-	return func(ctx C, info *DomainInfo) handler.Response {
+func DefaultProvisioningHandler(logger *slog.Logger) ProvisioningHandler {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return func(w http.ResponseWriter, r *http.Request, info *DomainInfo) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+		w.WriteHeader(http.StatusAccepted)
 		html := buildProvisioningHTML(info)
-		return response.HTMLWithStatus(html, http.StatusAccepted)
+		if _, err := w.Write([]byte(html)); err != nil {
+			logger.ErrorContext(r.Context(), "failed to write provisioning HTML",
+				"domain", info.Domain,
+				"error", err)
+		}
 	}
 }
 
 // DefaultFailedHandler returns a default failed page handler.
-func DefaultFailedHandler[C handler.Context]() FailedHandler[C] {
-	return func(ctx C, info *DomainInfo) handler.Response {
+func DefaultFailedHandler(logger *slog.Logger) FailedHandler {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return func(w http.ResponseWriter, r *http.Request, info *DomainInfo) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
 		html := buildFailedHTML(info)
-		return response.HTMLWithStatus(html, http.StatusServiceUnavailable)
+		if _, err := w.Write([]byte(html)); err != nil {
+			logger.ErrorContext(r.Context(), "failed to write failed HTML",
+				"domain", info.Domain,
+				"error", err)
+		}
 	}
 }
 
 // DefaultNotFoundHandler returns a default not found page handler.
-func DefaultNotFoundHandler[C handler.Context]() NotFoundHandler[C] {
-	return func(ctx C) handler.Response {
-		return response.HTMLWithStatus(defaultNotFoundHTML, http.StatusNotFound)
+func DefaultNotFoundHandler(logger *slog.Logger) NotFoundHandler {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		if _, err := w.Write([]byte(defaultNotFoundHTML)); err != nil {
+			logger.ErrorContext(r.Context(), "failed to write not found HTML",
+				"error", err)
+		}
 	}
 }
 
@@ -357,11 +383,11 @@ const defaultNotFoundHTML = `<!DOCTYPE html>
 // Run starts both HTTP and HTTPS servers with the provided handler.
 // The HTTP server handles ACME challenges and redirects to HTTPS.
 // The HTTPS server serves the application with TLS.
-func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error {
+func (s *AutoCertServer) Run(ctx context.Context, handler http.Handler) error {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
-		return fmt.Errorf("server is already running")
+		return ErrServerAlreadyRunning
 	}
 	s.running = true
 	s.mu.Unlock()
@@ -395,14 +421,14 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 	go func() {
 		s.config.Logger.InfoContext(ctx, "starting HTTP server", "addr", s.config.HTTPAddr)
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("HTTP server error: %w", err)
+			errCh <- errors.Join(ErrHTTPServer, err)
 		}
 	}()
 
 	go func() {
 		s.config.Logger.InfoContext(ctx, "starting HTTPS server", "addr", s.config.HTTPSAddr)
 		if err := s.httpsServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
-			errCh <- fmt.Errorf("HTTPS server error: %w", err)
+			errCh <- errors.Join(ErrHTTPSServer, err)
 		}
 	}()
 
@@ -421,7 +447,7 @@ func (s *AutoCertServer[C]) Run(ctx context.Context, handler http.Handler) error
 
 // createHTTPHandler creates the HTTP handler for port 80.
 // It handles ACME challenges and redirects to HTTPS when appropriate.
-func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
+func (s *AutoCertServer) createHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.config.CertManager.HandleChallenge(w, r) {
 			return
@@ -442,7 +468,7 @@ func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
 			return
 		}
 		if info == nil {
-			http.NotFound(w, r)
+			s.config.NotFoundHandler(w, r)
 			return
 		}
 
@@ -454,58 +480,40 @@ func (s *AutoCertServer[C]) createHTTPHandler() http.Handler {
 
 		switch info.Status {
 		case StatusProvisioning:
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-			w.WriteHeader(http.StatusAccepted)
-			if _, err := w.Write([]byte(buildProvisioningHTML(info))); err != nil {
-				s.config.Logger.ErrorContext(ctx, "failed to write provisioning HTML",
-					"domain", domain,
-					"error", err)
-			}
+			s.config.ProvisioningHandler(w, r, info)
 		case StatusFailed:
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if _, err := w.Write([]byte(buildFailedHTML(info))); err != nil {
-				s.config.Logger.ErrorContext(ctx, "failed to write failed HTML",
-					"domain", domain,
-					"error", err)
-			}
+			s.config.FailedHandler(w, r, info)
 		default:
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusAccepted)
-			if _, err := w.Write([]byte(buildProvisioningHTML(info))); err != nil {
-				s.config.Logger.ErrorContext(ctx, "failed to write default HTML",
-					"domain", domain,
-					"error", err)
-			}
+			// Default to provisioning state for any other status
+			s.config.ProvisioningHandler(w, r, info)
 		}
 	})
 }
 
 // getCertificate retrieves certificates for TLS handshake.
 // Only returns certificates that exist, never generates new ones.
-func (s *AutoCertServer[C]) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (s *AutoCertServer) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	domain := hello.ServerName
 	if domain == "" {
-		return nil, fmt.Errorf("no server name provided")
+		return nil, ErrNoServerName
 	}
 
 	// Use timeout to prevent slow domain lookups from blocking TLS handshake
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(hello.Context(), 10*time.Second)
 	defer cancel()
 	info, err := s.config.DomainStore.GetDomain(ctx, domain)
 	if err != nil {
-		return nil, fmt.Errorf("domain lookup failed: %w", err)
+		return nil, errors.Join(ErrDomainLookupFailed, err)
 	}
 	if info == nil {
-		return nil, fmt.Errorf("domain not registered: %s", domain)
+		return nil, ErrDomainNotRegistered
 	}
 
 	return s.config.CertManager.GetCertificate(hello)
 }
 
 // Shutdown gracefully shuts down both HTTP and HTTPS servers.
-func (s *AutoCertServer[C]) Shutdown(ctx context.Context) error {
+func (s *AutoCertServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -531,10 +539,10 @@ func (s *AutoCertServer[C]) Shutdown(ctx context.Context) error {
 	s.running = false
 
 	if httpErr != nil {
-		return fmt.Errorf("HTTP shutdown error: %w", httpErr)
+		return errors.Join(ErrHTTPShutdown, httpErr)
 	}
 	if httpsErr != nil {
-		return fmt.Errorf("HTTPS shutdown error: %w", httpsErr)
+		return errors.Join(ErrHTTPSShutdown, httpsErr)
 	}
 
 	s.config.Logger.InfoContext(ctx, "servers shutdown complete")
