@@ -499,7 +499,7 @@ func (s *AutoCertServer) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certif
 	}
 
 	// Use timeout to prevent slow domain lookups from blocking TLS handshake
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(hello.Context(), 10*time.Second)
 	defer cancel()
 	info, err := s.config.DomainStore.GetDomain(ctx, domain)
 	if err != nil {
