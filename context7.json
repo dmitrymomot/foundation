@@ -1,0 +1,34 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Foundation - Go Web Toolkit",
+  "description": "Secure Go toolkit for building web applications with type-safe handlers, middleware, and utilities",
+  "branch": "main",
+  "folders": ["core/*", "middleware", "pkg/*", "integration/**/*"],
+  "excludeFolders": [".github", ".git", ".claude", "vendor", "tmp", "dist", "build"],
+  "excludeFiles": [
+    "*.test.go",
+    "*_test.go",
+    "go.sum",
+    ".gitignore",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "*.json",
+    "*.yml",
+    "*.md"
+  ],
+  "rules": [
+    "FIRST: Run `go doc -all github.com/dmitrymomot/foundation` to get the complete packages index with descriptions",
+    "THEN: Use `go doc -all github.com/dmitrymomot/foundation/core/binder` (example) for detailed package documentation",
+    "Core packages: core/router, core/handler, core/binder, core/response, core/session, core/validator, core/sanitizer",
+    "Middleware: github.com/dmitrymomot/foundation/middleware for CORS, JWT auth, rate limiting, security headers",
+    "Utilities: pkg/jwt, pkg/totp, pkg/webhook, pkg/async, pkg/ratelimiter, pkg/secrets, pkg/token",
+    "Database: integration/database/pg (PostgreSQL), integration/database/redis, integration/database/mongo",
+    "External services: integration/email/postmark, integration/email/smtp, integration/storage/s3",
+    "Each package has comprehensive doc.go with examples - always check it first",
+    "Use generics: HandlerFunc[C Context] where C is custom context (e.g., *router.Context)",
+    "Configure with functional options: WithStore(), WithTimeout(), WithTransport()",
+    "Foundation requires Go 1.23+ for generics support",
+    "The main doc.go file contains full package list with import paths and descriptions"
+  ]
+}
