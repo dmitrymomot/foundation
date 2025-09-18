@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -44,7 +43,7 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
-		return fmt.Errorf("server is already running")
+		return ErrServerAlreadyRunning
 	}
 	s.running = true
 
