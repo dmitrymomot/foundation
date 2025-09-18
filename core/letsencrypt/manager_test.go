@@ -18,11 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/foundation/core/letsencrypt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/acme/autocert"
+
+	"github.com/dmitrymomot/foundation/core/letsencrypt"
 )
 
 // MockACMEProvider is a mock implementation of ACMEProvider using testify/mock

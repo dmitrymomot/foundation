@@ -4,9 +4,10 @@ import (
 	"crypto/tls"
 	"testing"
 
-	"github.com/dmitrymomot/foundation/core/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/server"
 )
 
 func TestDefaultTLSConfig(t *testing.T) {
