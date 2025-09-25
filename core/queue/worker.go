@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"sync"
@@ -65,7 +66,7 @@ func NewWorker(repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
 		pullInterval:       5 * time.Second,
 		lockTimeout:        5 * time.Minute,
 		maxConcurrentTasks: 1,
-		logger:             slog.Default(),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
 	}
 
 	// Apply options
