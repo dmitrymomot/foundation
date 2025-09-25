@@ -290,7 +290,7 @@
 //   - Read/Write timeout: 15 seconds
 //   - Idle timeout: 60 seconds
 //   - Shutdown timeout: 30 seconds
-//   - Logger: slog.Default()
+//   - Logger: No-op logger (writes to io.Discard)
 //   - AutoCertServer addresses: :80 (HTTP), :443 (HTTPS)
 //
 // # Interfaces
