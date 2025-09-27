@@ -43,6 +43,19 @@ func NewEnqueuer(repo EnqueuerRepository, opts ...EnqueuerOption) (*Enqueuer, er
 	}, nil
 }
 
+// NewEnqueuerFromConfig creates an Enqueuer from configuration.
+// Repository must be provided. Additional options can override config values.
+func NewEnqueuerFromConfig(cfg Config, repo EnqueuerRepository, opts ...EnqueuerOption) (*Enqueuer, error) {
+	// Combine config options with user-provided options (user options override)
+	// Option functions handle zero/empty values appropriately
+	allOpts := append([]EnqueuerOption{
+		WithDefaultQueue(cfg.DefaultQueue),
+		WithDefaultPriority(cfg.DefaultPriority),
+	}, opts...)
+
+	return NewEnqueuer(repo, allOpts...)
+}
+
 // Enqueue adds a new task to the queue with the given payload and options.
 func (e *Enqueuer) Enqueue(ctx context.Context, payload any, opts ...EnqueueOption) error {
 	if payload == nil {

@@ -65,6 +65,18 @@ func NewScheduler(repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler
 	}, nil
 }
 
+// NewSchedulerFromConfig creates a Scheduler from configuration.
+// Repository must be provided. Additional options can override config values.
+func NewSchedulerFromConfig(cfg Config, repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler, error) {
+	// Combine config options with user-provided options (user options override)
+	// Option functions handle zero/empty values appropriately
+	allOpts := append([]SchedulerOption{
+		WithCheckInterval(cfg.CheckInterval),
+	}, opts...)
+
+	return NewScheduler(repo, allOpts...)
+}
+
 // AddTask registers a periodic task
 func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTaskOption) error {
 	// Default task options
@@ -99,7 +111,8 @@ func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTas
 	s.tasks[name] = task
 
 	// Log registration
-	s.logger.Info("registered periodic task",
+	// Use context.Background() since this is during registration
+	s.logger.InfoContext(context.Background(), "registered periodic task",
 		slog.String("task_name", name),
 		slog.String("schedule", schedule.String()))
 
@@ -127,7 +140,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Info("scheduler shutting down")
+			s.logger.InfoContext(ctx, "scheduler shutting down")
 			return ctx.Err()
 		case <-s.ticker.C:
 			s.checkTasks(ctx)
@@ -150,7 +163,7 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 	// Check each task
 	for _, task := range tasks {
 		if err := s.scheduleTaskIfNeeded(ctx, task, now); err != nil {
-			s.logger.Error("failed to schedule task",
+			s.logger.ErrorContext(ctx, "failed to schedule task",
 				slog.String("task_name", task.name),
 				slog.String("error", err.Error()))
 		}
@@ -171,7 +184,7 @@ func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTas
 	if err == nil && existing != nil {
 		// Task exists - just update our state
 		s.updateTaskState(task.name, &existing.ScheduledAt)
-		s.logger.Debug("periodic task already pending",
+		s.logger.DebugContext(ctx, "periodic task already pending",
 			slog.String("task_name", task.name),
 			slog.Time("scheduled_for", existing.ScheduledAt))
 		return nil
@@ -187,11 +200,11 @@ func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTas
 
 	// Log success
 	if task.lastScheduledAt == nil {
-		s.logger.Info("created periodic task (first run)",
+		s.logger.InfoContext(ctx, "created periodic task (first run)",
 			slog.String("task_name", task.name),
 			slog.Time("scheduled_for", nextRun))
 	} else {
-		s.logger.Info("created periodic task",
+		s.logger.InfoContext(ctx, "created periodic task",
 			slog.String("task_name", task.name),
 			slog.Time("scheduled_for", nextRun))
 	}
@@ -218,7 +231,8 @@ func (s *Scheduler) shouldScheduleTask(task *scheduledTask, nextRun, now time.Ti
 
 	// Skip if not due yet
 	if nextRun.After(now) {
-		s.logger.Debug("periodic task not due yet",
+		// Use context.Background() for debug logging in this utility method
+		s.logger.DebugContext(context.Background(), "periodic task not due yet",
 			slog.String("task_name", task.name),
 			slog.Time("next_run", nextRun))
 		return false
@@ -263,7 +277,7 @@ func (s *Scheduler) RemoveTask(name string) {
 
 	delete(s.tasks, name)
 
-	s.logger.Info("removed periodic task",
+	s.logger.InfoContext(context.Background(), "removed periodic task",
 		slog.String("task_name", name))
 }
 

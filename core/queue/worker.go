@@ -86,6 +86,21 @@ func NewWorker(repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
 	}, nil
 }
 
+// NewWorkerFromConfig creates a Worker from configuration.
+// Repository must be provided. Additional options can override config values.
+func NewWorkerFromConfig(cfg Config, repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
+	// Combine config options with user-provided options (user options override)
+	// Option functions handle zero/empty values appropriately
+	allOpts := append([]WorkerOption{
+		WithPullInterval(cfg.PollInterval),
+		WithLockTimeout(cfg.LockTimeout),
+		WithMaxConcurrentTasks(cfg.MaxConcurrentTasks),
+		WithQueues(cfg.Queues...),
+	}, opts...)
+
+	return NewWorker(repo, allOpts...)
+}
+
 // RegisterHandler registers a single task handler
 func (w *Worker) RegisterHandler(handler Handler) error {
 	if handler == nil {
@@ -131,7 +146,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	// Start the main processing loop
 	go w.run()
 
-	w.logger.Info("worker started",
+	w.logger.InfoContext(w.ctx, "worker started",
 		slog.String("worker_id", w.workerID.String()),
 		slog.Any("queues", w.queues),
 		slog.Int("max_concurrent", cap(w.sem)))
@@ -160,12 +175,13 @@ func (w *Worker) Stop() error {
 	cancel()
 
 	// Wait for all active tasks to complete
-	w.logger.Info("worker stopping, waiting for active tasks to complete",
+	// Use context.Background() since w.ctx is cancelled
+	w.logger.InfoContext(context.Background(), "worker stopping, waiting for active tasks to complete",
 		slog.String("worker_id", w.workerID.String()))
 
 	w.wg.Wait()
 
-	w.logger.Info("worker stopped",
+	w.logger.InfoContext(context.Background(), "worker stopped",
 		slog.String("worker_id", w.workerID.String()))
 
 	return nil
@@ -216,7 +232,7 @@ func (w *Worker) run() {
 
 					if err := w.pullAndProcess(); err != nil {
 						if err != ErrHandlerNotFound {
-							w.logger.Error("failed to process task",
+							w.logger.ErrorContext(w.ctx, "failed to process task",
 								slog.String("worker_id", w.workerID.String()),
 								slog.String("error", err.Error()))
 						}
@@ -224,7 +240,7 @@ func (w *Worker) run() {
 				}()
 			default:
 				// All slots busy, skip this tick
-				w.logger.Debug("all worker slots busy, skipping tick",
+				w.logger.DebugContext(w.ctx, "all worker slots busy, skipping tick",
 					slog.String("worker_id", w.workerID.String()))
 			}
 		}
@@ -248,7 +264,7 @@ func (w *Worker) pullAndProcess() error {
 		return nil
 	}
 
-	w.logger.Debug("claimed task",
+	w.logger.DebugContext(w.ctx, "claimed task",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName),
@@ -266,7 +282,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			retErr = fmt.Errorf("panic in handler: %v", r)
-			w.logger.Error("handler panicked",
+			w.logger.ErrorContext(w.ctx, "handler panicked",
 				slog.String("worker_id", w.workerID.String()),
 				slog.String("task_id", task.ID.String()),
 				slog.String("task_name", task.TaskName),
@@ -311,7 +327,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 // 2. Manually requeue tasks from DLQ once handler is available
 // 3. Investigate why tasks were enqueued without corresponding handlers
 func (w *Worker) handleMissingHandler(task *Task) error {
-	w.logger.Error("no handler registered for task type",
+	w.logger.ErrorContext(w.ctx, "no handler registered for task type",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName))
@@ -343,7 +359,7 @@ func (w *Worker) handleMissingHandler(task *Task) error {
 // - Implement exponential backoff strategies
 // - Maintain audit trails of task processing attempts
 func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Duration) error {
-	w.logger.Error("task failed",
+	w.logger.ErrorContext(w.ctx, "task failed",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName),
@@ -364,7 +380,7 @@ func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Dura
 			return fmt.Errorf("failed to move task %s to DLQ after max retries: %w", task.ID, err)
 		}
 
-		w.logger.Warn("task moved to dead letter queue",
+		w.logger.WarnContext(w.ctx, "task moved to dead letter queue",
 			slog.String("worker_id", w.workerID.String()),
 			slog.String("task_id", task.ID.String()),
 			slog.String("task_name", task.TaskName))
@@ -381,7 +397,7 @@ func (w *Worker) handleTaskSuccess(task *Task, duration time.Duration) error {
 		return fmt.Errorf("failed to mark task %s as completed: %w", task.ID, err)
 	}
 
-	w.logger.Info("task completed successfully",
+	w.logger.InfoContext(w.ctx, "task completed successfully",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName),
@@ -401,4 +417,35 @@ func (w *Worker) ExtendLockForTask(ctx context.Context, taskID uuid.UUID, extens
 func (w *Worker) WorkerInfo() (id string, hostname string, pid int) {
 	hostname, _ = os.Hostname()
 	return w.workerID.String(), hostname, os.Getpid()
+}
+
+// HandlerCount returns the number of registered handlers.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) HandlerCount() int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return len(w.handlers)
+}
+
+// HasHandlers returns true if the worker has registered handlers.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) HasHandlers() bool {
+	return w.HandlerCount() > 0
+}
+
+// Queues returns the list of queues this worker processes.
+// If no queues are configured, returns the default queue.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) Queues() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if len(w.queues) == 0 {
+		return []string{DefaultQueueName}
+	}
+
+	// Return a copy to prevent external modification
+	result := make([]string, len(w.queues))
+	copy(result, w.queues)
+	return result
 }
