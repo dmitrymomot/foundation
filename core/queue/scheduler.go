@@ -65,6 +65,27 @@ func NewScheduler(repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler
 	}, nil
 }
 
+// NewSchedulerFromConfig creates a Scheduler from configuration.
+// Repository must be provided. Additional options can override config values.
+func NewSchedulerFromConfig(cfg Config, repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+
+	// Build options from config
+	configOpts := make([]SchedulerOption, 0)
+
+	// Apply scheduler configuration
+	if cfg.CheckInterval > 0 {
+		configOpts = append(configOpts, WithCheckInterval(cfg.CheckInterval))
+	}
+
+	// Combine config options with user-provided options (user options override)
+	allOpts := append(configOpts, opts...)
+
+	return NewScheduler(repo, allOpts...)
+}
+
 // AddTask registers a periodic task
 func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTaskOption) error {
 	// Default task options

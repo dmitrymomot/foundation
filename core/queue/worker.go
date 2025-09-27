@@ -86,6 +86,36 @@ func NewWorker(repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
 	}, nil
 }
 
+// NewWorkerFromConfig creates a Worker from configuration.
+// Repository must be provided. Additional options can override config values.
+func NewWorkerFromConfig(cfg Config, repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
+	if repo == nil {
+		return nil, ErrRepositoryNil
+	}
+
+	// Build options from config
+	configOpts := make([]WorkerOption, 0)
+
+	// Apply worker configuration
+	if cfg.PollInterval > 0 {
+		configOpts = append(configOpts, WithPullInterval(cfg.PollInterval))
+	}
+	if cfg.LockTimeout > 0 {
+		configOpts = append(configOpts, WithLockTimeout(cfg.LockTimeout))
+	}
+	if cfg.MaxConcurrentTasks > 0 {
+		configOpts = append(configOpts, WithMaxConcurrentTasks(cfg.MaxConcurrentTasks))
+	}
+	if len(cfg.Queues) > 0 {
+		configOpts = append(configOpts, WithQueues(cfg.Queues...))
+	}
+
+	// Combine config options with user-provided options (user options override)
+	allOpts := append(configOpts, opts...)
+
+	return NewWorker(repo, allOpts...)
+}
+
 // RegisterHandler registers a single task handler
 func (w *Worker) RegisterHandler(handler Handler) error {
 	if handler == nil {
