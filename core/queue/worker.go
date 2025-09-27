@@ -427,6 +427,12 @@ func (w *Worker) HandlerCount() int {
 	return len(w.handlers)
 }
 
+// HasHandlers returns true if the worker has registered handlers.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) HasHandlers() bool {
+	return w.HandlerCount() > 0
+}
+
 // Queues returns the list of queues this worker processes.
 // If no queues are configured, returns the default queue.
 // This method is thread-safe and can be called at any time.
@@ -442,12 +448,4 @@ func (w *Worker) Queues() []string {
 	result := make([]string, len(w.queues))
 	copy(result, w.queues)
 	return result
-}
-
-// HasHandlers returns true if the worker has registered handlers.
-// This method is thread-safe and can be called at any time.
-func (w *Worker) HasHandlers() bool {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return len(w.handlers) > 0
 }
