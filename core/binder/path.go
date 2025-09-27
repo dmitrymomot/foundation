@@ -68,7 +68,7 @@ import (
 //		}
 //		// Process req...
 //	})
-func Path(extractor func(r *http.Request, fieldName string) string) func(r *http.Request, v any) error {
+func Path(extractor func(r *http.Request, fieldName string) string) Binder {
 	return func(r *http.Request, v any) error {
 		if extractor == nil {
 			return fmt.Errorf("%w: extractor function is nil", ErrFailedToParsePath)

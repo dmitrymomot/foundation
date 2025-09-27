@@ -38,7 +38,7 @@ import (
 //	}
 //
 //	http.HandleFunc("/search", searchHandler)
-func Query() func(r *http.Request, v any) error {
+func Query() Binder {
 	return func(r *http.Request, v any) error {
 		return bindToStruct(v, "query", r.URL.Query(), ErrFailedToParseQuery)
 	}
