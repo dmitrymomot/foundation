@@ -19,4 +19,6 @@ var (
 	ErrFailedToUpdateTaskStatus = errors.New("failed to update task status")
 	ErrFailedToMoveToDLQ        = errors.New("failed to move task to dead letter queue")
 	ErrNoTaskToClaim            = errors.New("no task available to claim")
+	ErrServiceNotConfiguring    = errors.New("service is not in configuration state")
+	ErrServiceAlreadyRunning    = errors.New("service is already running or stopped")
 )

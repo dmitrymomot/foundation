@@ -418,3 +418,36 @@ func (w *Worker) WorkerInfo() (id string, hostname string, pid int) {
 	hostname, _ = os.Hostname()
 	return w.workerID.String(), hostname, os.Getpid()
 }
+
+// HandlerCount returns the number of registered handlers.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) HandlerCount() int {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return len(w.handlers)
+}
+
+// Queues returns the list of queues this worker processes.
+// If no queues are configured, returns the default queue.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) Queues() []string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if len(w.queues) == 0 {
+		return []string{DefaultQueueName}
+	}
+
+	// Return a copy to prevent external modification
+	result := make([]string, len(w.queues))
+	copy(result, w.queues)
+	return result
+}
+
+// HasHandlers returns true if the worker has registered handlers.
+// This method is thread-safe and can be called at any time.
+func (w *Worker) HasHandlers() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return len(w.handlers) > 0
+}

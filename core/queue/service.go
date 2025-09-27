@@ -6,29 +6,88 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 )
 
+// ServiceState represents the lifecycle state of the service.
+type ServiceState int32
+
+const (
+	// StateConfiguring indicates the service is being configured.
+	// Handlers and scheduled tasks can only be registered in this state.
+	StateConfiguring ServiceState = iota
+
+	// StateRunning indicates the service is running.
+	// No configuration changes are allowed in this state.
+	StateRunning
+
+	// StateStopped indicates the service has stopped.
+	StateStopped
+)
+
+// String returns a string representation of the service state.
+func (s ServiceState) String() string {
+	switch s {
+	case StateConfiguring:
+		return "configuring"
+	case StateRunning:
+		return "running"
+	case StateStopped:
+		return "stopped"
+	default:
+		return "unknown"
+	}
+}
+
+// ServiceConfig holds runtime configuration for the service.
+type ServiceConfig struct {
+	// SkipWorkerIfNoHandlers skips starting the worker if no handlers are registered.
+	SkipWorkerIfNoHandlers bool
+
+	// SkipSchedulerIfNoTasks skips starting the scheduler if no tasks are scheduled.
+	SkipSchedulerIfNoTasks bool
+
+	// RequireHandlers causes Run() to fail if no handlers are registered.
+	RequireHandlers bool
+
+	// RequireScheduledTasks causes Run() to fail if no tasks are scheduled.
+	RequireScheduledTasks bool
+}
+
 // Service provides a unified management interface for queue system components.
 // It orchestrates Worker, Scheduler, and Enqueuer instances, handling their
 // lifecycle and providing convenient access methods for other modules.
 //
-// The Service is designed to be easily integrated into applications requiring
-// background task processing, scheduled jobs, and asynchronous work queues.
+// The Service follows a configure-then-run pattern where all handlers and
+// scheduled tasks must be registered before calling Run(). Once Run() is called,
+// the service transitions to a running state and no further configuration is allowed.
+//
+// This design ensures thread-safety and eliminates race conditions between
+// configuration and execution.
 type Service struct {
+	// Components
 	worker    *Worker
 	scheduler *Scheduler
 	enqueuer  *Enqueuer
 	storage   Storage
 	logger    *slog.Logger
 
-	// Configuration for conditional startup
-	skipWorkerIfNoHandlers bool
-	skipSchedulerIfNoTasks bool
+	// State management
+	state   atomic.Int32 // Current service state
+	stateMu sync.RWMutex // Protects state transitions
 
-	// Hooks for custom initialization
+	// Readiness signaling
+	ready    chan struct{} // Closed when service is fully started
+	stopOnce sync.Once     // Ensures Stop() cleanup runs once
+
+	// Configuration
+	config ServiceConfig
+
+	// Lifecycle hooks
 	beforeStart func(context.Context) error
 	afterStop   func() error
 }
@@ -100,13 +159,18 @@ func NewService(storage Storage, opts ...ServiceOption) (*Service, error) {
 
 	// Default service configuration with no-op logger
 	s := &Service{
-		storage:                storage,
-		logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
-		skipWorkerIfNoHandlers: true,
-		skipSchedulerIfNoTasks: true,
+		storage: storage,
+		logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ready:   make(chan struct{}),
+		config: ServiceConfig{
+			SkipWorkerIfNoHandlers: true,
+			SkipSchedulerIfNoTasks: true,
+		},
 	}
 
-	// Create default components first
+	// Initialize state to configuring
+	s.state.Store(int32(StateConfiguring))
+
 	// Create enqueuer (always needed for enqueueing tasks)
 	enqueuer, err := NewEnqueuer(storage)
 	if err != nil {
@@ -164,12 +228,28 @@ func NewServiceFromConfig(cfg Config, storage Storage, opts ...ServiceOption) (*
 }
 
 // Run starts the queue service components in an error group.
+// After calling Run(), no more handlers or scheduled tasks can be registered.
 // Components are started conditionally based on service configuration:
 // - Worker starts only if handlers are registered (unless forced)
 // - Scheduler starts only if tasks are scheduled (unless forced)
 //
 // The method blocks until the context is cancelled or an error occurs.
 func (s *Service) Run(ctx context.Context) error {
+	// Transition to running state
+	if !s.transitionToRunning() {
+		return ErrServiceAlreadyRunning
+	}
+
+	// Ensure we transition to stopped state on exit
+	defer func() {
+		s.state.Store(int32(StateStopped))
+	}()
+
+	// Validate configuration
+	if err := s.validate(); err != nil {
+		return fmt.Errorf("service validation failed: %w", err)
+	}
+
 	// Run before start hook if provided
 	if s.beforeStart != nil {
 		if err := s.beforeStart(ctx); err != nil {
@@ -180,61 +260,55 @@ func (s *Service) Run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Start worker conditionally
-	eg.Go(func() error {
-		// Check if worker should be skipped
-		if s.skipWorkerIfNoHandlers && len(s.worker.handlers) == 0 {
-			s.logger.InfoContext(ctx, "no task handlers registered, worker will not start")
-			return nil
-		}
+	if s.shouldStartWorker() {
+		eg.Go(func() error {
+			// Get worker info through public methods
+			handlerCount := s.worker.HandlerCount()
+			queues := s.worker.Queues()
 
-		queues := s.worker.queues
-		if len(queues) == 0 {
-			queues = []string{DefaultQueueName}
-		}
-
-		s.logger.InfoContext(ctx, "starting queue worker",
-			slog.Any("queues", queues),
-		)
-
-		err := s.worker.Start(ctx)
-		if errors.Is(err, ErrNoHandlers) && s.skipWorkerIfNoHandlers {
-			s.logger.InfoContext(ctx, "no task handlers registered, worker stopped")
-			return nil
-		}
-		return err
-	})
+			s.logger.InfoContext(ctx, "starting queue worker",
+				slog.Int("handlers", handlerCount),
+				slog.Any("queues", queues),
+			)
+			return s.worker.Start(ctx)
+		})
+	} else {
+		s.logger.InfoContext(ctx, "worker skipped (no handlers registered)")
+	}
 
 	// Start scheduler conditionally
-	eg.Go(func() error {
-		tasks := s.scheduler.ListTasks()
+	if s.shouldStartScheduler() {
+		eg.Go(func() error {
+			tasks := s.scheduler.ListTasks()
+			s.logger.InfoContext(ctx, "starting queue scheduler",
+				slog.Int("task_count", len(tasks)),
+				slog.Any("tasks", tasks),
+			)
+			return s.scheduler.Start(ctx)
+		})
+	} else {
+		s.logger.InfoContext(ctx, "scheduler skipped (no tasks scheduled)")
+	}
 
-		// Check if scheduler should be skipped
-		if s.skipSchedulerIfNoTasks && len(tasks) == 0 {
-			s.logger.InfoContext(ctx, "no scheduled tasks registered, scheduler will not start")
-			return nil
-		}
-
-		s.logger.InfoContext(ctx, "starting queue scheduler",
-			slog.Int("task_count", len(tasks)),
-		)
-
-		return s.scheduler.Start(ctx)
-	})
+	// Signal that service is ready
+	close(s.ready)
 
 	// Wait for all components
 	err := eg.Wait()
 
 	// Run after stop hook if provided
-	if s.afterStop != nil {
-		if stopErr := s.afterStop(); stopErr != nil {
-			if err == nil {
-				err = fmt.Errorf("after stop hook failed: %w", stopErr)
-			} else {
-				// Use context.Background() since original context may be cancelled
-				s.logger.ErrorContext(context.Background(), "after stop hook failed", slog.String("error", stopErr.Error()))
+	s.stopOnce.Do(func() {
+		if s.afterStop != nil {
+			if stopErr := s.afterStop(); stopErr != nil {
+				if err == nil {
+					err = fmt.Errorf("after stop hook failed: %w", stopErr)
+				} else {
+					// Use context.Background() since original context may be cancelled
+					s.logger.ErrorContext(context.Background(), "after stop hook failed", slog.String("error", stopErr.Error()))
+				}
 			}
 		}
-	}
+	})
 
 	return err
 }
@@ -242,24 +316,33 @@ func (s *Service) Run(ctx context.Context) error {
 // Stop gracefully stops the queue service components.
 // This method should be called to ensure clean shutdown of workers.
 func (s *Service) Stop() error {
+	state := ServiceState(s.state.Load())
+	if state != StateRunning {
+		return fmt.Errorf("cannot stop service in state %s", state)
+	}
+
 	// Use context.Background() for stop operations
 	ctx := context.Background()
 	s.logger.InfoContext(ctx, "stopping queue service")
 
-	// Stop worker (it has graceful shutdown logic)
-	if err := s.worker.Stop(); err != nil {
-		s.logger.ErrorContext(ctx, "failed to stop worker", slog.String("error", err.Error()))
-		return err
-	}
-
-	// Run after stop hook if provided
-	if s.afterStop != nil {
-		if err := s.afterStop(); err != nil {
-			s.logger.ErrorContext(ctx, "after stop hook failed", slog.String("error", err.Error()))
-			return err
+	// Stop worker if it was started
+	if s.shouldStartWorker() {
+		if err := s.worker.Stop(); err != nil {
+			s.logger.ErrorContext(ctx, "failed to stop worker", slog.String("error", err.Error()))
+			return fmt.Errorf("failed to stop worker: %w", err)
 		}
 	}
 
+	// Run after stop hook
+	s.stopOnce.Do(func() {
+		if s.afterStop != nil {
+			if err := s.afterStop(); err != nil {
+				s.logger.ErrorContext(ctx, "after stop hook failed", slog.String("error", err.Error()))
+			}
+		}
+	})
+
+	s.state.Store(int32(StateStopped))
 	return nil
 }
 
@@ -284,20 +367,29 @@ func (s *Service) Storage() Storage {
 }
 
 // RegisterHandler registers a task handler with the worker.
-// This is a convenience method equivalent to service.Worker().RegisterHandler(handler).
+// This method can only be called before Run().
 func (s *Service) RegisterHandler(handler Handler) error {
+	if !s.isConfiguring() {
+		return ErrServiceNotConfiguring
+	}
 	return s.worker.RegisterHandler(handler)
 }
 
 // RegisterHandlers registers multiple task handlers with the worker.
-// This is a convenience method equivalent to service.Worker().RegisterHandlers(handlers).
+// This method can only be called before Run().
 func (s *Service) RegisterHandlers(handlers ...Handler) error {
+	if !s.isConfiguring() {
+		return ErrServiceNotConfiguring
+	}
 	return s.worker.RegisterHandlers(handlers...)
 }
 
 // AddScheduledTask registers a periodic task with the scheduler.
-// This is a convenience method equivalent to service.Scheduler().AddTask(name, schedule, opts...).
+// This method can only be called before Run().
 func (s *Service) AddScheduledTask(name string, schedule Schedule, opts ...SchedulerTaskOption) error {
+	if !s.isConfiguring() {
+		return ErrServiceNotConfiguring
+	}
 	return s.scheduler.AddTask(name, schedule, opts...)
 }
 
@@ -321,4 +413,63 @@ func (s *Service) EnqueueAt(ctx context.Context, payload any, at time.Time, opts
 	// Add scheduled time option to the existing options
 	allOpts := append([]EnqueueOption{WithScheduledAt(at)}, opts...)
 	return s.enqueuer.Enqueue(ctx, payload, allOpts...)
+}
+
+// Ready returns a channel that is closed when the service is fully started.
+// This is useful for testing and coordination.
+func (s *Service) Ready() <-chan struct{} {
+	return s.ready
+}
+
+// State returns the current service state.
+func (s *Service) State() ServiceState {
+	return ServiceState(s.state.Load())
+}
+
+// --- Private helper methods ---
+
+func (s *Service) isConfiguring() bool {
+	return ServiceState(s.state.Load()) == StateConfiguring
+}
+
+func (s *Service) transitionToRunning() bool {
+	s.stateMu.Lock()
+	defer s.stateMu.Unlock()
+
+	current := ServiceState(s.state.Load())
+	if current != StateConfiguring {
+		return false
+	}
+
+	s.state.Store(int32(StateRunning))
+	return true
+}
+
+func (s *Service) validate() error {
+	handlerCount := s.worker.HandlerCount()
+	taskCount := len(s.scheduler.ListTasks())
+
+	if s.config.RequireHandlers && handlerCount == 0 {
+		return errors.New("no handlers registered (RequireHandlers is true)")
+	}
+
+	if s.config.RequireScheduledTasks && taskCount == 0 {
+		return errors.New("no scheduled tasks registered (RequireScheduledTasks is true)")
+	}
+
+	return nil
+}
+
+func (s *Service) shouldStartWorker() bool {
+	if !s.config.SkipWorkerIfNoHandlers {
+		return true
+	}
+	return s.worker.HandlerCount() > 0
+}
+
+func (s *Service) shouldStartScheduler() bool {
+	if !s.config.SkipSchedulerIfNoTasks {
+		return true
+	}
+	return len(s.scheduler.ListTasks()) > 0
 }

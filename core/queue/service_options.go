@@ -66,7 +66,7 @@ func WithEnqueuerOptions(opts ...EnqueuerOption) ServiceOption {
 // if no handlers are registered. Default is true.
 func WithSkipWorkerIfNoHandlers(skip bool) ServiceOption {
 	return func(s *Service) error {
-		s.skipWorkerIfNoHandlers = skip
+		s.config.SkipWorkerIfNoHandlers = skip
 		return nil
 	}
 }
@@ -75,7 +75,25 @@ func WithSkipWorkerIfNoHandlers(skip bool) ServiceOption {
 // if no tasks are scheduled. Default is true.
 func WithSkipSchedulerIfNoTasks(skip bool) ServiceOption {
 	return func(s *Service) error {
-		s.skipSchedulerIfNoTasks = skip
+		s.config.SkipSchedulerIfNoTasks = skip
+		return nil
+	}
+}
+
+// WithRequireHandlers configures whether Run() should fail if no handlers are registered.
+// Default is false.
+func WithRequireHandlers(require bool) ServiceOption {
+	return func(s *Service) error {
+		s.config.RequireHandlers = require
+		return nil
+	}
+}
+
+// WithRequireScheduledTasks configures whether Run() should fail if no scheduled tasks are registered.
+// Default is false.
+func WithRequireScheduledTasks(require bool) ServiceOption {
+	return func(s *Service) error {
+		s.config.RequireScheduledTasks = require
 		return nil
 	}
 }
