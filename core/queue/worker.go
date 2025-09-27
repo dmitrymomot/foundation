@@ -89,29 +89,14 @@ func NewWorker(repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
 // NewWorkerFromConfig creates a Worker from configuration.
 // Repository must be provided. Additional options can override config values.
 func NewWorkerFromConfig(cfg Config, repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
-	if repo == nil {
-		return nil, ErrRepositoryNil
-	}
-
-	// Build options from config
-	configOpts := make([]WorkerOption, 0)
-
-	// Apply worker configuration
-	if cfg.PollInterval > 0 {
-		configOpts = append(configOpts, WithPullInterval(cfg.PollInterval))
-	}
-	if cfg.LockTimeout > 0 {
-		configOpts = append(configOpts, WithLockTimeout(cfg.LockTimeout))
-	}
-	if cfg.MaxConcurrentTasks > 0 {
-		configOpts = append(configOpts, WithMaxConcurrentTasks(cfg.MaxConcurrentTasks))
-	}
-	if len(cfg.Queues) > 0 {
-		configOpts = append(configOpts, WithQueues(cfg.Queues...))
-	}
-
 	// Combine config options with user-provided options (user options override)
-	allOpts := append(configOpts, opts...)
+	// Option functions handle zero/empty values appropriately
+	allOpts := append([]WorkerOption{
+		WithPullInterval(cfg.PollInterval),
+		WithLockTimeout(cfg.LockTimeout),
+		WithMaxConcurrentTasks(cfg.MaxConcurrentTasks),
+		WithQueues(cfg.Queues...),
+	}, opts...)
 
 	return NewWorker(repo, allOpts...)
 }
@@ -161,7 +146,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	// Start the main processing loop
 	go w.run()
 
-	w.logger.Info("worker started",
+	w.logger.InfoContext(w.ctx, "worker started",
 		slog.String("worker_id", w.workerID.String()),
 		slog.Any("queues", w.queues),
 		slog.Int("max_concurrent", cap(w.sem)))
@@ -190,12 +175,13 @@ func (w *Worker) Stop() error {
 	cancel()
 
 	// Wait for all active tasks to complete
-	w.logger.Info("worker stopping, waiting for active tasks to complete",
+	// Use context.Background() since w.ctx is cancelled
+	w.logger.InfoContext(context.Background(), "worker stopping, waiting for active tasks to complete",
 		slog.String("worker_id", w.workerID.String()))
 
 	w.wg.Wait()
 
-	w.logger.Info("worker stopped",
+	w.logger.InfoContext(context.Background(), "worker stopped",
 		slog.String("worker_id", w.workerID.String()))
 
 	return nil
@@ -246,7 +232,7 @@ func (w *Worker) run() {
 
 					if err := w.pullAndProcess(); err != nil {
 						if err != ErrHandlerNotFound {
-							w.logger.Error("failed to process task",
+							w.logger.ErrorContext(w.ctx, "failed to process task",
 								slog.String("worker_id", w.workerID.String()),
 								slog.String("error", err.Error()))
 						}
@@ -254,7 +240,7 @@ func (w *Worker) run() {
 				}()
 			default:
 				// All slots busy, skip this tick
-				w.logger.Debug("all worker slots busy, skipping tick",
+				w.logger.DebugContext(w.ctx, "all worker slots busy, skipping tick",
 					slog.String("worker_id", w.workerID.String()))
 			}
 		}
@@ -278,7 +264,7 @@ func (w *Worker) pullAndProcess() error {
 		return nil
 	}
 
-	w.logger.Debug("claimed task",
+	w.logger.DebugContext(w.ctx, "claimed task",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName),
@@ -296,7 +282,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 	defer func() {
 		if r := recover(); r != nil {
 			retErr = fmt.Errorf("panic in handler: %v", r)
-			w.logger.Error("handler panicked",
+			w.logger.ErrorContext(w.ctx, "handler panicked",
 				slog.String("worker_id", w.workerID.String()),
 				slog.String("task_id", task.ID.String()),
 				slog.String("task_name", task.TaskName),
@@ -341,7 +327,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 // 2. Manually requeue tasks from DLQ once handler is available
 // 3. Investigate why tasks were enqueued without corresponding handlers
 func (w *Worker) handleMissingHandler(task *Task) error {
-	w.logger.Error("no handler registered for task type",
+	w.logger.ErrorContext(w.ctx, "no handler registered for task type",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName))
@@ -373,7 +359,7 @@ func (w *Worker) handleMissingHandler(task *Task) error {
 // - Implement exponential backoff strategies
 // - Maintain audit trails of task processing attempts
 func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Duration) error {
-	w.logger.Error("task failed",
+	w.logger.ErrorContext(w.ctx, "task failed",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName),
@@ -394,7 +380,7 @@ func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Dura
 			return fmt.Errorf("failed to move task %s to DLQ after max retries: %w", task.ID, err)
 		}
 
-		w.logger.Warn("task moved to dead letter queue",
+		w.logger.WarnContext(w.ctx, "task moved to dead letter queue",
 			slog.String("worker_id", w.workerID.String()),
 			slog.String("task_id", task.ID.String()),
 			slog.String("task_name", task.TaskName))
@@ -411,7 +397,7 @@ func (w *Worker) handleTaskSuccess(task *Task, duration time.Duration) error {
 		return fmt.Errorf("failed to mark task %s as completed: %w", task.ID, err)
 	}
 
-	w.logger.Info("task completed successfully",
+	w.logger.InfoContext(w.ctx, "task completed successfully",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName),
