@@ -8,22 +8,14 @@ import (
 // ServiceOption configures a Service instance.
 type ServiceOption func(*Service) error
 
-// WithServiceLogger sets the logger for the service and its components.
+// WithServiceLogger sets the logger for the service.
+// Components maintain their own loggers (discard by default).
 func WithServiceLogger(logger *slog.Logger) ServiceOption {
 	return func(s *Service) error {
 		if logger == nil {
 			return nil // Just use the default logger
 		}
 		s.logger = logger
-
-		// Also set logger for components
-		if s.worker != nil {
-			s.worker.logger = logger.With(slog.String("component", "worker"))
-		}
-		if s.scheduler != nil {
-			s.scheduler.logger = logger.With(slog.String("component", "scheduler"))
-		}
-
 		return nil
 	}
 }

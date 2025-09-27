@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -35,26 +36,77 @@ type Service struct {
 // NewService creates a new queue service with all components using the provided storage.
 // The storage must implement the unified Storage interface that combines all repository interfaces.
 // Options can be used to customize service behavior and component configuration.
+//
+// Example usage:
+//
+//	// Create storage (use your database implementation in production)
+//	storage := queue.NewMemoryStorage()
+//	defer storage.Close()
+//
+//	// Create service with options
+//	service, err := queue.NewService(storage,
+//	    queue.WithWorkerOptions(
+//	        queue.WithPullInterval(100*time.Millisecond),
+//	        queue.WithMaxConcurrentTasks(10),
+//	    ),
+//	    queue.WithServiceLogger(slog.Default()),
+//	)
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//
+//	// Define task payload type
+//	type EmailTask struct {
+//	    To      string `json:"to"`
+//	    Subject string `json:"subject"`
+//	    Body    string `json:"body"`
+//	}
+//
+//	// Register task handler
+//	emailHandler := queue.NewTaskHandler(func(ctx context.Context, task EmailTask) error {
+//	    fmt.Printf("Sending email to %s: %s\n", task.To, task.Subject)
+//	    // Implement email sending logic
+//	    return nil
+//	})
+//	service.RegisterHandler(emailHandler)
+//
+//	// Start service
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//
+//	go func() {
+//	    if err := service.Run(ctx); err != nil {
+//	        log.Printf("Service error: %v", err)
+//	    }
+//	}()
+//
+//	// Enqueue tasks
+//	service.Enqueue(context.Background(), EmailTask{
+//	    To:      "user@example.com",
+//	    Subject: "Welcome!",
+//	    Body:    "Welcome to our service",
+//	})
+//
+//	// Enqueue with delay
+//	service.EnqueueWithDelay(context.Background(), EmailTask{
+//	    To:      "admin@example.com",
+//	    Subject: "Reminder",
+//	    Body:    "Delayed reminder",
+//	}, 2*time.Second)
 func NewService(storage Storage, opts ...ServiceOption) (*Service, error) {
 	if storage == nil {
 		return nil, ErrRepositoryNil
 	}
 
-	// Default service configuration
+	// Default service configuration with no-op logger
 	s := &Service{
 		storage:                storage,
-		logger:                 slog.Default(),
+		logger:                 slog.New(slog.NewTextHandler(io.Discard, nil)),
 		skipWorkerIfNoHandlers: true,
 		skipSchedulerIfNoTasks: true,
 	}
 
-	// Apply service options
-	for _, opt := range opts {
-		if err := opt(s); err != nil {
-			return nil, fmt.Errorf("failed to apply service option: %w", err)
-		}
-	}
-
+	// Create default components first
 	// Create enqueuer (always needed for enqueueing tasks)
 	enqueuer, err := NewEnqueuer(storage)
 	if err != nil {
@@ -75,6 +127,13 @@ func NewService(storage Storage, opts ...ServiceOption) (*Service, error) {
 		return nil, fmt.Errorf("failed to create scheduler: %w", err)
 	}
 	s.scheduler = scheduler
+
+	// Apply service options (may override components)
+	for _, opt := range opts {
+		if err := opt(s); err != nil {
+			return nil, fmt.Errorf("failed to apply service option: %w", err)
+		}
+	}
 
 	return s, nil
 }
