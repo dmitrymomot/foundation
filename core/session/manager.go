@@ -19,7 +19,7 @@ import (
 type Manager[Data any] struct {
 	store     Store[Data]
 	transport Transport
-	config    *Config
+	config    Config
 	logger    *slog.Logger
 }
 
@@ -44,7 +44,7 @@ func WithTransport[Data any](transport Transport) ManagerOption[Data] {
 func WithConfig[Data any](opts ...Option) ManagerOption[Data] {
 	return func(m *Manager[Data]) {
 		for _, opt := range opts {
-			opt(m.config)
+			opt(&m.config)
 		}
 	}
 }
@@ -62,7 +62,7 @@ func WithLogger[Data any](logger *slog.Logger) ManagerOption[Data] {
 // New creates a new session manager with the given options.
 func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 	m := &Manager[Data]{
-		config: defaultConfig(),
+		config: DefaultConfig(),
 	}
 
 	for _, opt := range opts {

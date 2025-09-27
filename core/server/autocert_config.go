@@ -1,7 +1,7 @@
 package server
 
 // AutoCertConfig extends the base Config with AutoCert-specific settings.
-// It embeds the base Config to inherit all timeout settings, but ignores the Addr field.
+// IMPORTANT: The embedded Config.Addr field is ignored - use HTTPAddr/HTTPSAddr instead.
 type AutoCertConfig struct {
 	// Embed the base Config to get all timeout settings
 	// We'll ignore the Addr field and use HTTPAddr/HTTPSAddr instead

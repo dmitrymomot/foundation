@@ -21,13 +21,6 @@ func DefaultConfig() Config {
 	}
 }
 
-// defaultConfig returns a pointer to Config with secure defaults.
-// Kept for backward compatibility with existing code.
-func defaultConfig() *Config {
-	config := DefaultConfig()
-	return &config
-}
-
 // Option is a functional option for configuring the session manager.
 type Option func(*Config)
 
@@ -53,7 +46,7 @@ func WithTouchInterval(interval time.Duration) Option {
 func NewFromConfig[Data any](cfg Config, opts ...ManagerOption[Data]) (*Manager[Data], error) {
 	// Create a new manager with default config first
 	m := &Manager[Data]{
-		config: defaultConfig(),
+		config: DefaultConfig(),
 	}
 
 	// Apply config values directly
