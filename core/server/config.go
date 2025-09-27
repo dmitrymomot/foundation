@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -72,7 +73,8 @@ func NewFromConfig(cfg Config, opts ...Option) (*Server, error) {
 	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		tlsConfig, err := loadTLSFromFiles(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to load TLS configuration from files %s, %s: %w",
+				cfg.TLSCertFile, cfg.TLSKeyFile, err)
 		}
 		configOpts = append(configOpts, WithTLS(tlsConfig))
 	}
