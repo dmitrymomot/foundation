@@ -597,7 +597,7 @@ func TestMemoryStorage_GetPendingTaskByName(t *testing.T) {
 	t.Run("returns first match when multiple pending tasks with same name", func(t *testing.T) {
 		// Create multiple pending tasks with same name
 		var taskIDs []uuid.UUID
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			task := &queue.Task{
 				ID:          uuid.New(),
 				Queue:       queue.DefaultQueueName,
