@@ -81,15 +81,10 @@ type Service struct {
 	stateMu sync.RWMutex // Protects state transitions
 
 	// Readiness signaling
-	ready    chan struct{} // Closed when service is fully started
-	stopOnce sync.Once     // Ensures Stop() cleanup runs once
+	ready chan struct{} // Closed when service is fully started
 
 	// Configuration
 	config ServiceConfig
-
-	// Lifecycle hooks
-	beforeStart func(context.Context) error
-	afterStop   func() error
 }
 
 // NewService creates a new queue service with all components using the provided storage.
@@ -250,13 +245,6 @@ func (s *Service) Run(ctx context.Context) error {
 		return fmt.Errorf("service validation failed: %w", err)
 	}
 
-	// Run before start hook if provided
-	if s.beforeStart != nil {
-		if err := s.beforeStart(ctx); err != nil {
-			return fmt.Errorf("before start hook failed: %w", err)
-		}
-	}
-
 	eg, ctx := errgroup.WithContext(ctx)
 
 	// Start worker conditionally
@@ -294,30 +282,21 @@ func (s *Service) Run(ctx context.Context) error {
 	close(s.ready)
 
 	// Wait for all components
-	err := eg.Wait()
-
-	// Run after stop hook if provided
-	s.stopOnce.Do(func() {
-		if s.afterStop != nil {
-			if stopErr := s.afterStop(); stopErr != nil {
-				if err == nil {
-					err = fmt.Errorf("after stop hook failed: %w", stopErr)
-				} else {
-					// Use context.Background() since original context may be cancelled
-					s.logger.ErrorContext(context.Background(), "after stop hook failed", slog.String("error", stopErr.Error()))
-				}
-			}
-		}
-	})
-
-	return err
+	return eg.Wait()
 }
 
 // Stop gracefully stops the queue service components.
 // This method should be called to ensure clean shutdown of workers.
 func (s *Service) Stop() error {
 	state := ServiceState(s.state.Load())
-	if state != StateRunning {
+
+	// Already stopped - make it idempotent
+	if state == StateStopped {
+		return nil
+	}
+
+	// Can't stop what hasn't started
+	if state == StateConfiguring {
 		return fmt.Errorf("cannot stop service in state %s", state)
 	}
 
@@ -332,15 +311,6 @@ func (s *Service) Stop() error {
 			return fmt.Errorf("failed to stop worker: %w", err)
 		}
 	}
-
-	// Run after stop hook
-	s.stopOnce.Do(func() {
-		if s.afterStop != nil {
-			if err := s.afterStop(); err != nil {
-				s.logger.ErrorContext(ctx, "after stop hook failed", slog.String("error", err.Error()))
-			}
-		}
-	})
 
 	s.state.Store(int32(StateStopped))
 	return nil

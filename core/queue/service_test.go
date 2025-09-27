@@ -497,166 +497,6 @@ func TestService_Run(t *testing.T) {
 			t.Fatal("service did not stop within timeout")
 		}
 	})
-
-	t.Run("beforeStart hook executed", func(t *testing.T) {
-		t.Parallel()
-
-		storage := new(MockStorage)
-		defer storage.AssertExpectations(t)
-
-		var hookCalled bool
-		beforeStartHook := func(ctx context.Context) error {
-			hookCalled = true
-			return nil
-		}
-
-		service, err := queue.NewService(storage,
-			queue.WithBeforeStart(beforeStartHook),
-		)
-		require.NoError(t, err)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Start service in goroutine
-		serviceErr := make(chan error, 1)
-		go func() {
-			serviceErr <- service.Run(ctx)
-		}()
-
-		// Wait for service to be ready
-		<-service.Ready()
-
-		// Verify before start hook was called
-		assert.True(t, hookCalled)
-
-		// Cancel context to stop service
-		cancel()
-
-		// Wait for service to stop
-		select {
-		case err := <-serviceErr:
-			// Context cancellation is expected
-			if err != nil {
-				assert.Contains(t, err.Error(), "context")
-			}
-		case <-time.After(1 * time.Second):
-			t.Fatal("service did not stop within timeout")
-		}
-	})
-
-	t.Run("beforeStart hook failure stops service", func(t *testing.T) {
-		t.Parallel()
-
-		storage := new(MockStorage)
-		defer storage.AssertExpectations(t)
-
-		expectedErr := errors.New("hook failed")
-		beforeStartHook := func(ctx context.Context) error {
-			return expectedErr
-		}
-
-		service, err := queue.NewService(storage,
-			queue.WithBeforeStart(beforeStartHook),
-		)
-		require.NoError(t, err)
-
-		ctx := context.Background()
-		err = service.Run(ctx)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "before start hook failed")
-		assert.Contains(t, err.Error(), expectedErr.Error())
-	})
-
-	t.Run("afterStop hook executed on normal shutdown", func(t *testing.T) {
-		t.Parallel()
-
-		storage := new(MockStorage)
-		defer storage.AssertExpectations(t)
-
-		var hookCalled bool
-		var hookCallCount int
-		afterStopHook := func() error {
-			hookCalled = true
-			hookCallCount++
-			return nil
-		}
-
-		service, err := queue.NewService(storage,
-			queue.WithAfterStop(afterStopHook),
-		)
-		require.NoError(t, err)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Start service in goroutine
-		serviceErr := make(chan error, 1)
-		go func() {
-			serviceErr <- service.Run(ctx)
-		}()
-
-		// Wait for service to be ready
-		<-service.Ready()
-
-		// Cancel context to stop service
-		cancel()
-
-		// Wait for service to stop
-		select {
-		case err := <-serviceErr:
-			// Context cancellation is expected
-			if err != nil {
-				assert.Contains(t, err.Error(), "context")
-			}
-		case <-time.After(1 * time.Second):
-			t.Fatal("service did not stop within timeout")
-		}
-
-		assert.True(t, hookCalled)
-		assert.Equal(t, 1, hookCallCount) // Should be called only once
-	})
-
-	t.Run("afterStop hook failure becomes the main error", func(t *testing.T) {
-		t.Parallel()
-
-		storage := new(MockStorage)
-		defer storage.AssertExpectations(t)
-
-		afterStopHook := func() error {
-			return errors.New("hook cleanup failed")
-		}
-
-		service, err := queue.NewService(storage,
-			queue.WithAfterStop(afterStopHook),
-		)
-		require.NoError(t, err)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		// Start service in goroutine
-		serviceErr := make(chan error, 1)
-		go func() {
-			serviceErr <- service.Run(ctx)
-		}()
-
-		// Wait for service to be ready
-		<-service.Ready()
-
-		// Cancel context to stop service
-		cancel()
-
-		// Wait for service to stop
-		select {
-		case err := <-serviceErr:
-			// Should get after stop hook error
-			assert.Error(t, err)
-			assert.Contains(t, err.Error(), "after stop hook failed: hook cleanup failed")
-		case <-time.After(1 * time.Second):
-			t.Fatal("service did not stop within timeout")
-		}
-	})
 }
 
 func TestService_Stop(t *testing.T) {
@@ -677,51 +517,43 @@ func TestService_Stop(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot stop service in state configuring")
 	})
 
-	t.Run("afterStop hook not called when service not running", func(t *testing.T) {
+	t.Run("stop is idempotent when service already stopped", func(t *testing.T) {
 		t.Parallel()
 
 		storage := new(MockStorage)
 		defer storage.AssertExpectations(t)
 
-		var hookCalled bool
-		afterStopHook := func() error {
-			hookCalled = true
-			return nil
-		}
-
-		service, err := queue.NewService(storage,
-			queue.WithAfterStop(afterStopHook),
-		)
+		service, err := queue.NewService(storage)
 		require.NoError(t, err)
 
-		// Stop will fail since service is not running, hook won't be called
-		err = service.Stop()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot stop service in state configuring")
-		assert.False(t, hookCalled, "hook should not be called when service is not running")
-	})
+		// Start and stop service normally
+		ctx, cancel := context.WithCancel(context.Background())
+		serviceErr := make(chan error, 1)
+		go func() {
+			serviceErr <- service.Run(ctx)
+		}()
 
-	t.Run("stop error when service not in running state", func(t *testing.T) {
-		t.Parallel()
+		// Wait for service to be ready
+		<-service.Ready()
 
-		storage := new(MockStorage)
-		defer storage.AssertExpectations(t)
+		// Cancel context to stop service
+		cancel()
 
-		expectedErr := errors.New("cleanup failed")
-		afterStopHook := func() error {
-			return expectedErr
+		// Wait for service to stop
+		select {
+		case <-serviceErr:
+			// Service stopped
+		case <-time.After(1 * time.Second):
+			t.Fatal("service did not stop within timeout")
 		}
 
-		service, err := queue.NewService(storage,
-			queue.WithAfterStop(afterStopHook),
-		)
-		require.NoError(t, err)
-
-		// Stop fails because service is not running, so hook is never called
+		// Now service is in StateStopped, Stop() should be idempotent
 		err = service.Stop()
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "cannot stop service in state configuring")
-		assert.NotContains(t, err.Error(), "cleanup failed")
+		assert.NoError(t, err, "Stop() should be idempotent when service is already stopped")
+
+		// Can call Stop() multiple times without error
+		err = service.Stop()
+		assert.NoError(t, err, "Stop() should be idempotent on multiple calls")
 	})
 }
 
@@ -1221,7 +1053,6 @@ func TestService_FullLifecycle(t *testing.T) {
 		defer storage.AssertExpectations(t)
 
 		var mu sync.Mutex
-		var beforeStartCalled, afterStopCalled bool
 		var processedTasks []string
 
 		// Setup mock expectations for the full lifecycle
@@ -1320,20 +1151,7 @@ func TestService_FullLifecycle(t *testing.T) {
 			DefaultPriority:    queue.PriorityMedium,
 		}
 
-		service, err := queue.NewServiceFromConfig(cfg, storage,
-			queue.WithBeforeStart(func(ctx context.Context) error {
-				mu.Lock()
-				beforeStartCalled = true
-				mu.Unlock()
-				return nil
-			}),
-			queue.WithAfterStop(func() error {
-				mu.Lock()
-				afterStopCalled = true
-				mu.Unlock()
-				return nil
-			}),
-		)
+		service, err := queue.NewServiceFromConfig(cfg, storage)
 		require.NoError(t, err)
 		require.NotNil(t, service)
 
@@ -1365,11 +1183,6 @@ func TestService_FullLifecycle(t *testing.T) {
 
 		// Wait for service to be ready
 		<-service.Ready()
-
-		// Verify before start hook was called
-		mu.Lock()
-		assert.True(t, beforeStartCalled, "beforeStart hook should be called")
-		mu.Unlock()
 
 		// Enqueue tasks while service is running
 		err = service.Enqueue(context.Background(), serviceTestPayload{Message: "task1", Value: 1},
@@ -1434,11 +1247,6 @@ func TestService_FullLifecycle(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatal("service did not stop within timeout")
 		}
-
-		// Verify after stop hook was called
-		mu.Lock()
-		assert.True(t, afterStopCalled, "afterStop hook should be called")
-		mu.Unlock()
 
 		// Verify all tasks were processed in order
 		mu.Lock()

@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"context"
 	"log/slog"
 )
 
@@ -94,24 +93,6 @@ func WithRequireHandlers(require bool) ServiceOption {
 func WithRequireScheduledTasks(require bool) ServiceOption {
 	return func(s *Service) error {
 		s.config.RequireScheduledTasks = require
-		return nil
-	}
-}
-
-// WithBeforeStart sets a hook that runs before the service starts.
-// This can be used for custom initialization logic.
-func WithBeforeStart(hook func(context.Context) error) ServiceOption {
-	return func(s *Service) error {
-		s.beforeStart = hook
-		return nil
-	}
-}
-
-// WithAfterStop sets a hook that runs after the service stops.
-// This can be used for cleanup logic.
-func WithAfterStop(hook func() error) ServiceOption {
-	return func(s *Service) error {
-		s.afterStop = hook
 		return nil
 	}
 }
