@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// ErrMissingAddress is returned when server address is not provided.
+var ErrMissingAddress = errors.New("server address is required")
+
 // Config holds server configuration with environment variable support.
 type Config struct {
 	// Server address
@@ -42,7 +45,7 @@ func DefaultConfig() Config {
 func NewFromConfig(cfg Config, opts ...Option) (*Server, error) {
 	// Validate address
 	if cfg.Addr == "" {
-		return nil, errors.New("server address is required")
+		return nil, ErrMissingAddress
 	}
 
 	// Build options from config
