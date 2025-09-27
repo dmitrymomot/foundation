@@ -119,41 +119,39 @@ func TestNewAutoCertServer(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		config  *server.AutoCertConfig
+		opts    []server.AutoCertOption
 		wantErr error
 	}{
 		{
 			name: "missing certificate manager",
-			config: &server.AutoCertConfig{
-				DomainStore: &MockDomainStore{},
+			opts: []server.AutoCertOption{
+				server.WithDomainStore(&MockDomainStore{}),
 			},
 			wantErr: server.ErrNoCertManager,
 		},
 		{
 			name: "missing domain store",
-			config: &server.AutoCertConfig{
-				CertManager: &MockCertificateManager{},
+			opts: []server.AutoCertOption{
+				server.WithCertManager(&MockCertificateManager{}),
 			},
 			wantErr: server.ErrNoDomainStore,
 		},
 		{
 			name: "valid config with defaults",
-			config: &server.AutoCertConfig{
-				CertManager: &MockCertificateManager{},
-				DomainStore: &MockDomainStore{},
+			opts: []server.AutoCertOption{
+				server.WithCertManager(&MockCertificateManager{}),
+				server.WithDomainStore(&MockDomainStore{}),
 			},
 			wantErr: nil,
 		},
 		{
-			name: "custom handlers and addresses",
-			config: &server.AutoCertConfig{
-				CertManager:         &MockCertificateManager{},
-				DomainStore:         &MockDomainStore{},
-				ProvisioningHandler: testProvisioningHandler(),
-				FailedHandler:       testFailedHandler(),
-				NotFoundHandler:     testNotFoundHandler(),
-				HTTPAddr:            ":8080",
-				HTTPSAddr:           ":8443",
+			name: "custom handlers",
+			opts: []server.AutoCertOption{
+				server.WithCertManager(&MockCertificateManager{}),
+				server.WithDomainStore(&MockDomainStore{}),
+				server.WithProvisioningHandler(testProvisioningHandler()),
+				server.WithFailedHandler(testFailedHandler()),
+				server.WithNotFoundHandler(testNotFoundHandler()),
 			},
 			wantErr: nil,
 		},
@@ -161,7 +159,7 @@ func TestNewAutoCertServer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv, err := server.NewAutoCertServer(tt.config)
+			srv, err := server.NewAutoCertServer(tt.opts...)
 			if tt.wantErr != nil {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, tt.wantErr)
@@ -255,12 +253,10 @@ func TestAutoCertServer_GetCertificate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			config := &server.AutoCertConfig{
-				CertManager: tt.certManager,
-				DomainStore: tt.domainStore,
-			}
-
-			srv, err := server.NewAutoCertServer(config)
+			srv, err := server.NewAutoCertServer(
+				server.WithCertManager(tt.certManager),
+				server.WithDomainStore(tt.domainStore),
+			)
 			require.NoError(t, err)
 
 			// Access the private getCertificate method through the TLS config
@@ -393,14 +389,12 @@ func TestAutoCertServer_HTTPHandler(t *testing.T) {
 				domainStore.domains[tt.host] = tt.domainInfo
 			}
 
-			config := &server.AutoCertConfig{
-				CertManager: certManager,
-				DomainStore: domainStore,
-				HTTPAddr:    ":8080",
-				HTTPSAddr:   ":8443",
-			}
-
-			_, err := server.NewAutoCertServer(config)
+			_, err := server.NewAutoCertServer(
+				server.WithCertManager(certManager),
+				server.WithDomainStore(domainStore),
+				server.WithHTTPServer(server.New(":8080")),
+				server.WithHTTPSServer(server.New(":8443")),
+			)
 			require.NoError(t, err)
 
 			// Create test request
@@ -474,14 +468,15 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 	t.Parallel()
 
 	t.Run("successful run and shutdown", func(t *testing.T) {
-		config := &server.AutoCertConfig{
-			CertManager: &MockCertificateManager{},
-			DomainStore: &MockDomainStore{},
-			HTTPAddr:    fmt.Sprintf(":%d", getFreePort(t)),
-			HTTPSAddr:   fmt.Sprintf(":%d", getFreePort(t)),
-		}
+		httpAddr := fmt.Sprintf(":%d", getFreePort(t))
+		httpsAddr := fmt.Sprintf(":%d", getFreePort(t))
 
-		srv, err := server.NewAutoCertServer(config)
+		srv, err := server.NewAutoCertServer(
+			server.WithCertManager(&MockCertificateManager{}),
+			server.WithDomainStore(&MockDomainStore{}),
+			server.WithHTTPServer(server.New(httpAddr)),
+			server.WithHTTPSServer(server.New(httpsAddr)),
+		)
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -509,14 +504,15 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 	})
 
 	t.Run("double run returns error", func(t *testing.T) {
-		config := &server.AutoCertConfig{
-			CertManager: &MockCertificateManager{},
-			DomainStore: &MockDomainStore{},
-			HTTPAddr:    fmt.Sprintf(":%d", getFreePort(t)),
-			HTTPSAddr:   fmt.Sprintf(":%d", getFreePort(t)),
-		}
+		httpAddr := fmt.Sprintf(":%d", getFreePort(t))
+		httpsAddr := fmt.Sprintf(":%d", getFreePort(t))
 
-		srv, err := server.NewAutoCertServer(config)
+		srv, err := server.NewAutoCertServer(
+			server.WithCertManager(&MockCertificateManager{}),
+			server.WithDomainStore(&MockDomainStore{}),
+			server.WithHTTPServer(server.New(httpAddr)),
+			server.WithHTTPSServer(server.New(httpsAddr)),
+		)
 		require.NoError(t, err)
 
 		ctx1 := context.Background()
@@ -542,12 +538,10 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 	})
 
 	t.Run("shutdown without run is safe", func(t *testing.T) {
-		config := &server.AutoCertConfig{
-			CertManager: &MockCertificateManager{},
-			DomainStore: &MockDomainStore{},
-		}
-
-		srv, err := server.NewAutoCertServer(config)
+		srv, err := server.NewAutoCertServer(
+			server.WithCertManager(&MockCertificateManager{}),
+			server.WithDomainStore(&MockDomainStore{}),
+		)
 		require.NoError(t, err)
 
 		// Shutdown without running should not error

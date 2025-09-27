@@ -70,6 +70,60 @@
 //		log.Fatal(err)
 //	}
 //
+// # Configuration-Based Initialization
+//
+// Use environment variables with the config-based approach:
+//
+//	import (
+//		"github.com/caarlos0/env/v11"
+//	)
+//
+//	// Load configuration from environment
+//	config := server.DefaultConfig()
+//	if err := env.Parse(&config); err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	// Create server from config
+//	srv, err := server.NewFromConfig(config)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	r := router.New[*AppContext]()
+//	r.Get("/", func(ctx *AppContext) handler.Response {
+//		return response.Text("Hello from config-based server")
+//	})
+//
+//	// Environment variables:
+//	// SERVER_ADDR=:8080
+//	// SERVER_READ_TIMEOUT=30s
+//	// SERVER_WRITE_TIMEOUT=30s
+//	// SERVER_IDLE_TIMEOUT=120s
+//	// SERVER_SHUTDOWN_TIMEOUT=60s
+//	// SERVER_MAX_HEADER_BYTES=2097152
+//	// SERVER_TLS_CERT_FILE=/path/to/cert.pem
+//	// SERVER_TLS_KEY_FILE=/path/to/key.pem
+//
+//	if err := srv.Run(ctx, r); err != nil {
+//		log.Fatal(err)
+//	}
+//
+// Mix configuration with runtime options:
+//
+//	config := server.DefaultConfig()
+//	config.Addr = ":9000"
+//	config.ReadTimeout = 30 * time.Second
+//
+//	// Options override config values
+//	srv, err := server.NewFromConfig(config,
+//		server.WithLogger(customLogger),
+//		server.WithShutdownTimeout(45*time.Second),
+//	)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
 // # HTTPS with TLS Configuration
 //
 // Use built-in TLS presets for secure HTTPS:
@@ -113,6 +167,40 @@
 // # Automatic HTTPS with Let's Encrypt
 //
 // Use AutoCertServer for automatic certificate management:
+//
+// Configuration-based approach with environment variables:
+//
+//	import (
+//		"github.com/caarlos0/env/v11"
+//	)
+//
+//	// Load configuration from environment
+//	config := server.DefaultAutoCertConfig()
+//	if err := env.Parse(&config); err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	// Environment variables:
+//	// AUTOCERT_HTTP_ADDR=:80
+//	// AUTOCERT_HTTPS_ADDR=:443
+//	// SERVER_READ_TIMEOUT=30s
+//	// SERVER_WRITE_TIMEOUT=30s
+//	// SERVER_IDLE_TIMEOUT=120s
+//	// SERVER_SHUTDOWN_TIMEOUT=60s
+//
+//	srv, err := server.NewAutoCertFromConfig(
+//		config,
+//		certManager,
+//		domainStore,
+//		server.WithServerOptions(
+//			server.WithLogger(logger),
+//		),
+//	)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+// Traditional approach:
 //
 //	import (
 //		"github.com/dmitrymomot/foundation/core/handler"
@@ -290,7 +378,7 @@
 //   - Read/Write timeout: 15 seconds
 //   - Idle timeout: 60 seconds
 //   - Shutdown timeout: 30 seconds
-//   - Logger: slog.Default()
+//   - Logger: No-op logger (writes to io.Discard)
 //   - AutoCertServer addresses: :80 (HTTP), :443 (HTTPS)
 //
 // # Interfaces

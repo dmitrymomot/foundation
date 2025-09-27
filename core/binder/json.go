@@ -27,7 +27,7 @@ const DefaultMaxJSONSize = 1 << 20 // 1 MB
 //	}
 //
 //	http.HandleFunc("/users", createUserHandler)
-func JSON() func(r *http.Request, v any) error {
+func JSON() Binder {
 	return func(r *http.Request, v any) error {
 		// Fail fast if request context is already cancelled to avoid processing doomed requests
 		ctx := r.Context()

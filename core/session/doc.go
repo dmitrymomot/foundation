@@ -37,6 +37,51 @@
 //		log.Fatal(err)
 //	}
 //
+// # Configuration-Based Initialization
+//
+// Use environment variables with the config-based approach:
+//
+//	import (
+//		"github.com/caarlos0/env/v11"
+//	)
+//
+//	// Load configuration from environment
+//	config := session.DefaultConfig()
+//	if err := env.Parse(&config); err != nil {
+//		log.Fatal(err)
+//	}
+//
+//	// Environment variables:
+//	// SESSION_TTL=24h
+//	// SESSION_TOUCH_INTERVAL=5m
+//
+//	// Create manager from config
+//	manager, err := session.NewFromConfig[UserData](
+//		config,
+//		session.WithStore(myStore),
+//		session.WithTransport(myTransport),
+//	)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
+// Mix configuration with runtime options:
+//
+//	config := session.DefaultConfig()
+//	config.TTL = 48 * time.Hour
+//
+//	// Options can override config values
+//	manager, err := session.NewFromConfig[UserData](
+//		config,
+//		session.WithStore(myStore),
+//		session.WithTransport(myTransport),
+//		session.WithLogger(customLogger),
+//		session.WithTouchInterval(10 * time.Minute), // Overrides config
+//	)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//
 // Handle requests with session loading:
 //
 //	func handler(w http.ResponseWriter, r *http.Request) {

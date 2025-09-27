@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"sync"
 	"time"
@@ -48,7 +49,7 @@ func NewScheduler(repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler
 	// Default options
 	options := &schedulerOptions{
 		checkInterval: 30 * time.Second,
-		logger:        slog.Default(),
+		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
 	}
 
 	// Apply options

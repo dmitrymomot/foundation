@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -27,7 +28,7 @@ func newMux[C handler.Context](opts ...Option[C]) *mux[C] {
 	m := &mux[C]{
 		tree:         &node[C]{},
 		errorHandler: defaultErrorHandler[C],
-		logger:       slog.Default(),
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
 	}
 
 	for _, opt := range opts {

@@ -61,7 +61,7 @@ const DefaultMaxMemory = 10 << 20 // 10 MB
 //	}
 //
 //	http.HandleFunc("/upload", uploadHandler)
-func Form() func(r *http.Request, v any) error {
+func Form() Binder {
 	return func(r *http.Request, v any) error {
 		contentType := r.Header.Get("Content-Type")
 		if contentType == "" {

@@ -80,73 +80,61 @@ type (
 	NotFoundHandler func(w http.ResponseWriter, r *http.Request)
 )
 
-// AutoCertConfig holds configuration for automatic HTTPS with certificates.
-type AutoCertConfig struct {
-	// CertManager manages certificate operations
-	CertManager CertificateManager
-
-	// DomainStore provides domain registration lookups
-	DomainStore DomainStore
-
-	// ProvisioningHandler handles requests during certificate provisioning
-	ProvisioningHandler ProvisioningHandler
-
-	// FailedHandler handles requests when certificate generation failed
-	FailedHandler FailedHandler
-
-	// NotFoundHandler handles requests for unregistered domains
-	NotFoundHandler NotFoundHandler
-
-	// HTTPAddr is the address for the HTTP server (default ":80")
-	HTTPAddr string
-
-	// HTTPSAddr is the address for the HTTPS server (default ":443")
-	HTTPSAddr string
-
-	// Logger for server operations
-	Logger *slog.Logger
-}
+// AutoCertOption is a functional option for configuring AutoCertServer.
+type AutoCertOption func(*AutoCertServer)
 
 // AutoCertServer provides automatic HTTPS with certificate management.
 type AutoCertServer struct {
 	mu          sync.RWMutex
-	config      *AutoCertConfig
-	httpServer  *http.Server
-	httpsServer *http.Server
-	running     bool
+	httpServer  *Server
+	httpsServer *Server
+
+	// Core dependencies
+	certManager CertificateManager
+	domainStore DomainStore
+
+	// Handlers
+	provisioningHandler ProvisioningHandler
+	failedHandler       FailedHandler
+	notFoundHandler     NotFoundHandler
+
+	// State
+	running bool
 }
 
 // NewAutoCertServer creates a new server with automatic HTTPS support.
-func NewAutoCertServer(cfg *AutoCertConfig) (*AutoCertServer, error) {
-	if cfg.CertManager == nil {
-		return nil, ErrNoCertManager
-	}
-	if cfg.DomainStore == nil {
-		return nil, ErrNoDomainStore
-	}
-	// Initialize logger with no-op logger by default (discards all logs)
-	if cfg.Logger == nil {
-		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
-	if cfg.ProvisioningHandler == nil {
-		cfg.ProvisioningHandler = DefaultProvisioningHandler(cfg.Logger)
-	}
-	if cfg.FailedHandler == nil {
-		cfg.FailedHandler = DefaultFailedHandler(cfg.Logger)
-	}
-	if cfg.NotFoundHandler == nil {
-		cfg.NotFoundHandler = DefaultNotFoundHandler(cfg.Logger)
-	}
-	if cfg.HTTPAddr == "" {
-		cfg.HTTPAddr = ":80"
-	}
-	if cfg.HTTPSAddr == "" {
-		cfg.HTTPSAddr = ":443"
+func NewAutoCertServer(opts ...AutoCertOption) (*AutoCertServer, error) {
+	// Default configuration
+	s := &AutoCertServer{
+		httpServer:  New(":80"),  // Default HTTP address
+		httpsServer: New(":443"), // Default HTTPS address
 	}
 
-	return &AutoCertServer{
-		config: cfg,
-	}, nil
+	// Apply all options
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	// Validation - ensure required dependencies are set
+	if s.certManager == nil {
+		return nil, ErrNoCertManager
+	}
+	if s.domainStore == nil {
+		return nil, ErrNoDomainStore
+	}
+
+	// Set default handlers if not provided
+	if s.provisioningHandler == nil {
+		s.provisioningHandler = DefaultProvisioningHandler(s.httpServer.logger)
+	}
+	if s.failedHandler == nil {
+		s.failedHandler = DefaultFailedHandler(s.httpServer.logger)
+	}
+	if s.notFoundHandler == nil {
+		s.notFoundHandler = DefaultNotFoundHandler(s.httpServer.logger)
+	}
+
+	return s, nil
 }
 
 // DefaultProvisioningHandler returns a default provisioning page handler.
@@ -392,53 +380,31 @@ func (s *AutoCertServer) Run(ctx context.Context, handler http.Handler) error {
 	s.running = true
 	s.mu.Unlock()
 
-	s.httpServer = &http.Server{
-		Addr:           s.config.HTTPAddr,
-		Handler:        s.createHTTPHandler(),
-		ReadTimeout:    DefaultReadTimeout,
-		WriteTimeout:   DefaultWriteTimeout,
-		IdleTimeout:    DefaultIdleTimeout,
-		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
-	}
-
-	tlsConfig := &tls.Config{
+	// Configure TLS for HTTPS server
+	s.httpsServer.tlsConfig = &tls.Config{
 		GetCertificate: s.getCertificate,
 		MinVersion:     tls.VersionTLS12,
 	}
 
-	s.httpsServer = &http.Server{
-		Addr:           s.config.HTTPSAddr,
-		Handler:        handler,
-		TLSConfig:      tlsConfig,
-		ReadTimeout:    DefaultReadTimeout,
-		WriteTimeout:   DefaultWriteTimeout,
-		IdleTimeout:    DefaultIdleTimeout,
-		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
-	}
-
 	errCh := make(chan error, 2)
 
+	// Run HTTP server with ACME handler
 	go func() {
-		s.config.Logger.InfoContext(ctx, "starting HTTP server", "addr", s.config.HTTPAddr)
-		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+		if err := s.httpServer.Run(ctx, s.createHTTPHandler()); err != nil {
 			errCh <- errors.Join(ErrHTTPServer, err)
 		}
 	}()
 
+	// Run HTTPS server with application handler
 	go func() {
-		s.config.Logger.InfoContext(ctx, "starting HTTPS server", "addr", s.config.HTTPSAddr)
-		if err := s.httpsServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
+		if err := s.httpsServer.Run(ctx, handler); err != nil {
 			errCh <- errors.Join(ErrHTTPSServer, err)
 		}
 	}()
 
 	select {
 	case err := <-errCh:
-		if shutdownErr := s.Shutdown(ctx); shutdownErr != nil {
-			s.config.Logger.ErrorContext(ctx, "shutdown error during error handling",
-				"shutdown_error", shutdownErr,
-				"original_error", err)
-		}
+		_ = s.Shutdown(ctx)
 		return err
 	case <-ctx.Done():
 		return s.Shutdown(ctx)
@@ -449,7 +415,7 @@ func (s *AutoCertServer) Run(ctx context.Context, handler http.Handler) error {
 // It handles ACME challenges and redirects to HTTPS when appropriate.
 func (s *AutoCertServer) createHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.config.CertManager.HandleChallenge(w, r) {
+		if s.certManager.HandleChallenge(w, r) {
 			return
 		}
 
@@ -459,20 +425,20 @@ func (s *AutoCertServer) createHTTPHandler() http.Handler {
 		}
 
 		ctx := r.Context()
-		info, err := s.config.DomainStore.GetDomain(ctx, domain)
+		info, err := s.domainStore.GetDomain(ctx, domain)
 		if err != nil {
-			s.config.Logger.ErrorContext(ctx, "domain lookup failed",
+			s.httpServer.logger.ErrorContext(ctx, "domain lookup failed",
 				"domain", domain,
 				"error", err)
 			http.NotFound(w, r)
 			return
 		}
 		if info == nil {
-			s.config.NotFoundHandler(w, r)
+			s.notFoundHandler(w, r)
 			return
 		}
 
-		if s.config.CertManager.Exists(domain) {
+		if s.certManager.Exists(domain) {
 			url := "https://" + r.Host + r.URL.String()
 			http.Redirect(w, r, url, http.StatusMovedPermanently)
 			return
@@ -480,12 +446,12 @@ func (s *AutoCertServer) createHTTPHandler() http.Handler {
 
 		switch info.Status {
 		case StatusProvisioning:
-			s.config.ProvisioningHandler(w, r, info)
+			s.provisioningHandler(w, r, info)
 		case StatusFailed:
-			s.config.FailedHandler(w, r, info)
+			s.failedHandler(w, r, info)
 		default:
 			// Default to provisioning state for any other status
-			s.config.ProvisioningHandler(w, r, info)
+			s.provisioningHandler(w, r, info)
 		}
 	})
 }
@@ -501,7 +467,7 @@ func (s *AutoCertServer) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certif
 	// Use timeout to prevent slow domain lookups from blocking TLS handshake
 	ctx, cancel := context.WithTimeout(hello.Context(), 10*time.Second)
 	defer cancel()
-	info, err := s.config.DomainStore.GetDomain(ctx, domain)
+	info, err := s.domainStore.GetDomain(ctx, domain)
 	if err != nil {
 		return nil, errors.Join(ErrDomainLookupFailed, err)
 	}
@@ -509,7 +475,7 @@ func (s *AutoCertServer) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certif
 		return nil, ErrDomainNotRegistered
 	}
 
-	return s.config.CertManager.GetCertificate(hello)
+	return s.certManager.GetCertificate(hello)
 }
 
 // Shutdown gracefully shuts down both HTTP and HTTPS servers.
@@ -521,30 +487,21 @@ func (s *AutoCertServer) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	s.config.Logger.InfoContext(ctx, "shutting down servers")
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), DefaultShutdownTimeout)
-	defer cancel()
-
 	var httpErr, httpsErr error
 
 	if s.httpServer != nil {
-		httpErr = s.httpServer.Shutdown(shutdownCtx)
+		httpErr = s.httpServer.Shutdown(ctx)
 	}
 
 	if s.httpsServer != nil {
-		httpsErr = s.httpsServer.Shutdown(shutdownCtx)
+		httpsErr = s.httpsServer.Shutdown(ctx)
 	}
 
 	s.running = false
 
-	if httpErr != nil {
-		return errors.Join(ErrHTTPShutdown, httpErr)
-	}
-	if httpsErr != nil {
-		return errors.Join(ErrHTTPSShutdown, httpsErr)
+	if httpErr != nil || httpsErr != nil {
+		return errors.Join(httpErr, httpsErr)
 	}
 
-	s.config.Logger.InfoContext(ctx, "servers shutdown complete")
 	return nil
 }

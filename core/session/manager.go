@@ -19,7 +19,7 @@ import (
 type Manager[Data any] struct {
 	store     Store[Data]
 	transport Transport
-	config    *Config
+	config    Config
 	logger    *slog.Logger
 }
 
@@ -44,7 +44,17 @@ func WithTransport[Data any](transport Transport) ManagerOption[Data] {
 func WithConfig[Data any](opts ...Option) ManagerOption[Data] {
 	return func(m *Manager[Data]) {
 		for _, opt := range opts {
-			opt(m.config)
+			opt(&m.config)
+		}
+	}
+}
+
+// WithLogger sets the logger for internal session operations.
+// If nil, a no-op logger will be used.
+func WithLogger[Data any](logger *slog.Logger) ManagerOption[Data] {
+	return func(m *Manager[Data]) {
+		if logger != nil {
+			m.logger = logger
 		}
 	}
 }
@@ -52,7 +62,7 @@ func WithConfig[Data any](opts ...Option) ManagerOption[Data] {
 // New creates a new session manager with the given options.
 func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 	m := &Manager[Data]{
-		config: defaultConfig(),
+		config: DefaultConfig(),
 	}
 
 	for _, opt := range opts {
@@ -66,10 +76,8 @@ func New[Data any](opts ...ManagerOption[Data]) (*Manager[Data], error) {
 		return nil, ErrNoTransport
 	}
 
-	// Set logger from config or use no-op logger
-	if m.config.Logger != nil {
-		m.logger = m.config.Logger
-	} else {
+	// Set no-op logger if not provided
+	if m.logger == nil {
 		m.logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 

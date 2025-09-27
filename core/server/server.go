@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"io"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -12,22 +13,30 @@ import (
 // Server wraps http.Server with graceful shutdown and configuration options.
 // Safe for concurrent use.
 type Server struct {
-	mu        sync.RWMutex
-	addr      string
-	server    *http.Server
-	logger    *slog.Logger
-	shutdown  time.Duration
-	tlsConfig *tls.Config
-	running   bool
+	mu             sync.RWMutex
+	addr           string
+	server         *http.Server
+	logger         *slog.Logger
+	shutdown       time.Duration
+	readTimeout    time.Duration
+	writeTimeout   time.Duration
+	idleTimeout    time.Duration
+	maxHeaderBytes int
+	tlsConfig      *tls.Config
+	running        bool
 }
 
 // New creates a new Server with the given address and options.
-// Defaults to 30-second graceful shutdown timeout and the default logger.
+// Defaults to 30-second graceful shutdown timeout and a no-op logger.
 func New(addr string, opts ...Option) *Server {
 	s := &Server{
-		addr:     addr,
-		logger:   slog.Default(),
-		shutdown: DefaultShutdownTimeout,
+		addr:           addr,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
+		shutdown:       DefaultShutdownTimeout,
+		readTimeout:    DefaultReadTimeout,
+		writeTimeout:   DefaultWriteTimeout,
+		idleTimeout:    DefaultIdleTimeout,
+		maxHeaderBytes: DefaultMaxHeaderBytes,
 	}
 
 	for _, opt := range opts {
@@ -50,10 +59,10 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 	s.server = &http.Server{
 		Addr:           s.addr,
 		Handler:        handler,
-		ReadTimeout:    DefaultReadTimeout,
-		WriteTimeout:   DefaultWriteTimeout,
-		IdleTimeout:    DefaultIdleTimeout,
-		MaxHeaderBytes: http.DefaultMaxHeaderBytes,
+		ReadTimeout:    s.readTimeout,
+		WriteTimeout:   s.writeTimeout,
+		IdleTimeout:    s.idleTimeout,
+		MaxHeaderBytes: s.maxHeaderBytes,
 		TLSConfig:      s.tlsConfig,
 	}
 
