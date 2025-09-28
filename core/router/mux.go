@@ -35,18 +35,8 @@ func newMux[C handler.Context](opts ...Option[C]) *mux[C] {
 		opt(m)
 	}
 
-	// If no context factory provided, only set default for standard Context type
-	if m.newContext == nil {
-		var zero C
-		if _, ok := any(zero).(*Context); ok {
-			// Only set default factory for standard *Context type
-			m.newContext = func(w http.ResponseWriter, r *http.Request, params map[string]string) C {
-				return any(newContext(w, r, params)).(C)
-			}
-		}
-		// For custom context types, leave newContext as nil
-		// It must be provided via WithContextFactory or inherited from parent
-	}
+	// Don't set default factory here - it will be set lazily when needed
+	// This allows inheritance from parent routers to work properly
 
 	return m
 }
@@ -57,6 +47,26 @@ func (m *mux[C]) getErrorHandler() handler.ErrorHandler[C] {
 		return m.errorHandler
 	}
 	return defaultErrorHandler[C]
+}
+
+// createContext creates a context instance using the appropriate factory.
+// It uses the custom factory if set, falls back to default for standard Context type,
+// or panics if no factory is available for custom context types.
+func (m *mux[C]) createContext(w http.ResponseWriter, r *http.Request, params map[string]string) C {
+	// Use custom factory if provided
+	if m.newContext != nil {
+		return m.newContext(w, r, params)
+	}
+
+	// Check if this is the standard Context type
+	var zero C
+	if _, ok := any(zero).(*Context); ok {
+		// Use default factory for standard *Context type
+		return any(newContext(w, r, params)).(C)
+	}
+
+	// For custom context types without a factory, panic
+	panic(ErrNoContextFactory)
 }
 
 // ServeHTTP implements http.Handler interface.
@@ -74,14 +84,16 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	method, ok := methodMap[r.Method]
 	if !ok {
-		// Check if we have a context factory
-		if m.newContext == nil {
-			// Can't create context, respond with error directly
-			http.Error(ww, ErrMethodNotAllowed.Error(), http.StatusMethodNotAllowed)
-			return
-		}
+		// Try to create context for error handling
+		defer func() {
+			if p := recover(); p != nil {
+				// If we can't create context, respond with error directly
+				http.Error(ww, ErrMethodNotAllowed.Error(), http.StatusMethodNotAllowed)
+			}
+		}()
+
 		// Create context with empty params for error handling
-		ctx := m.newContext(ww, r, nil)
+		ctx := m.createContext(ww, r, nil)
 		m.getErrorHandler()(ctx, ErrMethodNotAllowed)
 		return
 	}
@@ -100,14 +112,8 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Check if we have a context factory
-	if m.newContext == nil {
-		// This should not happen in normal usage, but protect against it
-		panic(ErrNoContextFactory)
-	}
-
-	// Create context with params
-	ctx := m.newContext(ww, r, paramsMap)
+	// Create context with params (will panic if no factory available)
+	ctx := m.createContext(ww, r, paramsMap)
 
 	// Recover from panics to prevent server crashes
 	defer func() {
@@ -297,7 +303,7 @@ func (m *mux[C]) With(middlewares ...handler.Middleware[C]) Router[C] {
 		tree:         m.tree,
 		middlewares:  middlewares,
 		errorHandler: m.errorHandler, // Inline routers always inherit parent's error handler
-		newContext:   m.newContext,
+		newContext:   m.newContext,   // Inline routers always inherit parent's context factory
 		logger:       m.logger,
 	}
 
@@ -353,9 +359,12 @@ func (m *mux[C]) Mount(pattern string, sub Router[C]) {
 		subMux.logger = m.logger
 	}
 
-	// Always inherit context factory - required for custom context types to work correctly
-	// Context factory must be consistent across the entire router tree
-	subMux.newContext = m.newContext
+	// Only inherit context factory if not explicitly set on the subrouter
+	// This allows different initialization logic for the same context type
+	// (e.g., cookie-based vs header-based session initialization)
+	if subMux.newContext == nil {
+		subMux.newContext = m.newContext
+	}
 
 	// Stub handler - actual routing is handled by the tree traversal
 	mountHandler := func(ctx C) handler.Response {
