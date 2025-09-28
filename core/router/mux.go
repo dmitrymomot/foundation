@@ -26,29 +26,37 @@ type mux[C handler.Context] struct {
 // newMux creates a new router instance.
 func newMux[C handler.Context](opts ...Option[C]) *mux[C] {
 	m := &mux[C]{
-		tree:         &node[C]{},
-		errorHandler: defaultErrorHandler[C],
-		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
+		tree: &node[C]{},
+		// errorHandler is nil by default, will use defaultErrorHandler if not set
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
 	}
 
 	for _, opt := range opts {
 		opt(m)
 	}
 
-	// If no context factory provided, require it for non-default contexts
+	// If no context factory provided, only set default for standard Context type
 	if m.newContext == nil {
-		m.newContext = func(w http.ResponseWriter, r *http.Request, params map[string]string) C {
-			// Only support default *Context type without factory
-			// For custom contexts, user must provide a factory
-			var zero C
-			if _, ok := any(zero).(*Context); ok {
+		var zero C
+		if _, ok := any(zero).(*Context); ok {
+			// Only set default factory for standard *Context type
+			m.newContext = func(w http.ResponseWriter, r *http.Request, params map[string]string) C {
 				return any(newContext(w, r, params)).(C)
 			}
-			panic(ErrNoContextFactory)
 		}
+		// For custom context types, leave newContext as nil
+		// It must be provided via WithContextFactory or inherited from parent
 	}
 
 	return m
+}
+
+// getErrorHandler returns the error handler to use, falling back to default if nil.
+func (m *mux[C]) getErrorHandler() handler.ErrorHandler[C] {
+	if m.errorHandler != nil {
+		return m.errorHandler
+	}
+	return defaultErrorHandler[C]
 }
 
 // ServeHTTP implements http.Handler interface.
@@ -66,9 +74,15 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	method, ok := methodMap[r.Method]
 	if !ok {
+		// Check if we have a context factory
+		if m.newContext == nil {
+			// Can't create context, respond with error directly
+			http.Error(ww, ErrMethodNotAllowed.Error(), http.StatusMethodNotAllowed)
+			return
+		}
 		// Create context with empty params for error handling
 		ctx := m.newContext(ww, r, nil)
-		m.errorHandler(ctx, ErrMethodNotAllowed)
+		m.getErrorHandler()(ctx, ErrMethodNotAllowed)
 		return
 	}
 
@@ -84,6 +98,12 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				paramsMap[key] = params.Values[i]
 			}
 		}
+	}
+
+	// Check if we have a context factory
+	if m.newContext == nil {
+		// This should not happen in normal usage, but protect against it
+		panic(ErrNoContextFactory)
 	}
 
 	// Create context with params
@@ -110,7 +130,7 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				)
 			} else {
 				// Response not written, can use error handler
-				m.errorHandler(ctx, panicErr)
+				m.getErrorHandler()(ctx, panicErr)
 			}
 		}
 	}()
@@ -166,9 +186,9 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !ww.Written() {
 				ww.Header().Set("Allow", strings.Join(allowed, ", "))
 			}
-			m.errorHandler(ctx, ErrMethodNotAllowed)
+			m.getErrorHandler()(ctx, ErrMethodNotAllowed)
 		} else {
-			m.errorHandler(ctx, ErrNotFound)
+			m.getErrorHandler()(ctx, ErrNotFound)
 		}
 		return
 	}
@@ -179,12 +199,12 @@ func (m *mux[C]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	response := fn(ctx)
 	if response == nil {
-		m.errorHandler(ctx, ErrNilResponse)
+		m.getErrorHandler()(ctx, ErrNilResponse)
 		return
 	}
 
 	if err := response(ww, r); err != nil {
-		m.errorHandler(ctx, err)
+		m.getErrorHandler()(ctx, err)
 		return
 	}
 }
@@ -276,7 +296,7 @@ func (m *mux[C]) With(middlewares ...handler.Middleware[C]) Router[C] {
 		parent:       m,
 		tree:         m.tree,
 		middlewares:  middlewares,
-		errorHandler: m.errorHandler,
+		errorHandler: m.errorHandler, // Inline routers always inherit parent's error handler
 		newContext:   m.newContext,
 		logger:       m.logger,
 	}
@@ -300,6 +320,8 @@ func (m *mux[C]) Route(pattern string, fn func(r Router[C])) Router[C] {
 	}
 	subRouter := newMux[C]()
 
+	// Route method creates inline subrouters that inherit parent's settings
+	// This is different from Mount where subrouters might have their own settings
 	subRouter.errorHandler = m.errorHandler
 	subRouter.newContext = m.newContext
 	subRouter.logger = m.logger
@@ -320,10 +342,19 @@ func (m *mux[C]) Mount(pattern string, sub Router[C]) {
 		panic("foundation: can only mount *mux[C] routers")
 	}
 
-	// Always inherit parent's error handler, logger, and context factory for consistency
-	// This ensures mounted subrouters behave predictably
-	subMux.errorHandler = m.errorHandler
-	subMux.logger = m.logger
+	// Only inherit parent's error handler if not explicitly set on the subrouter
+	// This allows mounted subrouters to have their own error handlers
+	if subMux.errorHandler == nil {
+		subMux.errorHandler = m.errorHandler
+	}
+
+	// Only inherit parent's logger if not explicitly set
+	if subMux.logger == nil {
+		subMux.logger = m.logger
+	}
+
+	// Always inherit context factory - required for custom context types to work correctly
+	// Context factory must be consistent across the entire router tree
 	subMux.newContext = m.newContext
 
 	// Stub handler - actual routing is handled by the tree traversal
