@@ -2,10 +2,12 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +30,12 @@ type Scheduler struct {
 	ticker   *time.Ticker
 	interval time.Duration
 	logger   *slog.Logger
+
+	// State management
+	ctx     context.Context
+	cancel  context.CancelFunc
+	running atomic.Bool
+	wg      sync.WaitGroup
 }
 
 // scheduledTask holds configuration for a periodic task
@@ -121,31 +129,111 @@ func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTas
 
 // Start begins the scheduler's periodic task checking
 func (s *Scheduler) Start(ctx context.Context) error {
-	s.mu.RLock()
-	taskCount := len(s.tasks)
-	s.mu.RUnlock()
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler already started")
+	}
 
+	taskCount := len(s.tasks)
 	if taskCount == 0 {
+		s.mu.Unlock()
 		return ErrSchedulerNotConfigured
 	}
 
-	// Create ticker
+	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.ticker = time.NewTicker(s.interval)
-	defer s.ticker.Stop()
+	s.mu.Unlock()
+
+	// Reset running flag
+	s.running.Store(true)
+
+	s.logger.InfoContext(s.ctx, "scheduler started",
+		slog.Int("task_count", taskCount),
+		slog.Duration("check_interval", s.interval))
 
 	// Check immediately on start
-	s.checkTasks(ctx)
+	s.checkTasksWithWait()
 
 	// Then check periodically
 	for {
 		select {
-		case <-ctx.Done():
-			s.logger.InfoContext(ctx, "scheduler shutting down")
-			return ctx.Err()
+		case <-s.ctx.Done():
+			s.logger.InfoContext(context.Background(), "scheduler stopping")
+			s.running.Store(false)
+			return s.ctx.Err()
 		case <-s.ticker.C:
-			s.checkTasks(ctx)
+			if s.running.Load() {
+				s.checkTasksWithWait()
+			}
 		}
 	}
+}
+
+// Stop gracefully shuts down the scheduler
+func (s *Scheduler) Stop() error {
+	s.mu.Lock()
+	if s.cancel == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler not started")
+	}
+
+	// Stop accepting new checks
+	s.running.Store(false)
+
+	// Stop the ticker
+	if s.ticker != nil {
+		s.ticker.Stop()
+	}
+
+	cancel := s.cancel
+	s.cancel = nil
+	s.mu.Unlock()
+
+	// Cancel context to stop the main loop
+	cancel()
+
+	// Wait for any in-progress checkTasks to complete
+	s.logger.InfoContext(context.Background(), "scheduler stopping, waiting for active checks to complete")
+	s.wg.Wait()
+
+	s.logger.InfoContext(context.Background(), "scheduler stopped")
+	return nil
+}
+
+// Run starts the scheduler and returns a function suitable for errgroup
+func (s *Scheduler) Run(ctx context.Context) func() error {
+	return func() error {
+		// Start the scheduler in a goroutine
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- s.Start(ctx)
+		}()
+
+		// Wait for either context cancellation or Start to fail
+		select {
+		case <-ctx.Done():
+			// Context cancelled, stop the scheduler gracefully
+			_ = s.Stop() // Ignore stop error in normal shutdown
+			<-errCh      // Wait for Start to return
+			return nil   // Normal shutdown is not an error
+		case err := <-errCh:
+			// Start returned (either error or context cancellation)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				// Normal shutdown via context cancellation
+				return nil
+			}
+			// Real error from Start (like ErrSchedulerNotConfigured)
+			return err
+		}
+	}
+}
+
+// checkTasksWithWait is a wrapper around checkTasks that tracks the operation with WaitGroup
+func (s *Scheduler) checkTasksWithWait() {
+	s.wg.Add(1)
+	defer s.wg.Done()
+	s.checkTasks(s.ctx)
 }
 
 // checkTasks checks all registered tasks and creates any that are due

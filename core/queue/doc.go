@@ -136,8 +136,22 @@
 //	// Schedule with intervals
 //	scheduler.AddTask("health_check", queue.EveryMinutes(5))
 //
-//	// Start scheduler
+//	// Start scheduler (multiple options)
+//
+//	// Option 1: Simple start with context
 //	go scheduler.Start(ctx)
+//
+//	// Option 2: Use Run() for errgroup pattern
+//	g, ctx := errgroup.WithContext(context.Background())
+//	g.Go(scheduler.Run(ctx))
+//
+//	// Option 3: Manual lifecycle management
+//	go func() {
+//		if err := scheduler.Start(ctx); err != nil {
+//			log.Printf("scheduler error: %v", err)
+//		}
+//	}()
+//	// Later: scheduler.Stop() for graceful shutdown
 //
 // # Retry Mechanisms
 //
@@ -224,16 +238,26 @@
 //		worker, _ := queue.NewWorker(storage)
 //		scheduler, _ := queue.NewScheduler(storage)
 //
-//		// Start components in goroutines
+//		// Option 1: Using errgroup for coordinated lifecycle
+//		g, ctx := errgroup.WithContext(context.Background())
+//		g.Go(worker.Run(ctx))
+//		g.Go(scheduler.Run(ctx))
+//
+//		// Wait for all components to finish
+//		if err := g.Wait(); err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		// Option 2: Manual lifecycle management
 //		go worker.Start(ctx)
 //		go scheduler.Start(ctx)
 //
 //		// Wait for shutdown signal
 //		<-ctx.Done()
 //
-//		// Workers stop automatically when context is cancelled
-//		// Call Stop() for immediate shutdown
-//		worker.Stop()
+//		// Graceful shutdown
+//		worker.Stop()    // Waits for active tasks to complete
+//		scheduler.Stop() // Waits for active checks to complete
 //
 //		log.Info("Queue system shutdown complete")
 //		return nil
@@ -288,4 +312,18 @@
 //   - SchedulerRepository: CreateTask, GetPendingTaskByName
 //
 // Use queue.NewMemoryStorage() for development or implement custom storage for production.
+//
+// # Graceful Shutdown Support
+//
+// Both Worker and Scheduler support graceful shutdown:
+//
+//	worker.Stop()    // Waits for all active tasks to complete
+//	scheduler.Stop() // Waits for all active checks to complete
+//
+// The Run() method provides errgroup compatibility for coordinated shutdown:
+//
+//	g, ctx := errgroup.WithContext(context.Background())
+//	g.Go(worker.Run(ctx))
+//	g.Go(scheduler.Run(ctx))
+//	g.Wait() // Blocks until all components shut down gracefully
 package queue
