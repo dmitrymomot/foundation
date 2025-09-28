@@ -20,6 +20,8 @@ import (
 type methodTyp uint
 
 const (
+	// mSTUB is a special method type for mount points in the router tree.
+	// It marks nodes where subrouters are mounted, enabling proper request delegation.
 	mSTUB methodTyp = 1 << iota
 	mCONNECT
 	mDELETE
@@ -32,6 +34,8 @@ const (
 	mTRACE
 )
 
+// mALL represents all standard HTTP methods combined.
+// It's used to register handlers that should respond to any HTTP method.
 var mALL = mCONNECT | mDELETE | mGET | mHEAD |
 	mOPTIONS | mPATCH | mPOST | mPUT | mTRACE
 
