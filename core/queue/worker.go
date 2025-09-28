@@ -48,7 +48,9 @@ type Worker struct {
 	lockTimeout  time.Duration
 	logger       *slog.Logger
 
-	// State management
+	// State management for graceful shutdown coordination
+	// ctx/cancel: Controls main processing loop lifecycle
+	// stopping: Atomic flag prevents new tasks during shutdown
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopping atomic.Bool
@@ -213,11 +215,13 @@ func (w *Worker) run() {
 			// Try to acquire a slot
 			select {
 			case w.sem <- struct{}{}:
-				// Use stopMu to ensure we don't add to WaitGroup after Stop() starts
+				// Critical section: prevent race between shutdown and task start
+				// Must check stopping flag while holding stopMu to ensure
+				// Stop() doesn't begin waiting while we're adding to WaitGroup
 				w.stopMu.Lock()
 				if w.stopping.Load() {
 					w.stopMu.Unlock()
-					<-w.sem // Release slot
+					<-w.sem // Release semaphore slot
 					return
 				}
 
@@ -278,7 +282,9 @@ func (w *Worker) pullAndProcess() error {
 func (w *Worker) processTask(task *Task) (retErr error) {
 	start := time.Now()
 
-	// Add panic recovery
+	// Panic recovery ensures system stability
+	// Strategy: Treat panics as task failures with retry eligibility
+	// This prevents a single bad handler from crashing the entire worker
 	defer func() {
 		if r := recover(); r != nil {
 			retErr = fmt.Errorf("panic in handler: %v", r)
@@ -287,7 +293,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 				slog.String("task_id", task.ID.String()),
 				slog.String("task_name", task.TaskName),
 				slog.Any("panic", r))
-			// Treat panic as task failure
+			// Convert panic to regular failure for retry processing
 			duration := time.Since(start)
 			_ = w.handleTaskFailure(task, retErr, duration)
 		}
@@ -302,8 +308,9 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 		return w.handleMissingHandler(task)
 	}
 
-	// Create context with timeout that's not tied to worker lifecycle
-	// This allows graceful shutdown to let tasks complete
+	// Isolation strategy: Create independent context for task execution
+	// Rationale: Worker shutdown should not interrupt running tasks
+	// Tasks get full lockTimeout to complete even during graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), w.lockTimeout)
 	defer cancel()
 

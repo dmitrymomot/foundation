@@ -201,30 +201,38 @@ func (s *Scheduler) Stop() error {
 	return nil
 }
 
-// Run starts the scheduler and returns a function suitable for errgroup
+// Run provides errgroup compatibility for coordinated lifecycle management.
+// Returns a function that:
+// 1. Starts scheduler in background goroutine
+// 2. Handles context cancellation gracefully
+// 3. Distinguishes between normal shutdown and actual errors
+//
+// This pattern allows multiple components to shutdown together:
+//
+//	g.Go(worker.Run(ctx))
+//	g.Go(scheduler.Run(ctx))
+//	g.Wait() // All components stop when context cancels
 func (s *Scheduler) Run(ctx context.Context) func() error {
 	return func() error {
-		// Start the scheduler in a goroutine
+		// Channel coordination: Start() runs independently while we monitor context
 		errCh := make(chan error, 1)
 		go func() {
 			errCh <- s.Start(ctx)
 		}()
 
-		// Wait for either context cancellation or Start to fail
+		// Race between context cancellation and Start() errors
 		select {
 		case <-ctx.Done():
-			// Context cancelled, stop the scheduler gracefully
+			// Graceful shutdown sequence: Stop first, then wait for Start to exit
 			_ = s.Stop() // Ignore stop error in normal shutdown
-			<-errCh      // Wait for Start to return
+			<-errCh      // Ensure Start() completes before returning
 			return nil   // Normal shutdown is not an error
 		case err := <-errCh:
-			// Start returned (either error or context cancellation)
+			// Start returned: differentiate normal vs error conditions
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				// Normal shutdown via context cancellation
-				return nil
+				return nil // Context-driven shutdown is expected
 			}
-			// Real error from Start (like ErrSchedulerNotConfigured)
-			return err
+			return err // Actual error (misconfiguration, etc.)
 		}
 	}
 }
@@ -262,15 +270,16 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTask, now time.Time) error {
 	nextRun := s.calculateNextRun(task, now)
 
-	// Check if task should be scheduled
+	// Scheduling decision: Only create task if due and not already pending
 	if !s.shouldScheduleTask(task, nextRun, now) {
 		return nil
 	}
 
-	// Check if task already exists in DB
+	// Idempotency check: Prevent duplicate tasks for same schedule period
+	// Critical for reliability - ensures scheduler restarts don't create duplicates
 	existing, err := s.repo.GetPendingTaskByName(ctx, task.name)
 	if err == nil && existing != nil {
-		// Task exists - just update our state
+		// Task already exists for this period - sync our state
 		s.updateTaskState(task.name, &existing.ScheduledAt)
 		s.logger.DebugContext(ctx, "periodic task already pending",
 			slog.String("task_name", task.name),
