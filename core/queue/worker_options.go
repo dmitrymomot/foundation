@@ -16,14 +16,12 @@ type workerOptions struct {
 	logger             *slog.Logger
 }
 
-// WithQueues sets which queues the worker should pull from
 func WithQueues(queues ...string) WorkerOption {
 	return func(o *workerOptions) {
 		o.queues = queues
 	}
 }
 
-// WithPullInterval sets how often the worker checks for new tasks
 func WithPullInterval(d time.Duration) WorkerOption {
 	return func(o *workerOptions) {
 		if d > 0 {
@@ -32,7 +30,6 @@ func WithPullInterval(d time.Duration) WorkerOption {
 	}
 }
 
-// WithLockTimeout sets the lock duration for tasks
 func WithLockTimeout(d time.Duration) WorkerOption {
 	return func(o *workerOptions) {
 		if d > 0 {
@@ -41,7 +38,6 @@ func WithLockTimeout(d time.Duration) WorkerOption {
 	}
 }
 
-// WithMaxConcurrentTasks sets the maximum number of concurrent tasks
 func WithMaxConcurrentTasks(n int) WorkerOption {
 	return func(o *workerOptions) {
 		if n > 0 {
@@ -50,7 +46,6 @@ func WithMaxConcurrentTasks(n int) WorkerOption {
 	}
 }
 
-// WithWorkerLogger sets the logger for the worker
 func WithWorkerLogger(logger *slog.Logger) WorkerOption {
 	return func(o *workerOptions) {
 		if logger != nil {

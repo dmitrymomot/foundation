@@ -13,7 +13,6 @@ type schedulerOptions struct {
 	logger        *slog.Logger
 }
 
-// WithCheckInterval sets how often scheduler checks for due tasks
 func WithCheckInterval(d time.Duration) SchedulerOption {
 	return func(o *schedulerOptions) {
 		if d > 0 {
@@ -22,7 +21,6 @@ func WithCheckInterval(d time.Duration) SchedulerOption {
 	}
 }
 
-// WithSchedulerLogger sets the logger for the scheduler
 func WithSchedulerLogger(logger *slog.Logger) SchedulerOption {
 	return func(o *schedulerOptions) {
 		if logger != nil {
@@ -40,7 +38,6 @@ type schedulerTaskOptions struct {
 	maxRetries int8
 }
 
-// WithTaskQueue sets the queue for the scheduled task
 func WithTaskQueue(queue string) SchedulerTaskOption {
 	return func(o *schedulerTaskOptions) {
 		if queue != "" {
@@ -49,7 +46,6 @@ func WithTaskQueue(queue string) SchedulerTaskOption {
 	}
 }
 
-// WithTaskPriority sets the priority for the scheduled task
 func WithTaskPriority(priority Priority) SchedulerTaskOption {
 	return func(o *schedulerTaskOptions) {
 		if priority.Valid() {

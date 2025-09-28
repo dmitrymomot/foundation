@@ -10,7 +10,6 @@ type enqueuerOptions struct {
 	defaultPriority Priority
 }
 
-// WithDefaultQueue sets the default queue name
 func WithDefaultQueue(queue string) EnqueuerOption {
 	return func(o *enqueuerOptions) {
 		if queue != "" {
@@ -19,7 +18,6 @@ func WithDefaultQueue(queue string) EnqueuerOption {
 	}
 }
 
-// WithDefaultPriority sets the default priority
 func WithDefaultPriority(priority Priority) EnqueuerOption {
 	return func(o *enqueuerOptions) {
 		if priority.Valid() {
@@ -40,7 +38,6 @@ type enqueueOptions struct {
 	taskName    string
 }
 
-// WithQueue sets the queue for the task
 func WithQueue(queue string) EnqueueOption {
 	return func(o *enqueueOptions) {
 		if queue != "" {
@@ -49,7 +46,6 @@ func WithQueue(queue string) EnqueueOption {
 	}
 }
 
-// WithPriority sets the priority for the task
 func WithPriority(priority Priority) EnqueueOption {
 	return func(o *enqueueOptions) {
 		o.priority = priority
@@ -66,7 +62,6 @@ func WithMaxRetries(maxRetries int8) EnqueueOption {
 	}
 }
 
-// WithDelay sets a delay before the task can be processed
 func WithDelay(delay time.Duration) EnqueueOption {
 	return func(o *enqueueOptions) {
 		if delay > 0 {
@@ -75,14 +70,12 @@ func WithDelay(delay time.Duration) EnqueueOption {
 	}
 }
 
-// WithScheduledAt sets a specific time for the task to be processed
 func WithScheduledAt(scheduledAt time.Time) EnqueueOption {
 	return func(o *enqueueOptions) {
 		o.scheduledAt = &scheduledAt
 	}
 }
 
-// WithTaskName sets a custom task name
 func WithTaskName(name string) EnqueueOption {
 	return func(o *enqueueOptions) {
 		if name != "" {

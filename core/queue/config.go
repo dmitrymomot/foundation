@@ -19,7 +19,6 @@ type Config struct {
 	DefaultPriority Priority `env:"QUEUE_DEFAULT_PRIORITY" envDefault:"50"` // PriorityMedium
 }
 
-// DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
 		// Worker defaults
