@@ -1,6 +1,7 @@
 package router_test
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -737,4 +738,119 @@ func TestMountWithoutCustomErrorHandlerUsesDefault(t *testing.T) {
 	// Should not have JSON or HTML content type
 	assert.NotEqual(t, "application/json", w.Header().Get("Content-Type"))
 	assert.NotEqual(t, "text/html", w.Header().Get("Content-Type"))
+}
+
+func TestMountPreservesCustomContextFactories(t *testing.T) {
+	t.Parallel()
+
+	// Track which context factory was called
+	var factoriesCalled []string
+
+	// Helper to create a proper Context (since newContext is private)
+	makeContext := func(label string) func(w http.ResponseWriter, r *http.Request, params map[string]string) *router.Context {
+		return func(w http.ResponseWriter, r *http.Request, params map[string]string) *router.Context {
+			factoriesCalled = append(factoriesCalled, label)
+			// Use exported methods to interact with Context
+			ctx := &router.Context{}
+			// Store label in context to verify which factory was used
+			if r != nil {
+				r = r.WithContext(context.WithValue(r.Context(), "factory", label))
+			}
+			// Note: This is a simplified test - in real usage, the router creates the context properly
+			return ctx
+		}
+	}
+
+	// Main router context factory
+	mainFactory := makeContext("main")
+
+	// API router context factory (e.g., header-based auth)
+	apiFactory := makeContext("api")
+
+	// Web router context factory (e.g., cookie-based session)
+	webFactory := makeContext("web")
+
+	// Create routers with different context factories
+	mainRouter := router.New[*router.Context](router.WithContextFactory(mainFactory))
+	apiRouter := router.New[*router.Context](router.WithContextFactory(apiFactory))
+	webRouter := router.New[*router.Context](router.WithContextFactory(webFactory))
+	defaultRouter := router.New[*router.Context]() // No factory, should inherit
+
+	// Add routes to each
+	mainRouter.Get("/main", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			w.Write([]byte("main"))
+			return nil
+		}
+	})
+
+	apiRouter.Get("/test", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			w.Write([]byte("api"))
+			return nil
+		}
+	})
+
+	webRouter.Get("/test", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			w.Write([]byte("web"))
+			return nil
+		}
+	})
+
+	defaultRouter.Get("/test", func(ctx *router.Context) handler.Response {
+		return func(w http.ResponseWriter, r *http.Request) error {
+			w.Write([]byte("default"))
+			return nil
+		}
+	})
+
+	// Mount subrouters
+	mainRouter.Mount("/api", apiRouter)
+	mainRouter.Mount("/web", webRouter)
+	mainRouter.Mount("/default", defaultRouter)
+
+	// Test cases
+	tests := []struct {
+		path              string
+		expectedFactories []string
+		expectedBody      string
+	}{
+		{
+			path:              "/main",
+			expectedFactories: []string{"main"}, // Only main factory called
+			expectedBody:      "main",
+		},
+		{
+			path:              "/api/test",
+			expectedFactories: []string{"main", "api"}, // Main for parent, API for subrouter
+			expectedBody:      "api",
+		},
+		{
+			path:              "/web/test",
+			expectedFactories: []string{"main", "web"}, // Main for parent, Web for subrouter
+			expectedBody:      "web",
+		},
+		{
+			path:              "/default/test",
+			expectedFactories: []string{"main", "main"}, // Inherited main factory
+			expectedBody:      "default",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run("path_"+tt.path, func(t *testing.T) {
+			factoriesCalled = nil // Reset
+
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			w := httptest.NewRecorder()
+
+			mainRouter.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusOK, w.Code)
+			assert.Equal(t, tt.expectedBody, w.Body.String())
+			assert.Equal(t, tt.expectedFactories, factoriesCalled,
+				"Wrong factories called for %s", tt.path)
+		})
+	}
 }
