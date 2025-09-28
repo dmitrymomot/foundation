@@ -3,6 +3,7 @@ package router_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/dmitrymomot/foundation/core/handler"
@@ -48,10 +49,15 @@ func BenchmarkMountedRouterWithDefaultFactory(b *testing.B) {
 
 // BenchmarkMountedRouterWithCustomFactory measures performance with custom context factory
 func BenchmarkMountedRouterWithCustomFactory(b *testing.B) {
-	// Custom factory that does minimal work
+	// Custom factory that simulates realistic auth token validation
 	customFactory := func(w http.ResponseWriter, r *http.Request, params map[string]string) *router.Context {
-		// This simulates real work like session extraction
-		_ = r.Header.Get("Authorization")
+		// Simulate real token validation work
+		auth := r.Header.Get("Authorization")
+		if strings.HasPrefix(auth, "Bearer ") {
+			// Simulate token parsing and validation
+			token := auth[7:]
+			_ = len(token) > 0 // Simulate token validation check
+		}
 		return &router.Context{}
 	}
 

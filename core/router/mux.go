@@ -58,15 +58,17 @@ func (m *mux[C]) createContext(w http.ResponseWriter, r *http.Request, params ma
 		return m.newContext(w, r, params)
 	}
 
-	// Check if this is the standard Context type
+	// Check if this is the standard Context type using zero-value type assertion.
+	// This pattern allows routers to work with the default *Context type without
+	// requiring an explicit factory, while still supporting custom context types.
 	var zero C
 	if _, ok := any(zero).(*Context); ok {
-		// Use default factory for standard *Context type
+		// Use built-in factory for standard *Context type
 		return any(newContext(w, r, params)).(C)
 	}
 
-	// For custom context types without a factory, panic
-	panic(ErrNoContextFactory)
+	// For custom context types without a factory, panic with helpful context
+	panic(fmt.Errorf("%w: custom context type %T requires WithContextFactory option", ErrNoContextFactory, zero))
 }
 
 // ServeHTTP implements http.Handler interface.
