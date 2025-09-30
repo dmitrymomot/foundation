@@ -3,9 +3,10 @@ package queue_test
 import (
 	"testing"
 
-	"github.com/dmitrymomot/foundation/core/queue"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/queue"
 )
 
 func TestNewFromConfig_WithEmptyConfig(t *testing.T) {
