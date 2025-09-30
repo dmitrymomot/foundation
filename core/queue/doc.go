@@ -59,9 +59,13 @@
 //	})
 //	worker.RegisterHandler(handler)
 //
-//	// Start worker
+//	// Start worker (blocking operation - run in goroutine)
 //	ctx := context.Background()
-//	go worker.Start(ctx)
+//	go func() {
+//		if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+//			log.Printf("worker error: %v", err)
+//		}
+//	}()
 //
 //	// Enqueue tasks
 //	err = enqueuer.Enqueue(ctx, EmailPayload{
@@ -144,22 +148,22 @@
 //	// Schedule with intervals
 //	scheduler.AddTask("health_check", queue.EveryMinutes(5))
 //
-//	// Start scheduler (multiple options)
+//	// Start scheduler (blocking operation - choose one pattern)
 //
-//	// Option 1: Simple start with context
-//	go scheduler.Start(ctx)
-//
-//	// Option 2: Use Run() for errgroup pattern
-//	g, ctx := errgroup.WithContext(context.Background())
-//	g.Go(scheduler.Run(ctx))
-//
-//	// Option 3: Manual lifecycle management
+//	// Pattern 1: Manual goroutine
 //	go func() {
-//		if err := scheduler.Start(ctx); err != nil {
+//		if err := scheduler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 //			log.Printf("scheduler error: %v", err)
 //		}
 //	}()
-//	// Later: scheduler.Stop() for graceful shutdown
+//	// Later call: scheduler.Stop() for graceful shutdown
+//
+//	// Pattern 2: Use Run() for errgroup
+//	g, ctx := errgroup.WithContext(context.Background())
+//	g.Go(scheduler.Run(ctx))
+//	if err := g.Wait(); err != nil {
+//		log.Fatal(err)
+//	}
 //
 // # Retry Mechanisms
 //
@@ -257,15 +261,27 @@
 //		}
 //
 //		// Option 2: Manual lifecycle management
-//		go worker.Start(ctx)
-//		go scheduler.Start(ctx)
+//		go func() {
+//			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+//				log.Printf("worker error: %v", err)
+//			}
+//		}()
+//		go func() {
+//			if err := scheduler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+//				log.Printf("scheduler error: %v", err)
+//			}
+//		}()
 //
 //		// Wait for shutdown signal
 //		<-ctx.Done()
 //
-//		// Graceful shutdown
-//		worker.Stop()    // Waits for active tasks to complete
-//		scheduler.Stop() // Waits for active checks to complete
+//		// Graceful shutdown with timeout (returns error if timeout exceeded)
+//		if err := worker.Stop(); err != nil {
+//			log.Printf("worker shutdown timeout: %v", err)
+//		}
+//		if err := scheduler.Stop(); err != nil {
+//			log.Printf("scheduler shutdown timeout: %v", err)
+//		}
 //
 //		log.Info("Queue system shutdown complete")
 //		return nil
@@ -343,27 +359,50 @@
 //
 // # Graceful Shutdown Support
 //
-// Both Worker and Scheduler support graceful shutdown with two complementary approaches:
+// Both Worker and Scheduler support graceful shutdown with configurable timeouts.
 //
-// ## Manual Lifecycle Management
+// ## Lifecycle Methods
+//
+//   - Start(ctx) - Blocking operation that runs until context is cancelled
+//   - Stop() - Blocking graceful shutdown with configurable timeout
+//   - Run(ctx) - Convenience wrapper for errgroup pattern
+//
+// ## Pattern 1: Manual Lifecycle Management
 //
 // Use Start() and Stop() methods for direct control:
 //
-//	// Start components
-//	go worker.Start(ctx)
-//	go scheduler.Start(ctx)
+//	ctx, cancel := context.WithCancel(context.Background())
 //
-//	// Later, graceful shutdown
-//	worker.Stop()    // Waits for all active tasks to complete
-//	scheduler.Stop() // Waits for all active checks to complete
+//	// Start components (blocking - use goroutines)
+//	go func() {
+//		if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+//			log.Printf("worker error: %v", err)
+//		}
+//	}()
+//	go func() {
+//		if err := scheduler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+//			log.Printf("scheduler error: %v", err)
+//		}
+//	}()
 //
-// ## errgroup Pattern with Run()
+//	// Later, trigger graceful shutdown
+//	cancel() // Signal components to stop
 //
-// The Run() method provides errgroup compatibility for coordinated shutdown:
+//	// Wait for graceful shutdown with timeout (default 30s)
+//	if err := worker.Stop(); err != nil {
+//		log.Printf("worker shutdown timeout: %v", err)
+//	}
+//	if err := scheduler.Stop(); err != nil {
+//		log.Printf("scheduler shutdown timeout: %v", err)
+//	}
+//
+// ## Pattern 2: errgroup for Coordinated Shutdown (Recommended)
+//
+// The Run() method provides errgroup compatibility:
 //
 //	g, ctx := errgroup.WithContext(context.Background())
-//	g.Go(worker.Run(ctx))     // Returns func() error for errgroup
-//	g.Go(scheduler.Run(ctx))  // Returns func() error for errgroup
+//	g.Go(worker.Run(ctx))
+//	g.Go(scheduler.Run(ctx))
 //
 //	// Blocks until context cancellation or error
 //	if err := g.Wait(); err != nil {
@@ -371,13 +410,24 @@
 //	}
 //
 // The Run() method automatically handles Start() and Stop() lifecycle:
-// 1. Calls Start() internally when the returned function executes
-// 2. Monitors context cancellation
-// 3. Calls Stop() for graceful shutdown when context is cancelled
-// 4. Returns nil for normal shutdown, error for unexpected failures
+//  1. Starts the component (calls Start internally)
+//  2. Monitors context cancellation
+//  3. Calls Stop() for graceful shutdown when context is cancelled
+//  4. Returns nil for normal shutdown, error for actual failures
 //
-// This pattern is ideal for coordinated shutdown of multiple components
-// where all must stop gracefully before the application exits.
+// ## Configuring Shutdown Timeout
+//
+//	// Configure custom shutdown timeout (default is 30s)
+//	worker, _ := queue.NewWorker(storage,
+//		queue.WithShutdownTimeout(60*time.Second),
+//	)
+//
+//	scheduler, _ := queue.NewScheduler(storage,
+//		queue.WithSchedulerShutdownTimeout(60*time.Second),
+//	)
+//
+// If the shutdown timeout is exceeded, Stop() returns an error but does not
+// block further. Active tasks/checks may be abandoned.
 // # Core Types and Constants
 //
 // ## Task Priorities
