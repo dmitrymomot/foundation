@@ -96,12 +96,13 @@ func NewMemoryStorage(opts ...MemoryStorageOption) *MemoryStorage {
 	return ms
 }
 
-// Close stops the background goroutines. Deprecated: Use Stop() instead.
+// Close stops the background goroutines.
+// Deprecated: Use Stop() instead for consistency with other components.
 func (ms *MemoryStorage) Close() error {
 	return ms.Stop()
 }
 
-// CreateTask implements EnqueuerRepository and SchedulerRepository
+// CreateTask stores a new task in memory.
 func (ms *MemoryStorage) CreateTask(ctx context.Context, task *Task) error {
 	if task == nil {
 		return errors.New("task cannot be nil")
@@ -110,23 +111,20 @@ func (ms *MemoryStorage) CreateTask(ctx context.Context, task *Task) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
-	// Check if task already exists
 	if _, exists := ms.tasks[task.ID]; exists {
 		return fmt.Errorf("task with ID %s already exists", task.ID)
 	}
 
-	// Clone task to prevent external modifications
 	taskCopy := *task
 	ms.tasks[task.ID] = &taskCopy
 
-	// Update indexes
 	ms.byQueue[task.Queue] = append(ms.byQueue[task.Queue], task.ID)
 	ms.byStatus[task.Status] = append(ms.byStatus[task.Status], task.ID)
 
 	return nil
 }
 
-// ClaimTask implements WorkerRepository
+// ClaimTask atomically claims the next highest-priority eligible task.
 func (ms *MemoryStorage) ClaimTask(ctx context.Context, workerID uuid.UUID, queues []string, lockDuration time.Duration) (*Task, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -171,22 +169,19 @@ func (ms *MemoryStorage) ClaimTask(ctx context.Context, workerID uuid.UUID, queu
 		return nil, ErrNoTaskToClaim
 	}
 
-	// Claim the task
 	lockUntil := now.Add(lockDuration)
 	bestTask.Status = TaskStatusProcessing
 	bestTask.LockedUntil = &lockUntil
 	bestTask.LockedBy = &workerID
 
-	// Update status index
 	ms.removeFromStatusIndex(bestTask.ID, TaskStatusPending)
 	ms.byStatus[TaskStatusProcessing] = append(ms.byStatus[TaskStatusProcessing], bestTask.ID)
 
-	// Return a copy to prevent external modifications
 	taskCopy := *bestTask
 	return &taskCopy, nil
 }
 
-// CompleteTask implements WorkerRepository
+// CompleteTask marks a task as successfully completed.
 func (ms *MemoryStorage) CompleteTask(ctx context.Context, taskID uuid.UUID) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -206,14 +201,13 @@ func (ms *MemoryStorage) CompleteTask(ctx context.Context, taskID uuid.UUID) err
 	task.LockedUntil = nil
 	task.LockedBy = nil
 
-	// Update status index
 	ms.removeFromStatusIndex(taskID, TaskStatusProcessing)
 	ms.byStatus[TaskStatusCompleted] = append(ms.byStatus[TaskStatusCompleted], taskID)
 
 	return nil
 }
 
-// FailTask implements WorkerRepository
+// FailTask records a task failure and resets to pending for retry if retries remain.
 func (ms *MemoryStorage) FailTask(ctx context.Context, taskID uuid.UUID, errorMsg string) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -237,7 +231,6 @@ func (ms *MemoryStorage) FailTask(ctx context.Context, taskID uuid.UUID, errorMs
 		ms.removeFromStatusIndex(taskID, TaskStatusProcessing)
 		ms.byStatus[TaskStatusFailed] = append(ms.byStatus[TaskStatusFailed], taskID)
 	} else {
-		// Reset to pending for retry
 		task.Status = TaskStatusPending
 		ms.removeFromStatusIndex(taskID, TaskStatusProcessing)
 		ms.byStatus[TaskStatusPending] = append(ms.byStatus[TaskStatusPending], taskID)
@@ -253,7 +246,7 @@ func (ms *MemoryStorage) FailTask(ctx context.Context, taskID uuid.UUID, errorMs
 	return nil
 }
 
-// MoveToDLQ implements WorkerRepository
+// MoveToDLQ moves a failed task to the dead letter queue for manual inspection.
 func (ms *MemoryStorage) MoveToDLQ(ctx context.Context, taskID uuid.UUID) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -263,7 +256,6 @@ func (ms *MemoryStorage) MoveToDLQ(ctx context.Context, taskID uuid.UUID) error 
 		return fmt.Errorf("task %s not found", taskID)
 	}
 
-	// Create DLQ entry
 	dlqEntry := &TasksDlq{
 		ID:         uuid.New(),
 		TaskID:     task.ID,
@@ -284,7 +276,6 @@ func (ms *MemoryStorage) MoveToDLQ(ctx context.Context, taskID uuid.UUID) error 
 
 	ms.dlq[dlqEntry.ID] = dlqEntry
 
-	// Remove from main storage and indexes
 	ms.removeFromStatusIndex(taskID, task.Status)
 	ms.removeFromQueueIndex(taskID, task.Queue)
 	delete(ms.tasks, taskID)
@@ -292,7 +283,7 @@ func (ms *MemoryStorage) MoveToDLQ(ctx context.Context, taskID uuid.UUID) error 
 	return nil
 }
 
-// ExtendLock implements WorkerRepository
+// ExtendLock extends the lock duration for a long-running task.
 func (ms *MemoryStorage) ExtendLock(ctx context.Context, taskID uuid.UUID, duration time.Duration) error {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
@@ -312,26 +303,21 @@ func (ms *MemoryStorage) ExtendLock(ctx context.Context, taskID uuid.UUID, durat
 	return nil
 }
 
-// GetPendingTaskByName implements SchedulerRepository
+// GetPendingTaskByName finds a pending task by name for scheduler idempotency checks.
 func (ms *MemoryStorage) GetPendingTaskByName(ctx context.Context, taskName string) (*Task, error) {
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
-	// Search through pending tasks for matching name
 	for _, taskID := range ms.byStatus[TaskStatusPending] {
 		task := ms.tasks[taskID]
 		if task.TaskName == taskName {
-			// Return a copy to prevent external modifications
 			taskCopy := *task
 			return &taskCopy, nil
 		}
 	}
 
-	// No matching task found
 	return nil, nil
 }
-
-// Helper methods
 
 func (ms *MemoryStorage) removeFromStatusIndex(taskID uuid.UUID, status TaskStatus) {
 	ms.byStatus[status] = slices.DeleteFunc(ms.byStatus[status], func(id uuid.UUID) bool {
@@ -372,7 +358,6 @@ func (ms *MemoryStorage) Start(ctx context.Context) error {
 			ms.logger.InfoContext(context.Background(), "memory storage stopping")
 			return ms.ctx.Err()
 		case <-ticker.C:
-			// Check context again before expensive operation
 			select {
 			case <-ms.ctx.Done():
 				return ms.ctx.Err()
@@ -396,10 +381,8 @@ func (ms *MemoryStorage) Stop() error {
 	ms.cancel = nil
 	ms.mu.Unlock()
 
-	// Cancel context to stop main loop
 	cancel()
 
-	// Wait for any in-progress lock expiration to complete with timeout
 	ms.logger.InfoContext(context.Background(), "memory storage stopping, waiting for lock expiration to complete",
 		slog.Duration("timeout", ms.shutdownTimeout))
 
@@ -449,7 +432,7 @@ func (ms *MemoryStorage) Run(ctx context.Context) func() error {
 	}
 }
 
-// expireLocksWithWait is a wrapper around expireLocks that tracks the operation with WaitGroup
+// expireLocksWithWait wraps expireLocks with WaitGroup tracking for graceful shutdown.
 func (ms *MemoryStorage) expireLocksWithWait() {
 	ms.mu.RLock()
 	if ms.cancel == nil {
@@ -474,12 +457,10 @@ func (ms *MemoryStorage) expireLocks() {
 	for _, taskID := range ms.byStatus[TaskStatusProcessing] {
 		task := ms.tasks[taskID]
 		if task.LockedUntil != nil && task.LockedUntil.Before(now) {
-			// Release expired lock and reset task to pending for retry
 			task.Status = TaskStatusPending
 			task.LockedUntil = nil
 			task.LockedBy = nil
 
-			// Update indexes to make task claimable again
 			ms.removeFromStatusIndex(taskID, TaskStatusProcessing)
 			ms.byStatus[TaskStatusPending] = append(ms.byStatus[TaskStatusPending], taskID)
 			freed++
@@ -506,13 +487,12 @@ func (ms *MemoryStorage) Stats() MemoryStorageStats {
 	}
 }
 
-// Healthcheck validates that the memory storage is operational.
+// Healthcheck validates that the memory storage lock expiration manager is running.
 // Returns nil if healthy, or an error describing the health issue.
 // This method is thread-safe and suitable for use in health check endpoints.
 func (ms *MemoryStorage) Healthcheck(ctx context.Context) error {
 	stats := ms.Stats()
 
-	// Memory storage should always be running for proper task recovery
 	if !stats.IsRunning {
 		return fmt.Errorf("lock expiration manager is not running")
 	}
