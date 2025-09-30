@@ -9,4 +9,8 @@ var (
 	ErrContextCancelled  = errors.New("context cancelled")
 	ErrStoreUnavailable  = errors.New("store unavailable")
 	ErrRateLimitExceeded = errors.New("rate limit exceeded")
+
+	// Lifecycle errors
+	ErrMemoryStoreAlreadyStarted = errors.New("memory store already started")
+	ErrMemoryStoreNotStarted     = errors.New("memory store not started")
 )

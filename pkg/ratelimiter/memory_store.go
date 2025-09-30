@@ -147,7 +147,7 @@ func (ms *MemoryStore) Start(ctx context.Context) error {
 	ms.mu.Lock()
 	if ms.cancel != nil {
 		ms.mu.Unlock()
-		return fmt.Errorf("memory store already started")
+		return ErrMemoryStoreAlreadyStarted
 	}
 
 	// Skip starting if cleanup is disabled
@@ -185,7 +185,7 @@ func (ms *MemoryStore) Stop() error {
 	ms.mu.Lock()
 	if ms.cancel == nil {
 		ms.mu.Unlock()
-		return fmt.Errorf("memory store not started")
+		return ErrMemoryStoreNotStarted
 	}
 
 	cancel := ms.cancel
