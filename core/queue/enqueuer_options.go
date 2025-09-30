@@ -10,6 +10,7 @@ type enqueuerOptions struct {
 	defaultPriority Priority
 }
 
+// WithDefaultQueue sets the default queue for tasks when WithQueue is not specified.
 func WithDefaultQueue(queue string) EnqueuerOption {
 	return func(o *enqueuerOptions) {
 		if queue != "" {
@@ -18,6 +19,7 @@ func WithDefaultQueue(queue string) EnqueuerOption {
 	}
 }
 
+// WithDefaultPriority sets the default priority for tasks when WithPriority is not specified.
 func WithDefaultPriority(priority Priority) EnqueuerOption {
 	return func(o *enqueuerOptions) {
 		if priority.Valid() {
@@ -38,6 +40,7 @@ type enqueueOptions struct {
 	taskName    string
 }
 
+// WithQueue overrides the default queue for a specific task.
 func WithQueue(queue string) EnqueueOption {
 	return func(o *enqueueOptions) {
 		if queue != "" {
@@ -46,6 +49,7 @@ func WithQueue(queue string) EnqueueOption {
 	}
 }
 
+// WithPriority overrides the default priority for a specific task.
 func WithPriority(priority Priority) EnqueueOption {
 	return func(o *enqueueOptions) {
 		o.priority = priority
@@ -62,6 +66,7 @@ func WithMaxRetries(maxRetries int8) EnqueueOption {
 	}
 }
 
+// WithDelay schedules the task to run after the specified duration from now.
 func WithDelay(delay time.Duration) EnqueueOption {
 	return func(o *enqueueOptions) {
 		if delay > 0 {
@@ -70,12 +75,14 @@ func WithDelay(delay time.Duration) EnqueueOption {
 	}
 }
 
+// WithScheduledAt schedules the task to run at a specific time.
 func WithScheduledAt(scheduledAt time.Time) EnqueueOption {
 	return func(o *enqueueOptions) {
 		o.scheduledAt = &scheduledAt
 	}
 }
 
+// WithTaskName overrides the auto-generated task name derived from payload type.
 func WithTaskName(name string) EnqueueOption {
 	return func(o *enqueueOptions) {
 		if name != "" {
