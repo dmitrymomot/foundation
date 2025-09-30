@@ -153,7 +153,7 @@ func (ms *MemoryStore) Start(ctx context.Context) error {
 	// Skip starting if cleanup is disabled
 	if ms.cleanupInterval <= 0 {
 		ms.mu.Unlock()
-		return fmt.Errorf("cleanup interval is not configured")
+		return fmt.Errorf("cleanup interval must be > 0, got %v (use WithCleanupInterval to configure)", ms.cleanupInterval)
 	}
 
 	ms.ctx, ms.cancel = context.WithCancel(ctx)
@@ -260,12 +260,15 @@ func (ms *MemoryStore) cleanupWithWait() {
 }
 
 // removeStale removes buckets that haven't been accessed recently to prevent memory leaks.
+// Buckets are considered stale if they haven't been accessed for 1 hour.
+// This threshold balances memory efficiency with avoiding premature cleanup of
+// infrequently-used but still active rate limit keys.
 func (ms *MemoryStore) removeStale() {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
 	now := time.Now()
-	staleThreshold := 1 * time.Hour
+	const staleThreshold = 1 * time.Hour // Buckets unused for 1+ hour are cleaned up
 
 	removed := 0
 	for key, b := range ms.buckets {

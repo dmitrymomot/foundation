@@ -372,7 +372,13 @@ func (ms *MemoryStorage) Start(ctx context.Context) error {
 			ms.logger.InfoContext(context.Background(), "memory storage stopping")
 			return ms.ctx.Err()
 		case <-ticker.C:
-			ms.expireLocksWithWait()
+			// Check context again before expensive operation
+			select {
+			case <-ms.ctx.Done():
+				return ms.ctx.Err()
+			default:
+				ms.expireLocksWithWait()
+			}
 		}
 	}
 }

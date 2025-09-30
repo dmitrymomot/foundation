@@ -222,7 +222,7 @@ func TestMemoryStore_StartStop(t *testing.T) {
 		ctx := context.Background()
 		err := store.Start(ctx)
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not configured")
+		assert.Contains(t, err.Error(), "must be > 0")
 	})
 }
 
