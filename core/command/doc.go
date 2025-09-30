@@ -1,5 +1,5 @@
-// Package command provides a command bus implementation for executing commands
-// with pluggable transport strategies.
+// Package command provides a type-safe command bus implementation with pluggable
+// transport strategies, middleware support, and unified panic recovery.
 //
 // Commands represent intent/orders with one-to-one handler relationships.
 // Each command has exactly one handler, and missing handlers are errors.
@@ -7,15 +7,20 @@
 // # Core Concepts
 //
 // Commands are intent-based operations like CreateUser, GenerateThumbnail, SendEmail.
-// Each command type maps to exactly one handler. The package provides two execution
-// strategies via transport implementations:
+// Each command type maps to exactly one handler. The package provides:
 //
-//   - Sync: Direct synchronous execution (zero overhead)
-//   - Channel: Asynchronous execution via buffered channels
+//   - Two execution strategies (Sync, Channel)
+//   - Type-safe handlers via generics
+//   - Immutable middleware configured at construction
+//   - Context-based lifecycle management
+//   - Unified panic recovery across all transports
+//   - Decorator pattern for retry, timeout, backoff
 //
 // # Quick Start
 //
 // Basic synchronous command execution:
+//
+//	import "github.com/dmitrymomot/foundation/core/command"
 //
 //	type CreateUser struct {
 //	    Email string
@@ -82,7 +87,7 @@
 // Example:
 //
 //	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel() // Graceful shutdown
+//	defer cancel() // Triggers graceful shutdown
 //
 //	dispatcher := command.NewDispatcher(
 //	    command.WithChannelTransport(ctx, 100, command.WithWorkers(5)),
@@ -93,10 +98,11 @@
 //
 //	dispatcher.Register(command.NewHandlerFunc(sendEmailHandler))
 //
-//	// Returns immediately
+//	// Returns immediately, preserving dispatch context for handler
 //	err := dispatcher.Dispatch(ctx, SendEmail{To: "user@example.com"})
 //	if err != nil {
 //	    // ErrBufferFull or ErrHandlerNotFound only
+//	    // Handler errors are reported via WithErrorHandler callback
 //	    return err
 //	}
 //
@@ -105,8 +111,9 @@
 // Middleware wraps handlers to add cross-cutting functionality like logging,
 // metrics, tracing, validation, or authorization.
 //
-// Middleware must be configured at construction time using WithMiddleware().
-// It cannot be added or modified after the dispatcher is created.
+// IMPORTANT: Middleware is immutable and must be configured at construction time
+// using WithMiddleware(). It cannot be added or modified after the dispatcher
+// is created. This design ensures thread-safety and predictable behavior.
 //
 // Built-in middleware:
 //   - LoggingMiddleware: Logs command execution with timing
@@ -206,10 +213,27 @@
 //	// err is ErrBufferFull or ErrHandlerNotFound
 //	// Handler errors handled via WithErrorHandler callback
 //
+// # Panic Recovery
+//
+// All transports include unified panic recovery. If a handler panics, the panic
+// is caught and converted to an error, preventing the entire process from crashing.
+//
+//	func riskyHandler(ctx context.Context, cmd ProcessData) error {
+//	    panic("something went wrong") // Caught by transport
+//	}
+//
+// Sync transport: Returns panic as error to caller
+// Channel transport: Reports panic via WithErrorHandler callback
+//
+// The original dispatch context is always propagated to handlers, even in async
+// transports, ensuring context values and cancellation work correctly.
+//
 // # Graceful Shutdown
 //
-// Channel transport uses context-based lifecycle management.
-// Workers drain pending commands when the context is cancelled:
+// Channel transport uses context-based lifecycle management for clean shutdown.
+// When the context is cancelled, workers drain all pending commands before exiting.
+//
+// Basic shutdown:
 //
 //	ctx, cancel := context.WithCancel(context.Background())
 //	defer cancel() // Triggers graceful shutdown
@@ -219,8 +243,15 @@
 //	    command.WithErrorHandler(errorHandler),
 //	)
 //
-//	// With signal handling:
-//	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+//	// When done:
+//	cancel() // Workers drain channel and exit gracefully
+//
+// Signal-based shutdown:
+//
+//	import "os/signal"
+//	import "syscall"
+//
+//	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 //	defer stop()
 //
 //	dispatcher := command.NewDispatcher(
@@ -228,19 +259,25 @@
 //	    command.WithErrorHandler(errorHandler),
 //	)
 //
+//	// Shutdown happens automatically on SIGTERM/SIGINT
+//
+// Note: Sync transport has no lifecycle management - it executes immediately and
+// requires no cleanup.
+//
 // # Best Practices
 //
-// 1. Commands should be self-contained data structures
-// 2. Include all necessary data in the command (don't rely on context values)
-// 3. Use sync transport for testing
-// 4. Use sync transport for transactional operations
-// 5. Use channel transport for fire-and-forget operations
-// 6. Always provide an error handler with async transports
-// 7. Pass a cancellable context to WithChannelTransport for lifecycle management
-// 8. Configure middleware at construction time using WithMiddleware()
-// 9. Apply decorators at registration time, not in handlers
-// 10. Use middleware for cross-cutting concerns
-// 11. Keep handlers simple and focused
+// 1. Commands should be self-contained data structures with all needed data
+// 2. Use sync transport for testing (deterministic, no timing issues)
+// 3. Use sync transport for transactional operations (immediate errors)
+// 4. Use channel transport for fire-and-forget operations
+// 5. Always provide WithErrorHandler with async transports
+// 6. Pass a cancellable context to WithChannelTransport for lifecycle management
+// 7. Configure middleware at construction time (immutable after creation)
+// 8. Apply decorators at registration time, not inside handlers
+// 9. Use middleware for cross-cutting concerns (logging, metrics, tracing)
+// 10. Keep handlers simple and focused on business logic
+// 11. Let panic recovery handle unexpected failures gracefully
+// 12. Dispatch context is propagated to handlers - use it for cancellation/values
 //
 // # Upgrade Path
 //
