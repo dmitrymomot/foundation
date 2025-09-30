@@ -31,8 +31,9 @@ func (h *middlewareHandler) Handle(ctx context.Context, payload any) error {
 //
 // Example:
 //
-//	dispatcher := command.NewDispatcher()
-//	dispatcher.Use(command.LoggingMiddleware(logger))
+//	dispatcher := command.NewDispatcher(
+//	    command.WithMiddleware(command.LoggingMiddleware(logger)),
+//	)
 func LoggingMiddleware(logger *slog.Logger) Middleware {
 	return func(next Handler) Handler {
 		return &middlewareHandler{

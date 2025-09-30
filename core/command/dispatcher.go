@@ -47,12 +47,10 @@ func NewDispatcher(opts ...Option) *Dispatcher {
 		logger:     slog.Default(),
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(d)
 	}
 
-	// Default to sync transport if none specified
 	if d.transport == nil {
 		d.transport = newSyncTransport(d.getHandler)
 	}
@@ -110,7 +108,6 @@ func (d *Dispatcher) getHandler(cmdName string) (Handler, bool) {
 		return nil, false
 	}
 
-	// Apply middleware to handler
 	if len(middleware) > 0 {
 		handler = chainMiddleware(handler, middleware)
 	}

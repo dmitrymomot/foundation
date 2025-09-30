@@ -176,7 +176,7 @@
 // Composition:
 //
 //	handler := command.WithTimeout(
-//	    command.WithRetryAndBackoff(
+//	    command.WithBackoff(
 //	        command.NewHandlerFunc(apiCallHandler),
 //	        5, 100*time.Millisecond, 10*time.Second,
 //	    ),

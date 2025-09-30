@@ -24,27 +24,22 @@ var commandNameCache sync.Map
 // For pointers to structs, it returns the struct name.
 // Results are cached to avoid repeated reflection overhead.
 func getCommandName(t reflect.Type) string {
-	// Check cache first
 	if name, ok := commandNameCache.Load(t); ok {
 		return name.(string)
 	}
 
-	// Dereference pointers
 	original := t
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
-	// For named types, use the name
 	var name string
 	if t.Name() != "" {
 		name = t.Name()
 	} else {
-		// Fallback to string representation
 		name = t.String()
 	}
 
-	// Cache the result using the original type (before dereferencing)
 	commandNameCache.Store(original, name)
 	return name
 }
@@ -57,8 +52,7 @@ func getCommandNameFromInstance(cmd any) string {
 // chainMiddleware applies multiple middleware in order.
 // The first middleware in the slice is the outermost (executed first).
 func chainMiddleware(handler Handler, middleware []Middleware) Handler {
-	// Apply middleware in reverse order so the first middleware
-	// in the slice becomes the outermost wrapper
+	// Reverse order required: wrapping innermost first makes it execute last
 	for i := len(middleware) - 1; i >= 0; i-- {
 		handler = middleware[i](handler)
 	}

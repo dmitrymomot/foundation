@@ -40,7 +40,6 @@ func WithRetry(handler Handler, maxRetries int) Handler {
 
 			for attempt := 0; attempt <= maxRetries; attempt++ {
 				if attempt > 0 {
-					// Check context before retry
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
@@ -87,14 +86,13 @@ func WithBackoff(handler Handler, maxRetries int, initialDelay, maxDelay time.Du
 
 			for attempt := 0; attempt <= maxRetries; attempt++ {
 				if attempt > 0 {
-					// Wait with backoff
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
 					case <-time.After(delay):
 					}
 
-					// Exponential backoff with max cap
+					// Cap exponential growth to prevent unbounded waits
 					delay *= 2
 					if delay > maxDelay {
 						delay = maxDelay
@@ -132,7 +130,6 @@ func WithTimeout(handler Handler, timeout time.Duration) Handler {
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
 
-			// Execute in goroutine to respect timeout
 			errCh := make(chan error, 1)
 			go func() {
 				errCh <- handler.Handle(ctx, payload)
@@ -146,19 +143,4 @@ func WithTimeout(handler Handler, timeout time.Duration) Handler {
 			}
 		},
 	}
-}
-
-// WithRetryAndBackoff combines retry with exponential backoff.
-// This is a convenience function that composes WithBackoff.
-//
-// Example:
-//
-//	handler := command.WithRetryAndBackoff(
-//	    command.NewHandlerFunc(apiCallHandler),
-//	    5,                    // max retries
-//	    100*time.Millisecond, // initial delay
-//	    10*time.Second,       // max delay
-//	)
-func WithRetryAndBackoff(handler Handler, maxRetries int, initialDelay, maxDelay time.Duration) Handler {
-	return WithBackoff(handler, maxRetries, initialDelay, maxDelay)
 }

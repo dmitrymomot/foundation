@@ -70,12 +70,10 @@ func newChannelTransport(
 		ctx:          ctx,
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(t)
 	}
 
-	// Start workers
 	for i := 0; i < t.workers; i++ {
 		t.wg.Add(1)
 		go t.worker()
@@ -99,7 +97,6 @@ func newChannelTransport(
 // Returns ErrHandlerNotFound if no handler is registered.
 // The dispatch context is preserved and passed to the handler.
 func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload any) error {
-	// Validate handler exists (fail fast)
 	if _, exists := t.getHandler(cmdName); !exists {
 		return fmt.Errorf("%w: %s", ErrHandlerNotFound, cmdName)
 	}
@@ -133,11 +130,9 @@ func (t *channelTransport) worker() {
 // handleCommand processes a single command.
 // Panics are caught and converted to errors by safeHandle.
 func (t *channelTransport) handleCommand(env envelope) {
-	// Get handler (with middleware applied)
 	handler, exists := t.getHandler(env.Name)
 	if !exists {
-		// This shouldn't happen since we validate in Dispatch,
-		// but handle it gracefully anyway
+		// Defensive: handler was validated in Dispatch but could be unregistered in a race
 		err := fmt.Errorf("%w: %s", ErrHandlerNotFound, env.Name)
 		t.logger.Error("handler not found",
 			slog.String("command", env.Name))
@@ -148,8 +143,6 @@ func (t *channelTransport) handleCommand(env envelope) {
 		return
 	}
 
-	// Execute handler with dispatch context
-	// safeHandle catches panics and converts them to errors
 	if err := safeHandle(handler, env.Context, env.Payload); err != nil {
 		if t.errorHandler != nil {
 			t.errorHandler(env.Context, env.Name, err)
