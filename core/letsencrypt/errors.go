@@ -20,4 +20,7 @@ var (
 
 	// ErrCertDirRequired is returned when certificate directory is not provided in config.
 	ErrCertDirRequired = errors.New("certificate directory is required")
+
+	// ErrDeleteFailed is returned when certificate deletion fails.
+	ErrDeleteFailed = errors.New("certificate deletion failed")
 )

@@ -510,36 +510,10 @@ func TestManagerRenew(t *testing.T) {
 		err = m.Renew(context.Background(), "example.com")
 		assert.NoError(t, err)
 
-		// Verify old cert was deleted
-		_, err = cache.Get(context.Background(), "example.com")
-		assert.Error(t, err)
+		// Cert should still exist after renewal (overwritten atomically)
+		assert.True(t, m.Exists("example.com"))
 
 		mockProvider.AssertExpectations(t)
-	})
-
-	t.Run("cache deletion failure", func(t *testing.T) {
-		cache := new(MockCache)
-		cache.On("Delete", mock.Anything, "example.com").
-			Return(errors.New("permission denied")).Once()
-
-		mockProvider := new(MockACMEProvider)
-
-		m, err := letsencrypt.NewManager(
-			letsencrypt.Config{
-				Email:   "test@example.com",
-				CertDir: t.TempDir(),
-			},
-			letsencrypt.WithACMEProvider(mockProvider),
-			letsencrypt.WithCache(cache),
-		)
-		require.NoError(t, err)
-
-		err = m.Renew(context.Background(), "example.com")
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to delete existing certificate")
-		assert.Contains(t, err.Error(), "permission denied")
-
-		cache.AssertExpectations(t)
 	})
 
 	t.Run("generation failure during renewal", func(t *testing.T) {
