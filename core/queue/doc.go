@@ -1,26 +1,99 @@
-// Package queue provides a comprehensive job queue system with workers, scheduling,
-// and priority-based task processing. It supports both immediate task execution
-// and scheduled task processing with configurable retry mechanisms and error handling.
+// Package queue provides a job queue system for background task processing with
+// workers, scheduling, and priority-based execution. It supports both immediate
+// and scheduled task processing with configurable retry mechanisms.
 //
-// The package is designed around three core components:
-//   - Enqueuer: Creates and submits tasks to queues
-//   - Worker: Processes tasks from queues with concurrent execution
-//   - Scheduler: Creates periodic tasks based on flexible schedules
+// The package is built around three components:
+//   - Enqueuer: Submits tasks to queues
+//   - Worker: Processes tasks with concurrent execution
+//   - Scheduler: Creates periodic tasks on flexible schedules
 //
 // # Features
 //
-//   - Task enqueueing with priority support (0-100 scale)
-//   - Background workers with configurable concurrent processing
-//   - Scheduled task execution with flexible scheduling options
-//   - Configurable retry policies with exponential backoff (max 10 retries)
-//   - In-memory storage for testing and development
-//   - Extensible repository interface for custom storage backends
-//   - Graceful shutdown with proper cleanup using Run() and Stop() methods
-//   - Type-safe task handlers using Go generics
-//   - Dead letter queue for failed tasks that exhausted retries
-//   - Multiple queue support for task categorization
-//   - Task locking mechanism to prevent duplicate processing
-//   - Comprehensive error handling and logging support
+//   - Priority-based task processing (0-100 scale)
+//   - Concurrent worker execution
+//   - Scheduled/periodic task support
+//   - Automatic retries with exponential backoff (max 10 retries)
+//   - In-memory storage (development) and extensible storage interface
+//   - Graceful shutdown with Run() and Stop() methods
+//   - Type-safe handlers using Go generics
+//   - Dead letter queue for failed tasks
+//   - Multiple queue support
+//   - Task locking to prevent duplicate processing
+//
+// # Quick Start
+//
+// Complete working example with all components:
+//
+//	package main
+//
+//	import (
+//		"context"
+//		"log"
+//		"os/signal"
+//		"syscall"
+//		"time"
+//
+//		"github.com/dmitrymomot/foundation/core/queue"
+//		"golang.org/x/sync/errgroup"
+//	)
+//
+//	type EmailPayload struct {
+//		To      string `json:"to"`
+//		Subject string `json:"subject"`
+//		Body    string `json:"body"`
+//	}
+//
+//	func main() {
+//		// Setup context with signal handling
+//		ctx, stop := signal.NotifyContext(context.Background(),
+//			syscall.SIGINT, syscall.SIGTERM)
+//		defer stop()
+//
+//		// Create storage (in-memory for development)
+//		storage := queue.NewMemoryStorage()
+//
+//		// Create components
+//		enqueuer, _ := queue.NewEnqueuer(storage,
+//			queue.WithDefaultQueue("email"))
+//		worker, _ := queue.NewWorker(storage,
+//			queue.WithQueues("email"),
+//			queue.WithMaxConcurrentTasks(5))
+//		scheduler, _ := queue.NewScheduler(storage)
+//
+//		// Register handlers
+//		emailHandler := queue.NewTaskHandler(func(ctx context.Context, email EmailPayload) error {
+//			log.Printf("Sending email to %s: %s", email.To, email.Subject)
+//			return nil
+//		})
+//		worker.RegisterHandler(emailHandler)
+//
+//		reportHandler := queue.NewPeriodicTaskHandler("daily_report", func(ctx context.Context) error {
+//			log.Println("Generating daily report")
+//			return nil
+//		})
+//		worker.RegisterHandler(reportHandler)
+//
+//		// Schedule tasks
+//		scheduler.AddTask("daily_report", queue.DailyAt(9, 0))
+//
+//		// Start all components with errgroup
+//		g, ctx := errgroup.WithContext(ctx)
+//		g.Go(storage.Run(ctx))
+//		g.Go(worker.Run(ctx))
+//		g.Go(scheduler.Run(ctx))
+//
+//		// Enqueue a task
+//		enqueuer.Enqueue(context.Background(), EmailPayload{
+//			To:      "user@example.com",
+//			Subject: "Welcome!",
+//			Body:    "Welcome to our service!",
+//		})
+//
+//		// Wait for shutdown
+//		if err := g.Wait(); err != nil {
+//			log.Fatal(err)
+//		}
+//	}
 //
 // # Basic Usage
 //
@@ -59,13 +132,9 @@
 //	})
 //	worker.RegisterHandler(handler)
 //
-//	// Start worker (blocking operation - run in goroutine)
+//	// Start worker in goroutine
 //	ctx := context.Background()
-//	go func() {
-//		if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-//			log.Printf("worker error: %v", err)
-//		}
-//	}()
+//	go worker.Start(ctx)
 //
 //	// Enqueue tasks
 //	err = enqueuer.Enqueue(ctx, EmailPayload{
@@ -124,221 +193,117 @@
 //
 // # Scheduled Tasks
 //
-// Create recurring tasks with flexible scheduling options:
+// Create recurring tasks with flexible scheduling:
 //
-//	// Create scheduler
-//	scheduler, err := queue.NewScheduler(storage,
-//		queue.WithSchedulerLogger(logger),
-//	)
+//	scheduler, _ := queue.NewScheduler(storage)
 //
-//	// Register periodic handler (no payload)
+//	// Register periodic handler
 //	reportHandler := queue.NewPeriodicTaskHandler("daily_report", func(ctx context.Context) error {
 //		return generateDailyReport()
 //	})
 //	worker.RegisterHandler(reportHandler)
 //
-//	// Schedule daily reports at 9 AM
-//	scheduler.AddTask("daily_report", queue.DailyAt(9, 0),
-//		queue.WithTaskPriority(queue.PriorityHigh),
-//	)
-//
-//	// Schedule weekly cleanup on Mondays at 2 AM
+//	// Schedule tasks
+//	scheduler.AddTask("daily_report", queue.DailyAt(9, 0))
 //	scheduler.AddTask("weekly_cleanup", queue.WeeklyOn(time.Monday, 2, 0))
-//
-//	// Schedule with intervals
 //	scheduler.AddTask("health_check", queue.EveryMinutes(5))
 //
-//	// Start scheduler (blocking operation - choose one pattern)
-//
-//	// Pattern 1: Manual goroutine
-//	go func() {
-//		if err := scheduler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-//			log.Printf("scheduler error: %v", err)
-//		}
-//	}()
-//	// Later call: scheduler.Stop() for graceful shutdown
-//
-//	// Pattern 2: Use Run() for errgroup
-//	g, ctx := errgroup.WithContext(context.Background())
-//	g.Go(scheduler.Run(ctx))
-//	if err := g.Wait(); err != nil {
-//		log.Fatal(err)
-//	}
+//	// Start scheduler
+//	go scheduler.Start(ctx)
 //
 // # Retry Mechanisms
 //
-// Configure retry policies for failed tasks:
+// Failed tasks automatically retry with exponential backoff:
 //
-//	// Set max retries when enqueueing
-//	enqueuer.Enqueue(ctx, payload,
-//		queue.WithMaxRetries(5), // Will retry up to 5 times
-//	)
+//	// Set max retries (default is 3, max is 10)
+//	enqueuer.Enqueue(ctx, payload, queue.WithMaxRetries(5))
 //
-//	// Handle task with retry logic - retries are automatic
+//	// Returning an error triggers automatic retry
 //	handler := queue.NewTaskHandler(func(ctx context.Context, data ProcessingPayload) error {
-//		err := performOperation(data)
-//		if err != nil {
-//			// Return error to trigger retry with exponential backoff
-//			return fmt.Errorf("operation failed: %w", err)
+//		if err := performOperation(data); err != nil {
+//			return err // Will retry with exponential backoff
 //		}
 //		return nil
 //	})
 //
+//	// Tasks exceeding max retries move to dead letter queue
+//
 // # Multiple Queues
 //
-// Set up different queues for different task types:
+// Use separate queues for different workload types:
 //
-//	// Email queue worker
+//	// Email worker (high throughput)
 //	emailWorker, _ := queue.NewWorker(storage,
 //		queue.WithQueues("email"),
 //		queue.WithMaxConcurrentTasks(10),
 //	)
-//	emailWorker.RegisterHandler(welcomeEmailHandler)
-//	emailWorker.RegisterHandler(notificationHandler)
 //
-//	// Image processing queue worker (CPU intensive, fewer workers)
+//	// Image worker (CPU intensive)
 //	imageWorker, _ := queue.NewWorker(storage,
 //		queue.WithQueues("images"),
 //		queue.WithMaxConcurrentTasks(3),
 //	)
-//	imageWorker.RegisterHandler(resizeHandler)
-//	imageWorker.RegisterHandler(thumbnailHandler)
 //
-//	// Analytics queue worker
-//	analyticsWorker, _ := queue.NewWorker(storage,
-//		queue.WithQueues("analytics"),
-//		queue.WithMaxConcurrentTasks(2),
-//	)
-//	analyticsWorker.RegisterHandler(eventTrackingHandler)
-//
-//	// Start all workers
+//	// Register handlers and start
+//	emailWorker.RegisterHandler(emailHandler)
+//	imageWorker.RegisterHandler(imageHandler)
 //	go emailWorker.Start(ctx)
 //	go imageWorker.Start(ctx)
-//	go analyticsWorker.Start(ctx)
 //
-// # Error Handling and Dead Letter Queue
+// # Error Handling
 //
-// Failed tasks are automatically handled with retries and dead letter queue:
+// Handle errors and context cancellation properly:
 //
 //	handler := queue.NewTaskHandler(func(ctx context.Context, data ProcessingPayload) error {
-//		// Check context cancellation
-//		select {
-//		case <-ctx.Done():
+//		// Respect context cancellation
+//		if ctx.Err() != nil {
 //			return ctx.Err()
-//		default:
 //		}
 //
-//		// Process task - errors trigger automatic retries
+//		// Process task
 //		if err := processData(data); err != nil {
 //			return fmt.Errorf("processing failed: %w", err)
 //		}
 //		return nil
 //	})
 //
-//	// Tasks that exceed max retries are moved to dead letter queue
-//	// Failed tasks can be inspected via the storage interface
-//
 // # Graceful Shutdown
 //
-// Implement proper shutdown procedures:
+// Two patterns for lifecycle management:
 //
-//	func runQueueSystem(ctx context.Context) error {
-//		// Create components
-//		storage := queue.NewMemoryStorage()
-//		defer storage.Close()
-//
-//		worker, _ := queue.NewWorker(storage)
-//		scheduler, _ := queue.NewScheduler(storage)
-//
-//		// Option 1: Using errgroup for coordinated lifecycle
-//		g, ctx := errgroup.WithContext(context.Background())
-//		g.Go(worker.Run(ctx))
-//		g.Go(scheduler.Run(ctx))
-//
-//		// Wait for all components to finish
-//		if err := g.Wait(); err != nil {
-//			log.Fatal(err)
-//		}
-//
-//		// Option 2: Manual lifecycle management
-//		go func() {
-//			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-//				log.Printf("worker error: %v", err)
-//			}
-//		}()
-//		go func() {
-//			if err := scheduler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-//				log.Printf("scheduler error: %v", err)
-//			}
-//		}()
-//
-//		// Wait for shutdown signal
-//		<-ctx.Done()
-//
-//		// Graceful shutdown with timeout (returns error if timeout exceeded)
-//		if err := worker.Stop(); err != nil {
-//			log.Printf("worker shutdown timeout: %v", err)
-//		}
-//		if err := scheduler.Stop(); err != nil {
-//			log.Printf("scheduler shutdown timeout: %v", err)
-//		}
-//
-//		log.Info("Queue system shutdown complete")
-//		return nil
+//	// Pattern 1: Using errgroup (recommended)
+//	g, ctx := errgroup.WithContext(context.Background())
+//	g.Go(storage.Run(ctx))
+//	g.Go(worker.Run(ctx))
+//	g.Go(scheduler.Run(ctx))
+//	if err := g.Wait(); err != nil {
+//		log.Fatal(err)
 //	}
 //
-// # Custom Storage Backend
+//	// Pattern 2: Manual Start/Stop
+//	go worker.Start(ctx)
+//	go scheduler.Start(ctx)
 //
-// Implement custom storage for production use by satisfying the repository interfaces:
+//	// On shutdown signal
+//	cancel() // Cancel context
+//	worker.Stop() // Blocks until shutdown complete (default 30s timeout)
+//	scheduler.Stop()
 //
-//	type PostgreSQLStorage struct {
-//		db *sql.DB
-//	}
-//
-//	// Implement EnqueuerRepository
-//	func (s *PostgreSQLStorage) CreateTask(ctx context.Context, task *queue.Task) error {
-//		query := `INSERT INTO tasks (id, queue, task_type, task_name, priority, payload, status, created_at)
-//		         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
-//		_, err := s.db.ExecContext(ctx, query,
-//			task.ID, task.Queue, task.TaskType, task.TaskName,
-//			task.Priority, task.Payload, task.Status, task.CreatedAt)
-//		return err
-//	}
-//
-//	// Implement WorkerRepository methods: ClaimTask, CompleteTask, FailTask, etc.
-//	// Implement SchedulerRepository methods: GetPendingTaskByName
-//
-//	// Use custom storage
-//	storage := &PostgreSQLStorage{db: database}
-//	enqueuer, _ := queue.NewEnqueuer(storage)
-//	worker, _ := queue.NewWorker(storage)
-//
-// # Delayed Tasks
-//
-// Schedule tasks for future execution:
-//
-//	// Enqueue with delay
-//	enqueuer.Enqueue(ctx, payload,
-//		queue.WithDelay(time.Hour), // Process in 1 hour
-//	)
-//
-//	// Enqueue at specific time
-//	enqueuer.Enqueue(ctx, payload,
-//		queue.WithScheduledAt(time.Date(2024, 12, 25, 9, 0, 0, 0, time.UTC)),
+//	// Configure shutdown timeout
+//	worker, _ := queue.NewWorker(storage,
+//		queue.WithShutdownTimeout(60*time.Second),
 //	)
 //
 // # Storage Interfaces
 //
-// The package defines three repository interfaces for different components:
+// Implement custom storage by satisfying the repository interfaces:
 //
-// ## EnqueuerRepository
-//
+//	// Required for Enqueuer
 //	type EnqueuerRepository interface {
 //		CreateTask(ctx context.Context, task *Task) error
 //	}
 //
-// ## WorkerRepository
-//
+//	// Required for Worker
 //	type WorkerRepository interface {
 //		ClaimTask(ctx context.Context, workerID uuid.UUID, queues []string, lockDuration time.Duration) (*Task, error)
 //		CompleteTask(ctx context.Context, taskID uuid.UUID) error
@@ -347,87 +312,22 @@
 //		ExtendLock(ctx context.Context, taskID uuid.UUID, duration time.Duration) error
 //	}
 //
-// ## SchedulerRepository
-//
+//	// Required for Scheduler
 //	type SchedulerRepository interface {
 //		CreateTask(ctx context.Context, task *Task) error
 //		GetPendingTaskByName(ctx context.Context, taskName string) (*Task, error)
 //	}
 //
-// Use queue.NewMemoryStorage() for development or implement custom storage for production.
-// The memory storage implements all three interfaces and provides thread-safe operations.
+//	// Use queue.NewMemoryStorage() for development
+//	// Implement your own for production (e.g., PostgreSQL, Redis)
 //
-// # Graceful Shutdown Support
+// # Delayed Tasks
 //
-// Both Worker and Scheduler support graceful shutdown with configurable timeouts.
+// Schedule tasks for future execution:
 //
-// ## Lifecycle Methods
+//	enqueuer.Enqueue(ctx, payload, queue.WithDelay(time.Hour))
+//	enqueuer.Enqueue(ctx, payload, queue.WithScheduledAt(futureTime))
 //
-//   - Start(ctx) - Blocking operation that runs until context is cancelled
-//   - Stop() - Blocking graceful shutdown with configurable timeout
-//   - Run(ctx) - Convenience wrapper for errgroup pattern
-//
-// ## Pattern 1: Manual Lifecycle Management
-//
-// Use Start() and Stop() methods for direct control:
-//
-//	ctx, cancel := context.WithCancel(context.Background())
-//
-//	// Start components (blocking - use goroutines)
-//	go func() {
-//		if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-//			log.Printf("worker error: %v", err)
-//		}
-//	}()
-//	go func() {
-//		if err := scheduler.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
-//			log.Printf("scheduler error: %v", err)
-//		}
-//	}()
-//
-//	// Later, trigger graceful shutdown
-//	cancel() // Signal components to stop
-//
-//	// Wait for graceful shutdown with timeout (default 30s)
-//	if err := worker.Stop(); err != nil {
-//		log.Printf("worker shutdown timeout: %v", err)
-//	}
-//	if err := scheduler.Stop(); err != nil {
-//		log.Printf("scheduler shutdown timeout: %v", err)
-//	}
-//
-// ## Pattern 2: errgroup for Coordinated Shutdown (Recommended)
-//
-// The Run() method provides errgroup compatibility:
-//
-//	g, ctx := errgroup.WithContext(context.Background())
-//	g.Go(worker.Run(ctx))
-//	g.Go(scheduler.Run(ctx))
-//
-//	// Blocks until context cancellation or error
-//	if err := g.Wait(); err != nil {
-//		log.Fatal(err)
-//	}
-//
-// The Run() method automatically handles Start() and Stop() lifecycle:
-//  1. Starts the component (calls Start internally)
-//  2. Monitors context cancellation
-//  3. Calls Stop() for graceful shutdown when context is cancelled
-//  4. Returns nil for normal shutdown, error for actual failures
-//
-// ## Configuring Shutdown Timeout
-//
-//	// Configure custom shutdown timeout (default is 30s)
-//	worker, _ := queue.NewWorker(storage,
-//		queue.WithShutdownTimeout(60*time.Second),
-//	)
-//
-//	scheduler, _ := queue.NewScheduler(storage,
-//		queue.WithSchedulerShutdownTimeout(60*time.Second),
-//	)
-//
-// If the shutdown timeout is exceeded, Stop() returns an error but does not
-// block further. Active tasks/checks may be abandoned.
 // # Core Types and Constants
 //
 // ## Task Priorities
@@ -480,131 +380,48 @@
 //
 // # Configuration Options
 //
-// ## Enqueuer Options
+// Common configuration options:
 //
-//	WithDefaultQueue("email")           // Set default queue name
-//	WithDefaultPriority(PriorityHigh)   // Set default priority
+//	// Enqueuer options
+//	enqueuer, _ := queue.NewEnqueuer(storage,
+//		queue.WithDefaultQueue("email"),
+//		queue.WithDefaultPriority(queue.PriorityHigh),
+//	)
 //
-// ## Worker Options
+//	// Worker options
+//	worker, _ := queue.NewWorker(storage,
+//		queue.WithQueues("email", "sms"),
+//		queue.WithMaxConcurrentTasks(10),
+//		queue.WithPullInterval(5*time.Second),
+//		queue.WithLockTimeout(5*time.Minute),
+//		queue.WithShutdownTimeout(60*time.Second),
+//	)
 //
-//	WithQueues("email", "sms")          // Queues to process
-//	WithMaxConcurrentTasks(10)          // Max concurrent tasks
-//	WithPullInterval(5*time.Second)     // How often to check for tasks
-//	WithLockTimeout(5*time.Minute)      // Task lock duration
-//	WithWorkerLogger(logger)            // Structured logger
+//	// Scheduler options
+//	scheduler, _ := queue.NewScheduler(storage,
+//		queue.WithCheckInterval(30*time.Second),
+//		queue.WithSchedulerShutdownTimeout(60*time.Second),
+//	)
 //
-// ## Scheduler Options
+//	// Task options
+//	enqueuer.Enqueue(ctx, payload,
+//		queue.WithQueue("priority"),
+//		queue.WithPriority(queue.PriorityMax),
+//		queue.WithMaxRetries(5),
+//		queue.WithDelay(time.Hour),
+//	)
 //
-//	WithCheckInterval(30*time.Second)   // How often to check schedules
-//	WithSchedulerLogger(logger)         // Structured logger
+// # Observability
 //
-// ## Task Options (for Enqueue)
+// Components provide Stats() for monitoring and Healthcheck() for readiness:
 //
-//	WithQueue("priority")               // Override queue
-//	WithPriority(PriorityMax)           // Override priority
-//	WithMaxRetries(5)                   // Max retry attempts (0-10)
-//	WithDelay(time.Hour)                // Delay before processing
-//	WithScheduledAt(futureTime)         // Schedule for specific time
-//	WithTaskName("custom-name")         // Custom task name
+//	// Get statistics
+//	stats := worker.Stats()
+//	fmt.Printf("Processed: %d, Failed: %d, Active: %d\n",
+//		stats.TasksProcessed, stats.TasksFailed, stats.ActiveTasks)
 //
-// ## Scheduled Task Options
-//
-//	WithTaskQueue("reports")            // Queue for scheduled task
-//	WithTaskPriority(PriorityHigh)      // Priority for scheduled task
-//	WithTaskMaxRetries(3)               // Max retries for scheduled task
-//
-// # Error Handling
-//
-// The package defines comprehensive errors for different failure scenarios:
-//
-//	ErrRepositoryNil            // Repository is nil
-//	ErrPayloadNil               // Payload is nil
-//	ErrInvalidPriority          // Priority out of range (0-100)
-//	ErrHandlerNotFound          // No handler for task type
-//	ErrNoHandlers               // Worker has no handlers
-//	ErrTaskAlreadyRegistered    // Duplicate scheduled task
-//	ErrSchedulerNotConfigured   // Scheduler has no tasks
-//	ErrNoTaskToClaim            // No tasks available (normal)
-//
-// # Advanced Usage Patterns
-//
-// ## Long-Running Tasks
-//
-// For tasks that may exceed the lock timeout, extend the lock periodically:
-//
-//	handler := queue.NewTaskHandler(func(ctx context.Context, data LongProcessPayload) error {
-//		// Start a goroutine to extend lock every 2 minutes
-//		ticker := time.NewTicker(2 * time.Minute)
-//		defer ticker.Stop()
-//
-//		go func() {
-//			for {
-//				select {
-//				case <-ctx.Done():
-//					return
-//				case <-ticker.C:
-//					// Extend lock by 5 minutes
-//					worker.ExtendLockForTask(ctx, taskID, 5*time.Minute)
-//				}
-//			}
-//		}()
-//
-//		// Perform long-running work
-//		return processLargeDataset(data)
-//	})
-//
-// ## Conditional Task Creation
-//
-// Create tasks only when certain conditions are met:
-//
-//	if shouldSendReminder(user) {
-//		enqueuer.Enqueue(ctx, ReminderPayload{UserID: user.ID},
-//			queue.WithDelay(24*time.Hour),
-//			queue.WithPriority(queue.PriorityLow),
-//		)
+//	// Health check
+//	if err := worker.Healthcheck(ctx); err != nil {
+//		log.Printf("unhealthy: %v", err)
 //	}
-//
-// ## Task Monitoring and Metrics
-//
-// Monitor task processing with structured logging:
-//
-//	handler := queue.NewTaskHandler(func(ctx context.Context, data ProcessPayload) error {
-//		start := time.Now()
-//		defer func() {
-//			logger.InfoContext(ctx, "task processed",
-//				slog.String("task_type", "ProcessPayload"),
-//				slog.Duration("duration", time.Since(start)),
-//			)
-//		}()
-//
-//		return processData(data)
-//	})
-//
-// ## Batch Task Processing
-//
-// Process multiple related items efficiently:
-//
-//	// Enqueue batch of related tasks
-//	batchID := uuid.New().String()
-//	for _, item := range items {
-//		enqueuer.Enqueue(ctx, BatchProcessPayload{
-//			BatchID: batchID,
-//			Item:    item,
-//		}, queue.WithQueue("batch"))
-//	}
-//
-//	// Handler tracks batch completion
-//	batchHandler := queue.NewTaskHandler(func(ctx context.Context, data BatchProcessPayload) error {
-//		err := processItem(data.Item)
-//		if err != nil {
-//			return err
-//		}
-//
-//		// Check if batch is complete
-//		if isBatchComplete(data.BatchID) {
-//			// Trigger batch completion task
-//			enqueuer.Enqueue(ctx, BatchCompletePayload{BatchID: data.BatchID})
-//		}
-//		return nil
-//	})
 package queue
