@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 // without explicitly depending on it.
 type Manager struct {
 	mu           sync.RWMutex
+	domainLocks  sync.Map // map[string]*sync.Mutex for per-domain locking
 	email        string
 	certDir      string
 	acme         ACMEProvider
@@ -76,32 +78,54 @@ func NewManager(cfg Config, opts ...ManagerOption) (*Manager, error) {
 	return m, nil
 }
 
+// getDomainLock returns a mutex for the specified domain, creating one if it doesn't exist.
+func (m *Manager) getDomainLock(domain string) *sync.Mutex {
+	lock, _ := m.domainLocks.LoadOrStore(domain, &sync.Mutex{})
+	return lock.(*sync.Mutex)
+}
+
 // hostPolicy is used internally to control which domains can get certificates.
 // Since we manage certificates explicitly, this just allows all requests.
 func (m *Manager) hostPolicy(ctx context.Context, host string) error {
-	// Remove port if present (validation only, host not used further)
+	// Strip port if present
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		// Validate host has content before port
 		if idx == 0 {
 			return fmt.Errorf("invalid host: %s", host)
 		}
+		host = host[:idx]
 	}
-	// Allow all hosts since certificate generation is explicit
+
+	// Basic domain validation
+	if host == "" {
+		return fmt.Errorf("empty domain")
+	}
+	if strings.Contains(host, "..") {
+		return fmt.Errorf("invalid domain: consecutive dots not allowed")
+	}
+	if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+		return fmt.Errorf("invalid domain: cannot start or end with dot")
+	}
+
+	// Allow all valid hosts since certificate generation is explicit
 	return nil
 }
 
 // Generate creates a new certificate for the domain.
 // This is a blocking operation that may take 30-60 seconds.
 // It includes retry logic with exponential backoff for transient failures.
+// Uses per-domain locking to allow concurrent generation for different domains.
 func (m *Manager) Generate(ctx context.Context, domain string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Use per-domain lock to allow concurrent operations on different domains
+	domainLock := m.getDomainLock(domain)
+	domainLock.Lock()
+	defer domainLock.Unlock()
 
 	hello := &tls.ClientHelloInfo{
 		ServerName: domain,
 	}
 
 	backoff := m.retryBackoff
+	const maxBackoff = 30 * time.Second
 
 	var lastErr error
 	for attempt := 1; attempt <= m.maxRetries; attempt++ {
@@ -118,6 +142,9 @@ func (m *Manager) Generate(ctx context.Context, domain string) error {
 				return errors.Join(ErrGenerationFailed, fmt.Errorf("context canceled for domain %s", domain), ctx.Err())
 			case <-time.After(backoff):
 				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
 				continue
 			}
 		}
@@ -178,24 +205,20 @@ func IsRetryableError(err error) bool {
 		"connection reset",
 	}
 
-	for _, pattern := range retryablePatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
-
-	return false
+	return slices.ContainsFunc(retryablePatterns, func(pattern string) bool {
+		return strings.Contains(errStr, pattern)
+	})
 }
 
 // Renew forces renewal of an existing certificate.
 // This is a blocking operation that may take 30-60 seconds.
+// The new certificate overwrites the old one atomically with zero downtime.
+// Uses per-domain locking to allow concurrent renewals for different domains.
 func (m *Manager) Renew(ctx context.Context, domain string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if err := m.cache.Delete(ctx, domain); err != nil && !os.IsNotExist(err) {
-		return errors.Join(errors.New("failed to delete existing certificate"), err)
-	}
+	// Use per-domain lock to allow concurrent operations on different domains
+	domainLock := m.getDomainLock(domain)
+	domainLock.Lock()
+	defer domainLock.Unlock()
 
 	hello := &tls.ClientHelloInfo{
 		ServerName: domain,
@@ -210,12 +233,15 @@ func (m *Manager) Renew(ctx context.Context, domain string) error {
 }
 
 // Delete removes the certificate for a domain.
+// Uses per-domain locking to allow concurrent deletions for different domains.
 func (m *Manager) Delete(ctx context.Context, domain string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Use per-domain lock to allow concurrent operations on different domains
+	domainLock := m.getDomainLock(domain)
+	domainLock.Lock()
+	defer domainLock.Unlock()
 
 	if err := m.cache.Delete(ctx, domain); err != nil {
-		return errors.Join(errors.New("delete failed"), fmt.Errorf("domain %s", domain), err)
+		return errors.Join(ErrDeleteFailed, fmt.Errorf("domain %s", domain), err)
 	}
 
 	return nil

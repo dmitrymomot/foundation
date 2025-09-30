@@ -266,7 +266,7 @@ func TestAutoCertServer_GetCertificate(t *testing.T) {
 
 			// Start server in background
 			go func() {
-				_ = srv.Run(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = srv.Start(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(http.StatusOK)
 				}))
 			}()
@@ -484,7 +484,7 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 		// Start server
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- srv.Run(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			errCh <- srv.Start(ctx, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
 			}))
 		}()
@@ -497,7 +497,8 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 
 		select {
 		case err := <-errCh:
-			assert.NoError(t, err)
+			// Context cancellation is expected
+			assert.ErrorIs(t, err, context.Canceled)
 		case <-time.After(2 * time.Second):
 			t.Fatal("server did not shutdown in time")
 		}
@@ -520,21 +521,19 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 
 		// Start first server
 		go func() {
-			_ = srv.Run(ctx1, testHandler())
+			_ = srv.Start(ctx1, testHandler())
 		}()
 
 		// Wait for first server to start
 		time.Sleep(100 * time.Millisecond)
 
 		// Try to start second server
-		err = srv.Run(ctx2, testHandler())
+		err = srv.Start(ctx2, testHandler())
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "already running")
 
 		// Cleanup
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		srv.Shutdown(shutdownCtx)
+		srv.Stop()
 	})
 
 	t.Run("shutdown without run is safe", func(t *testing.T) {
@@ -544,8 +543,8 @@ func TestAutoCertServer_RunAndShutdown(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		// Shutdown without running should not error
-		err = srv.Shutdown(context.Background())
+		// Stop without running should not error
+		err = srv.Stop()
 		assert.NoError(t, err)
 	})
 }

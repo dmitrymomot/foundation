@@ -50,7 +50,7 @@ func TestServerDoubleRun(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err1 = server.Run(ctx1, testHandler())
+		err1 = server.Start(ctx1, testHandler())
 	}()
 
 	// Give server time to start
@@ -58,14 +58,15 @@ func TestServerDoubleRun(t *testing.T) {
 
 	// Try to start second server - should fail
 	ctx2 := context.Background()
-	err2 := server.Run(ctx2, testHandler())
+	err2 := server.Start(ctx2, testHandler())
 	require.Error(t, err2)
 	assert.Contains(t, err2.Error(), "server is already running")
 
 	// Cleanup
 	cancel1()
 	wg.Wait()
-	assert.NoError(t, err1)
+	// Context cancellation is expected
+	assert.ErrorIs(t, err1, context.Canceled)
 }
 
 // TestServerPortConflict tests behavior when port is already in use
@@ -84,7 +85,7 @@ func TestServerPortConflict(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		err1 = server1.Run(ctx1, testHandler())
+		err1 = server1.Start(ctx1, testHandler())
 	}()
 
 	// Give first server time to bind port
@@ -95,14 +96,15 @@ func TestServerPortConflict(t *testing.T) {
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel2()
 
-	err2 := server2.Run(ctx2, testHandler())
+	err2 := server2.Start(ctx2, testHandler())
 	require.Error(t, err2)
 	assert.Contains(t, err2.Error(), "address already in use")
 
 	// Cleanup
 	cancel1()
 	wg.Wait()
-	assert.NoError(t, err1)
+	// Context cancellation is expected
+	assert.ErrorIs(t, err1, context.Canceled)
 }
 
 // TestServerConcurrentRunShutdown tests race conditions between Run and shutdown
@@ -120,7 +122,7 @@ func TestServerConcurrentRunShutdown(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runErr = server.Run(ctx, testHandler())
+		runErr = server.Start(ctx, testHandler())
 	}()
 
 	// Give server minimal time to start
@@ -132,8 +134,8 @@ func TestServerConcurrentRunShutdown(t *testing.T) {
 	// Wait for completion
 	wg.Wait()
 
-	// Should complete without error (graceful shutdown)
-	assert.NoError(t, runErr)
+	// Context cancellation is expected
+	assert.ErrorIs(t, runErr, context.Canceled)
 }
 
 // TestServerGracefulShutdownTimeout tests what happens when shutdown times out
@@ -157,7 +159,7 @@ func TestServerGracefulShutdownTimeout(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runErr = server.Run(ctx, handler)
+		runErr = server.Start(ctx, handler)
 	}()
 
 	// Give server time to start
@@ -197,7 +199,7 @@ func TestServerInvalidAddress(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			err := server.Run(ctx, testHandler())
+			err := server.Start(ctx, testHandler())
 			require.Error(t, err)
 		})
 	}
@@ -228,7 +230,7 @@ func TestServerTLSRaceCondition(t *testing.T) {
 		defer wg.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
-		_ = s.Run(ctx, testHandler())
+		_ = s.Start(ctx, testHandler())
 	}()
 
 	wg.Wait()
@@ -246,9 +248,9 @@ func TestServerContextCancellationDuringStartup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := server.Run(ctx, testHandler())
-	// Should handle cancellation gracefully
-	assert.NoError(t, err)
+	err := server.Start(ctx, testHandler())
+	// Context cancellation is expected
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 // TestServerShutdownWithoutRun tests calling gracefulShutdown without Run
@@ -256,10 +258,9 @@ func TestServerShutdownWithoutRun(t *testing.T) {
 	t.Parallel()
 
 	server := server.New(":0")
-	ctx := context.Background()
 
 	// Should not panic or error
-	err := server.Shutdown(ctx)
+	err := server.Stop()
 	assert.NoError(t, err)
 }
 
@@ -282,7 +283,7 @@ func TestServerRunIntegration(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		runErr = server.Run(ctx, handler)
+		runErr = server.Start(ctx, handler)
 	}()
 
 	// Give server time to start
@@ -301,7 +302,8 @@ func TestServerRunIntegration(t *testing.T) {
 	// Shutdown
 	cancel()
 	wg.Wait()
-	assert.NoError(t, runErr)
+	// Context cancellation is expected
+	assert.ErrorIs(t, runErr, context.Canceled)
 }
 
 // TestRunConvenienceFunction tests the convenience Run function
@@ -313,5 +315,6 @@ func TestRunConvenienceFunction(t *testing.T) {
 	defer cancel()
 
 	err := server.Run(ctx, fmt.Sprintf(":%d", port), testHandler())
-	assert.NoError(t, err)
+	// Context deadline exceeded is expected
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }

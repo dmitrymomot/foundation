@@ -8,6 +8,13 @@ import (
 	"strings"
 )
 
+const (
+	// acmeAccountKeyMarker is used by autocert to mark account key files.
+	acmeAccountKeyMarker = "+"
+	// acmeMetadataMarker is used by autocert to mark metadata files.
+	acmeMetadataMarker = "_"
+)
+
 // Storage provides low-level certificate file operations.
 type Storage struct {
 	dir string
@@ -34,7 +41,7 @@ func (s *Storage) List() ([]string, error) {
 		if !entry.IsDir() {
 			// Exclude autocert metadata files (contain + or _)
 			name := entry.Name()
-			if name != "" && !strings.Contains(name, "+") && !strings.Contains(name, "_") {
+			if name != "" && !strings.Contains(name, acmeAccountKeyMarker) && !strings.Contains(name, acmeMetadataMarker) {
 				domains = append(domains, name)
 			}
 		}
