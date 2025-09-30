@@ -33,11 +33,12 @@ func newSyncTransport(getHandler func(string) (Handler, bool)) Transport {
 
 // Dispatch executes the command immediately in the caller's goroutine.
 // Returns ErrHandlerNotFound if no handler is registered for the command.
+// Panics from handlers are caught and converted to errors.
 func (t *syncTransport) Dispatch(ctx context.Context, cmdName string, payload any) error {
 	handler, exists := t.getHandler(cmdName)
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrHandlerNotFound, cmdName)
 	}
 
-	return handler.Handle(ctx, payload)
+	return safeHandle(handler, ctx, payload)
 }

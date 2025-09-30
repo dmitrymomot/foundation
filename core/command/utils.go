@@ -1,12 +1,17 @@
 package command
 
-import "reflect"
+import (
+	"context"
+	"fmt"
+	"reflect"
+)
 
 // envelope is an internal type used by async transports to pass commands
 // through channels with their metadata.
 type envelope struct {
-	Name    string // Command name for handler lookup
-	Payload any    // Command data
+	Context context.Context // Original dispatch context
+	Name    string          // Command name for handler lookup
+	Payload any             // Command data
 }
 
 // getCommandName derives the command name from a reflect.Type.
@@ -41,4 +46,16 @@ func chainMiddleware(handler Handler, middleware []Middleware) Handler {
 		handler = middleware[i](handler)
 	}
 	return handler
+}
+
+// safeHandle executes a handler with panic recovery.
+// If the handler panics, the panic is caught and converted to an error.
+// This provides a single point of panic recovery for all transports.
+func safeHandle(handler Handler, ctx context.Context, payload any) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("handler %s panicked: %v", handler.Name(), r)
+		}
+	}()
+	return handler.Handle(ctx, payload)
 }

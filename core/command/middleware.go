@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -52,7 +53,7 @@ func LoggingMiddleware(logger *slog.Logger) Middleware {
 						slog.String("command", cmdName),
 						slog.Duration("duration", duration),
 						slog.String("error", err.Error()))
-					return err
+					return fmt.Errorf("command %s failed: %w", cmdName, err)
 				}
 
 				logger.InfoContext(ctx, "command completed",

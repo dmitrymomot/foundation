@@ -57,6 +57,10 @@ func newChannelTransport(
 	logger *slog.Logger,
 	opts ...ChannelOption,
 ) Transport {
+	if bufferSize < 1 {
+		panic("bufferSize must be at least 1")
+	}
+
 	t := &channelTransport{
 		ch:           make(chan envelope, bufferSize),
 		getHandler:   getHandler,
@@ -81,7 +85,9 @@ func newChannelTransport(
 	go func() {
 		<-ctx.Done()
 		close(t.ch)
-		t.logger.Info("channel transport shutting down")
+		t.logger.Info("channel transport shutting down, draining commands")
+		t.wg.Wait()
+		t.logger.Info("channel transport shutdown complete")
 	}()
 
 	return t
@@ -91,6 +97,7 @@ func newChannelTransport(
 // Validates handler exists before enqueuing (fail fast).
 // Returns ErrBufferFull if the channel buffer is full.
 // Returns ErrHandlerNotFound if no handler is registered.
+// The dispatch context is preserved and passed to the handler.
 func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload any) error {
 	// Validate handler exists (fail fast)
 	if _, exists := t.getHandler(cmdName); !exists {
@@ -98,6 +105,7 @@ func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload
 	}
 
 	env := envelope{
+		Context: ctx,
 		Name:    cmdName,
 		Payload: payload,
 	}
@@ -122,21 +130,9 @@ func (t *channelTransport) worker() {
 	}
 }
 
-// handleCommand processes a single command with panic recovery.
+// handleCommand processes a single command.
+// Panics are caught and converted to errors by safeHandle.
 func (t *channelTransport) handleCommand(env envelope) {
-	defer func() {
-		if r := recover(); r != nil {
-			t.logger.Error("command handler panicked",
-				slog.String("command", env.Name),
-				slog.Any("panic", r))
-
-			if t.errorHandler != nil {
-				t.errorHandler(context.Background(), env.Name,
-					fmt.Errorf("handler panicked: %v", r))
-			}
-		}
-	}()
-
 	// Get handler (with middleware applied)
 	handler, exists := t.getHandler(env.Name)
 	if !exists {
@@ -147,16 +143,16 @@ func (t *channelTransport) handleCommand(env envelope) {
 			slog.String("command", env.Name))
 
 		if t.errorHandler != nil {
-			t.errorHandler(context.Background(), env.Name, err)
+			t.errorHandler(env.Context, env.Name, err)
 		}
 		return
 	}
 
-	// Execute handler with fresh context
-	ctx := context.Background()
-	if err := handler.Handle(ctx, env.Payload); err != nil {
+	// Execute handler with dispatch context
+	// safeHandle catches panics and converts them to errors
+	if err := safeHandle(handler, env.Context, env.Payload); err != nil {
 		if t.errorHandler != nil {
-			t.errorHandler(ctx, env.Name, err)
+			t.errorHandler(env.Context, env.Name, err)
 		}
 	}
 }
