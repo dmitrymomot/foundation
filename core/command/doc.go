@@ -1,8 +1,22 @@
-// Package command provides a type-safe command bus implementation with pluggable
-// transport strategies, middleware support, and unified panic recovery.
+// Package command provides a type-safe command bus implementation inspired by Watermill.
+// It separates concerns into three components: Dispatcher (client), Transport (wire),
+// and Processor (router/worker manager).
 //
 // Commands represent intent/orders with one-to-one handler relationships.
 // Each command has exactly one handler, and missing handlers are errors.
+//
+// # Architecture (Watermill-Inspired)
+//
+// The package follows Watermill's architectural pattern:
+//
+//   - **Dispatcher** = Stateless client (like Watermill's Publisher)
+//   - **Transport** = Passive wire (like Watermill's Subscriber - provides channel)
+//   - **Processor** = Active router (like Watermill's Router - manages workers)
+//
+// This separation enables flexible deployment patterns:
+//   - Local: Single process runs Dispatcher and Processor with shared transport
+//   - Distributed: Dispatcher in web server, Processor in worker service
+//   - Testing: Sync transport for deterministic, in-process execution
 //
 // # Core Concepts
 //
@@ -11,14 +25,16 @@
 //
 //   - Two execution strategies (Sync, Channel)
 //   - Type-safe handlers via generics
-//   - Immutable middleware configured at construction
+//   - Immutable middleware configured at Processor construction
 //   - Context-based lifecycle management
 //   - Unified panic recovery across all transports
-//   - Decorator pattern for retry, timeout, backoff
+//   - Decorator chaining for retry, timeout, backoff
+//   - Stats tracking for observability (async transports)
+//   - Worker management in Processor (not Transport)
 //
-// # Quick Start
+// # Quick Start: Sync Transport (Simple)
 //
-// Basic synchronous command execution:
+// Synchronous execution in the same process:
 //
 //	import "github.com/dmitrymomot/foundation/core/command"
 //
@@ -31,24 +47,158 @@
 //	    return db.Insert(ctx, cmd.Email, cmd.Name)
 //	}
 //
-//	dispatcher := command.NewDispatcher(command.WithSyncTransport())
-//	dispatcher.Register(command.NewHandlerFunc(createUserHandler))
+//	// Create transport (passive wire)
+//	transport := command.NewSyncTransport()
 //
+//	// Create processor (active manager with handlers)
+//	processor := command.NewProcessor(transport)
+//	processor.Register(command.NewHandlerFunc(createUserHandler))
+//
+//	// Start processor (blocks until context cancelled)
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//	go processor.Run(ctx)
+//
+//	// Create dispatcher (stateless client)
+//	dispatcher := command.NewDispatcher(transport)
+//
+//	// Dispatch command - executes immediately
 //	err := dispatcher.Dispatch(ctx, CreateUser{
 //	    Email: "user@example.com",
 //	    Name:  "John Doe",
 //	})
+//	if err != nil {
+//	    // Handler error returned immediately
+//	    log.Fatal(err)
+//	}
 //
-// # Sync Transport
+// For sync transport, you can also use Processor.Dispatch() directly:
 //
-// Synchronous transport executes commands immediately in the caller's goroutine.
+//	processor := command.NewProcessor(command.NewSyncTransport())
+//	processor.Register(command.NewHandlerFunc(createUserHandler))
+//	go processor.Run(ctx)
+//
+//	err := processor.Dispatch(ctx, CreateUser{Email: "user@example.com"})
+//
+// # Quick Start: Channel Transport (Async)
+//
+// Asynchronous execution with background workers managed by Processor:
+//
+//	import (
+//	    "github.com/dmitrymomot/foundation/core/command"
+//	    "golang.org/x/sync/errgroup"
+//	)
+//
+//	// Create transport (passive wire - just a channel)
+//	transport := command.NewChannelTransport(100)
+//
+//	// Create processor (active manager - controls workers)
+//	processor := command.NewProcessor(
+//	    transport,
+//	    command.WithWorkers(5),  // Processor controls worker count!
+//	    command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
+//	        logger.Error("command failed", "command", cmdName, "error", err)
+//	    }),
+//	    command.WithLogger(logger),
+//	)
+//	processor.Register(command.NewHandlerFunc(sendEmailHandler))
+//
+//	// Start processor (manages worker lifecycle)
+//	g, ctx := errgroup.WithContext(context.Background())
+//	g.Go(func() error {
+//	    return processor.Run(ctx) // Blocks until context cancelled
+//	})
+//
+//	// Create dispatcher (can be in different part of code)
+//	dispatcher := command.NewDispatcher(transport)
+//
+//	// Dispatch returns immediately
+//	err := dispatcher.Dispatch(ctx, SendEmail{To: "user@example.com"})
+//	if err != nil {
+//	    // Only dispatch errors (ErrBufferFull, etc)
+//	    // Handler errors reported via WithErrorHandler callback
+//	    log.Fatal(err)
+//	}
+//
+// # Deployment Patterns
+//
+// ## Pattern 1: Local (Single Process)
+//
+// Dispatcher and Processor in the same process, useful for simple apps:
+//
+//	transport := command.NewChannelTransport(100)
+//
+//	// Processor runs in background (manages workers)
+//	processor := command.NewProcessor(transport, command.WithWorkers(5))
+//	processor.Register(handler)
+//	go processor.Run(ctx)
+//
+//	// Dispatcher used in HTTP handlers
+//	dispatcher := command.NewDispatcher(transport)
+//	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+//	    dispatcher.Dispatch(r.Context(), CreateUser{...})
+//	    w.WriteHeader(http.StatusAccepted) // Returns immediately
+//	})
+//
+// ## Pattern 2: Dispatcher-Only (Web Server)
+//
+// Web server dispatches to external queue/workers (future):
+//
+//	transport := redis.NewTransport("redis://localhost")
+//	dispatcher := command.NewDispatcher(transport)
+//
+//	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+//	    dispatcher.Dispatch(r.Context(), CreateUser{...})
+//	    w.WriteHeader(http.StatusAccepted)
+//	})
+//
+// ## Pattern 3: Processor-Only (Worker Service)
+//
+// Dedicated worker service processes commands from queue (future):
+//
+//	transport := redis.NewTransport("redis://localhost")
+//	processor := command.NewProcessor(
+//	    transport,
+//	    command.WithWorkers(10),
+//	)
+//	processor.Register(handler1)
+//	processor.Register(handler2)
+//
+//	// Blocks until shutdown signal
+//	if err := processor.Run(ctx); err != nil {
+//	    log.Fatal(err)
+//	}
+//
+// ## Pattern 4: Testing (Sync)
+//
+// Deterministic execution for tests:
+//
+//	func TestCreateUser(t *testing.T) {
+//	    transport := command.NewSyncTransport()
+//	    processor := command.NewProcessor(transport)
+//	    processor.Register(command.NewHandlerFunc(createUserHandler))
+//	    go processor.Run(context.Background())
+//
+//	    dispatcher := command.NewDispatcher(transport)
+//	    err := dispatcher.Dispatch(ctx, CreateUser{Email: "test@example.com"})
+//	    require.NoError(t, err)
+//
+//	    // Assertions run immediately after (synchronous execution)
+//	    assertUserExists(t, "test@example.com")
+//	}
+//
+// # Transports
+//
+// ## Sync Transport
+//
+// Executes commands immediately in the caller's goroutine.
 // This is the simplest and most efficient transport with zero overhead.
 //
 // Characteristics:
 //   - Direct function call (no goroutines, no channels)
 //   - Synchronous error handling
 //   - Runs in caller's context
-//   - No lifecycle management needed
+//   - No worker management needed
 //
 // Use cases:
 //   - HTTP request-response handlers
@@ -58,24 +208,26 @@
 //
 // Example:
 //
-//	dispatcher := command.NewDispatcher(command.WithSyncTransport())
-//	dispatcher.Register(command.NewHandlerFunc(createUserHandler))
+//	transport := command.NewSyncTransport()
+//	processor := command.NewProcessor(transport)
+//	processor.Register(command.NewHandlerFunc(handler))
+//	go processor.Run(ctx)
 //
-//	err := dispatcher.Dispatch(ctx, CreateUser{Email: "user@example.com"})
-//	if err != nil {
-//	    return err // Handler error or ErrHandlerNotFound
-//	}
+//	dispatcher := command.NewDispatcher(transport)
+//	err := dispatcher.Dispatch(ctx, CreateUser{...})
+//	// Error is from handler execution
 //
-// # Channel Transport
+// ## Channel Transport
 //
-// Channel transport executes commands asynchronously using buffered channels
-// and worker goroutines.
+// Executes commands asynchronously using buffered channels.
+// Transport is a passive wire - Processor manages workers.
 //
 // Characteristics:
 //   - Non-blocking dispatch
 //   - Buffered channel (configurable size)
-//   - Local execution (same process)
-//   - No persistence (commands lost on shutdown)
+//   - Passive wire (no internal workers)
+//   - Workers managed by Processor
+//   - Graceful shutdown (drains channel)
 //   - Error handling via callback
 //
 // Use cases:
@@ -86,132 +238,133 @@
 //
 // Example:
 //
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel() // Triggers graceful shutdown
+//	transport := command.NewChannelTransport(100)
 //
-//	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(ctx, 100, command.WithWorkers(5)),
-//	    command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
-//	        logger.Error("command failed", "command", cmdName, "error", err)
-//	    }),
+//	processor := command.NewProcessor(
+//	    transport,
+//	    command.WithWorkers(5),  // Processor controls workers
+//	    command.WithErrorHandler(errorHandler),
 //	)
+//	processor.Register(handler)
+//	go processor.Run(ctx)
 //
-//	dispatcher.Register(command.NewHandlerFunc(sendEmailHandler))
-//
-//	// Returns immediately, preserving dispatch context for handler
-//	err := dispatcher.Dispatch(ctx, SendEmail{To: "user@example.com"})
-//	if err != nil {
-//	    // ErrBufferFull or ErrHandlerNotFound only
-//	    // Handler errors are reported via WithErrorHandler callback
-//	    return err
-//	}
+//	dispatcher := command.NewDispatcher(transport)
+//	err := dispatcher.Dispatch(ctx, SendEmail{...})
+//	// Error is only dispatch error (ErrBufferFull)
+//	// Handler errors reported via errorHandler callback
 //
 // # Middleware
 //
-// Middleware wraps handlers to add cross-cutting functionality like logging,
+// Middleware wraps all handlers to add cross-cutting functionality like logging,
 // metrics, tracing, validation, or authorization.
 //
-// IMPORTANT: Middleware is immutable and must be configured at construction time
-// using WithMiddleware(). It cannot be added or modified after the dispatcher
-// is created. This design ensures thread-safety and predictable behavior.
+// IMPORTANT: Middleware is immutable and must be configured at Processor construction
+// using WithMiddleware(). It cannot be added or modified after creation.
 //
 // Built-in middleware:
 //   - LoggingMiddleware: Logs command execution with timing
 //
 // Example:
 //
-//	dispatcher := command.NewDispatcher(
+//	processor := command.NewProcessor(
+//	    transport,
 //	    command.WithMiddleware(
 //	        command.LoggingMiddleware(logger),
 //	        metricsMiddleware,
+//	        tracingMiddleware,
 //	    ),
 //	)
-//	dispatcher.Register(command.NewHandlerFunc(handler))
 //
 // Custom middleware:
 //
 //	func metricsMiddleware(next command.Handler) command.Handler {
-//	    return &middlewareHandler{
-//	        name: next.Name(),
-//	        fn: func(ctx context.Context, payload any) error {
-//	            start := time.Now()
-//	            err := next.Handle(ctx, payload)
-//	            metrics.Observe(next.Name(), time.Since(start))
-//	            return err
-//	        },
-//	    }
+//	    return command.NewHandlerFunc(func(ctx context.Context, payload any) error {
+//	        start := time.Now()
+//	        err := next.Handle(ctx, payload)
+//	        metrics.Observe(next.Name(), time.Since(start), err != nil)
+//	        return err
+//	    })
 //	}
 //
 // # Decorators
 //
 // Decorators wrap individual handlers to add retry, backoff, or timeout logic.
-// They are composable and applied per-handler.
+// Unlike middleware (applied to all handlers), decorators are applied per-handler.
 //
-// Retry example:
-//
-//	handler := command.WithRetry(
-//	    command.NewHandlerFunc(apiCallHandler),
-//	    3, // max retries
-//	)
-//	dispatcher.Register(handler)
-//
-// Backoff example:
-//
-//	handler := command.WithBackoff(
-//	    command.NewHandlerFunc(sendEmailHandler),
-//	    5,                    // max retries
-//	    100*time.Millisecond, // initial delay
-//	    10*time.Second,       // max delay
-//	)
-//	dispatcher.Register(handler)
-//
-// Timeout example:
-//
-//	handler := command.WithTimeout(
-//	    command.NewHandlerFunc(processImageHandler),
-//	    30*time.Second,
-//	)
-//	dispatcher.Register(handler)
-//
-// Composition:
+// ## Using WithXXX Functions
 //
 //	handler := command.WithTimeout(
 //	    command.WithBackoff(
-//	        command.NewHandlerFunc(apiCallHandler),
+//	        command.WithRetry(
+//	            command.NewHandlerFunc(apiCallHandler),
+//	            3, // max retries
+//	        ),
 //	        5, 100*time.Millisecond, 10*time.Second,
 //	    ),
 //	    60*time.Second,
 //	)
+//	processor.Register(handler)
 //
-// # Testing
+// ## Using Decorator Chaining (Cleaner)
 //
-// Sync transport is ideal for testing - it's deterministic with no timing issues.
+// The Decorate() helper provides cleaner syntax:
 //
-// Example:
+//	handler := command.Decorate(
+//	    command.NewHandlerFunc(apiCallHandler),
+//	    command.Retry(3),
+//	    command.Backoff(5, 100*time.Millisecond, 10*time.Second),
+//	    command.Timeout(60*time.Second),
+//	)
+//	processor.Register(handler)
 //
-//	func TestCreateUser(t *testing.T) {
-//	    dispatcher := command.NewDispatcher(command.WithSyncTransport())
-//	    dispatcher.Register(command.NewHandlerFunc(createUserHandler))
+// Available decorators:
 //
-//	    err := dispatcher.Dispatch(ctx, CreateUser{Email: "test@example.com"})
-//	    require.NoError(t, err)
+//   - Retry(maxRetries): Retries on error up to maxRetries times
+//   - Backoff(maxRetries, initialDelay, maxDelay): Exponential backoff retry
+//   - Timeout(duration): Enforces maximum execution time
 //
-//	    // Assertions run immediately after
-//	    assertUserExists(t, "test@example.com")
-//	}
+// Decorators are applied left-to-right (first decorator wraps innermost).
+// In the example above: Timeout wraps Backoff wraps Retry wraps Handler.
 //
 // # Error Handling
 //
-// Sync transport returns handler errors immediately:
+// Error handling differs between sync and async transports:
+//
+// ## Sync Transport
+//
+// Handler errors are returned immediately to the caller:
 //
 //	err := dispatcher.Dispatch(ctx, cmd)
-//	// err is handler error or ErrHandlerNotFound
+//	if err != nil {
+//	    // Could be:
+//	    // - ErrHandlerNotFound: No handler registered
+//	    // - Handler error: Error from command execution
+//	    // - Panic error: Handler panicked (caught and converted)
+//	}
 //
-// Channel transport returns dispatch errors only:
+// ## Channel Transport
 //
+// Dispatch returns only dispatch errors (ErrBufferFull, etc).
+// Handler errors are reported via WithErrorHandler callback:
+//
+//	processor := command.NewProcessor(
+//	    transport,
+//	    command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
+//	        logger.Error("command failed",
+//	            "command", cmdName,
+//	            "error", err,
+//	            "trace_id", ctx.Value("trace_id"),
+//	        )
+//	        metrics.CommandFailed.Inc()
+//	    }),
+//	)
+//
+//	// Dispatch returns immediately
 //	err := dispatcher.Dispatch(ctx, cmd)
-//	// err is ErrBufferFull or ErrHandlerNotFound
-//	// Handler errors handled via WithErrorHandler callback
+//	if err == command.ErrBufferFull {
+//	    // Channel buffer is full, apply backpressure
+//	    return http.StatusServiceUnavailable
+//	}
 //
 // # Panic Recovery
 //
@@ -225,44 +378,56 @@
 // Sync transport: Returns panic as error to caller
 // Channel transport: Reports panic via WithErrorHandler callback
 //
-// The original dispatch context is always propagated to handlers, even in async
-// transports, ensuring context values and cancellation work correctly.
+// The panic message and stack trace are included in the error.
 //
 // # Graceful Shutdown
 //
-// Channel transport uses context-based lifecycle management for clean shutdown.
-// When the context is cancelled, workers drain all pending commands before exiting.
-//
-// Basic shutdown:
+// Processor uses context-based lifecycle management for clean shutdown:
 //
 //	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel() // Triggers graceful shutdown
+//	defer cancel() // Triggers shutdown
 //
-//	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(ctx, 100),
-//	    command.WithErrorHandler(errorHandler),
-//	)
+//	g, ctx := errgroup.WithContext(ctx)
+//	g.Go(func() error {
+//	    return processor.Run(ctx)
+//	})
 //
-//	// When done:
-//	cancel() // Workers drain channel and exit gracefully
+//	// When context is cancelled:
+//	// 1. Channel transport: Closes channel, workers drain remaining commands
+//	// 2. Sync transport: Returns immediately (no workers)
+//	// 3. All transports: Close() called for cleanup
 //
 // Signal-based shutdown:
 //
 //	import "os/signal"
 //	import "syscall"
 //
-//	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+//	ctx, stop := signal.NotifyContext(
+//	    context.Background(),
+//	    syscall.SIGTERM,
+//	    syscall.SIGINT,
+//	)
 //	defer stop()
 //
-//	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(ctx, 100),
-//	    command.WithErrorHandler(errorHandler),
-//	)
+//	g, ctx := errgroup.WithContext(ctx)
+//	g.Go(func() error {
+//	    return processor.Run(ctx)
+//	})
 //
-//	// Shutdown happens automatically on SIGTERM/SIGINT
+//	if err := g.Wait(); err != nil {
+//	    log.Printf("shutdown error: %v", err)
+//	}
 //
-// Note: Sync transport has no lifecycle management - it executes immediately and
-// requires no cleanup.
+// # Stats and Observability
+//
+// Processor tracks statistics for observability:
+//
+//	stats := processor.Stats()
+//	log.Printf("Received: %d, Processed: %d, Failed: %d",
+//	    stats.Received, stats.Processed, stats.Failed)
+//
+// Stats are tracked via atomic counters and are thread-safe.
+// Useful for monitoring worker health and throughput.
 //
 // # Best Practices
 //
@@ -271,23 +436,117 @@
 // 3. Use sync transport for transactional operations (immediate errors)
 // 4. Use channel transport for fire-and-forget operations
 // 5. Always provide WithErrorHandler with async transports
-// 6. Pass a cancellable context to WithChannelTransport for lifecycle management
-// 7. Configure middleware at construction time (immutable after creation)
+// 6. Use errgroup for managing Processor lifecycle
+// 7. Configure middleware at Processor construction time (immutable after creation)
 // 8. Apply decorators at registration time, not inside handlers
 // 9. Use middleware for cross-cutting concerns (logging, metrics, tracing)
-// 10. Keep handlers simple and focused on business logic
-// 11. Let panic recovery handle unexpected failures gracefully
-// 12. Dispatch context is propagated to handlers - use it for cancellation/values
+// 10. Use decorators for per-handler concerns (retry, timeout, backoff)
+// 11. Keep handlers simple and focused on business logic
+// 12. Let panic recovery handle unexpected failures gracefully
+// 13. Dispatch context is propagated to handlers - use it for cancellation/values
+// 14. Separate Dispatcher and Processor for distributed architectures
+// 15. Share transport instance between Dispatcher and Processor in same process
+// 16. Processor controls workers, not Transport (Watermill pattern)
 //
-// # Upgrade Path
+// # Complete Example
 //
-// Start simple and add complexity as needed:
+// Full example with HTTP server and background workers:
 //
-//	// Phase 1: Simple app, sync
-//	dispatcher := command.NewDispatcher(command.WithSyncTransport())
+//	package main
 //
-//	// Phase 2: Need decoupling, async local
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//	dispatcher := command.NewDispatcher(command.WithChannelTransport(ctx, 100))
+//	import (
+//	    "context"
+//	    "log"
+//	    "net/http"
+//	    "os/signal"
+//	    "syscall"
+//	    "time"
+//
+//	    "github.com/dmitrymomot/foundation/core/command"
+//	    "golang.org/x/sync/errgroup"
+//	)
+//
+//	type CreateUser struct {
+//	    Email string
+//	    Name  string
+//	}
+//
+//	func createUserHandler(ctx context.Context, cmd CreateUser) error {
+//	    log.Printf("Creating user: %s (%s)", cmd.Name, cmd.Email)
+//	    // Insert into database
+//	    return nil
+//	}
+//
+//	func main() {
+//	    // Setup graceful shutdown
+//	    ctx, stop := signal.NotifyContext(
+//	        context.Background(),
+//	        syscall.SIGTERM,
+//	        syscall.SIGINT,
+//	    )
+//	    defer stop()
+//
+//	    // Create transport (passive wire)
+//	    transport := command.NewChannelTransport(100)
+//
+//	    // Create processor (active manager with workers)
+//	    processor := command.NewProcessor(
+//	        transport,
+//	        command.WithWorkers(5),  // Processor controls workers
+//	        command.WithMiddleware(command.LoggingMiddleware(logger)),
+//	        command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
+//	            log.Printf("Command %s failed: %v", cmdName, err)
+//	        }),
+//	    )
+//
+//	    // Register handlers with decorators
+//	    processor.Register(command.Decorate(
+//	        command.NewHandlerFunc(createUserHandler),
+//	        command.Retry(3),
+//	        command.Timeout(5*time.Second),
+//	    ))
+//
+//	    // Start processor
+//	    g, ctx := errgroup.WithContext(ctx)
+//	    g.Go(func() error {
+//	        return processor.Run(ctx)
+//	    })
+//
+//	    // Create dispatcher for HTTP handlers
+//	    dispatcher := command.NewDispatcher(transport)
+//
+//	    // Setup HTTP server
+//	    http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+//	        cmd := CreateUser{
+//	            Email: r.FormValue("email"),
+//	            Name:  r.FormValue("name"),
+//	        }
+//
+//	        if err := dispatcher.Dispatch(r.Context(), cmd); err != nil {
+//	            http.Error(w, err.Error(), http.StatusServiceUnavailable)
+//	            return
+//	        }
+//
+//	        w.WriteHeader(http.StatusAccepted)
+//	    })
+//
+//	    server := &http.Server{Addr: ":8080"}
+//
+//	    g.Go(func() error {
+//	        log.Println("Server starting on :8080")
+//	        if err := server.ListenAndServe(); err != http.ErrServerClosed {
+//	            return err
+//	        }
+//	        return nil
+//	    })
+//
+//	    g.Go(func() error {
+//	        <-ctx.Done()
+//	        return server.Shutdown(context.Background())
+//	    })
+//
+//	    if err := g.Wait(); err != nil {
+//	        log.Printf("Error: %v", err)
+//	    }
+//	}
 package command
