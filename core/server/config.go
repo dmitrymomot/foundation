@@ -12,21 +12,14 @@ var ErrMissingAddress = errors.New("server address is required")
 
 // Config holds server configuration with environment variable support.
 type Config struct {
-	// Server address
-	Addr string `env:"SERVER_ADDR" envDefault:":8080"`
-
-	// Timeouts
+	Addr            string        `env:"SERVER_ADDR" envDefault:":8080"`
 	ReadTimeout     time.Duration `env:"SERVER_READ_TIMEOUT" envDefault:"15s"`
 	WriteTimeout    time.Duration `env:"SERVER_WRITE_TIMEOUT" envDefault:"15s"`
 	IdleTimeout     time.Duration `env:"SERVER_IDLE_TIMEOUT" envDefault:"60s"`
 	ShutdownTimeout time.Duration `env:"SERVER_SHUTDOWN_TIMEOUT" envDefault:"30s"`
-
-	// Header limits
-	MaxHeaderBytes int `env:"SERVER_MAX_HEADER_BYTES" envDefault:"1048576"` // 1MB
-
-	// TLS Configuration (optional)
-	TLSCertFile string `env:"SERVER_TLS_CERT_FILE" envDefault:""`
-	TLSKeyFile  string `env:"SERVER_TLS_KEY_FILE" envDefault:""`
+	MaxHeaderBytes  int           `env:"SERVER_MAX_HEADER_BYTES" envDefault:"1048576"`
+	TLSCertFile     string        `env:"SERVER_TLS_CERT_FILE" envDefault:""`
+	TLSKeyFile      string        `env:"SERVER_TLS_KEY_FILE" envDefault:""`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -44,15 +37,12 @@ func DefaultConfig() Config {
 // NewFromConfig creates a Server from configuration.
 // Additional options can override config values.
 func NewFromConfig(cfg Config, opts ...Option) (*Server, error) {
-	// Validate address
 	if cfg.Addr == "" {
 		return nil, ErrMissingAddress
 	}
 
-	// Build options from config
 	configOpts := make([]Option, 0)
 
-	// Apply timeout configurations
 	if cfg.ReadTimeout > 0 {
 		configOpts = append(configOpts, WithReadTimeout(cfg.ReadTimeout))
 	}
@@ -69,7 +59,6 @@ func NewFromConfig(cfg Config, opts ...Option) (*Server, error) {
 		configOpts = append(configOpts, WithMaxHeaderBytes(cfg.MaxHeaderBytes))
 	}
 
-	// Handle TLS if configured
 	if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
 		tlsConfig, err := loadTLSFromFiles(cfg.TLSCertFile, cfg.TLSKeyFile)
 		if err != nil {
@@ -79,10 +68,8 @@ func NewFromConfig(cfg Config, opts ...Option) (*Server, error) {
 		configOpts = append(configOpts, WithTLS(tlsConfig))
 	}
 
-	// Append user-provided options to override config if needed
 	configOpts = append(configOpts, opts...)
 
-	// Use existing New constructor with combined options
 	return New(cfg.Addr, configOpts...), nil
 }
 
@@ -93,8 +80,9 @@ func loadTLSFromFiles(certFile, keyFile string) (*tls.Config, error) {
 		return nil, err
 	}
 
+	// TLS 1.2 minimum for security compliance
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12, // Enforce TLS 1.2 minimum
+		MinVersion:   tls.VersionTLS12,
 	}, nil
 }

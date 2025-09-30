@@ -110,12 +110,10 @@ func NewAutoCertServer(opts ...AutoCertOption) (*AutoCertServer, error) {
 		httpsServer: New(":443"), // Default HTTPS address
 	}
 
-	// Apply all options
 	for _, opt := range opts {
 		opt(s)
 	}
 
-	// Validation - ensure required dependencies are set
 	if s.certManager == nil {
 		return nil, ErrNoCertManager
 	}
@@ -123,7 +121,6 @@ func NewAutoCertServer(opts ...AutoCertOption) (*AutoCertServer, error) {
 		return nil, ErrNoDomainStore
 	}
 
-	// Set default handlers if not provided
 	if s.provisioningHandler == nil {
 		s.provisioningHandler = DefaultProvisioningHandler(s.httpServer.logger)
 	}
@@ -450,7 +447,7 @@ func (s *AutoCertServer) createHTTPHandler() http.Handler {
 		case StatusFailed:
 			s.failedHandler(w, r, info)
 		default:
-			// Default to provisioning state for any other status
+			// Treat unknown statuses as provisioning to avoid blocking requests
 			s.provisioningHandler(w, r, info)
 		}
 	})
