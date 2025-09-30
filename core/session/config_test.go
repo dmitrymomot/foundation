@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+
+	"github.com/dmitrymomot/foundation/core/session"
 )
 
 // Use the existing MockStore from manager_test.go
