@@ -71,3 +71,12 @@ func WithMaxHeaderBytes(max int) Option {
 		s.maxHeaderBytes = max
 	}
 }
+
+// WithServerShutdownTimeout sets the maximum time to wait for graceful shutdown of AutoCertServer.
+func WithServerShutdownTimeout(timeout time.Duration) AutoCertOption {
+	return func(s *AutoCertServer) {
+		if timeout > 0 {
+			s.shutdownTimeout = timeout
+		}
+	}
+}

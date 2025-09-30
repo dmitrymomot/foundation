@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -46,9 +47,10 @@ func New(addr string, opts ...Option) *Server {
 	return s
 }
 
-// Run starts the server and blocks until the context is canceled or an error occurs.
-// Automatically handles graceful shutdown when context is canceled.
-func (s *Server) Run(ctx context.Context, handler http.Handler) error {
+// Start starts the server and blocks until the context is canceled or an error occurs.
+// Returns context.Err() when the context is canceled.
+// Use Stop() for graceful shutdown.
+func (s *Server) Start(ctx context.Context, handler http.Handler) error {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -93,13 +95,13 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 		s.mu.Unlock()
 		return err
 	case <-ctx.Done():
-		return s.Shutdown(ctx)
+		return ctx.Err()
 	}
 }
 
-// Shutdown gracefully shuts down the server using the configured timeout.
+// Stop gracefully shuts down the server using the configured timeout.
 // Returns immediately if the server is not running.
-func (s *Server) Shutdown(ctx context.Context) error {
+func (s *Server) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -107,7 +109,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return nil
 	}
 
-	s.logger.InfoContext(ctx, "shutting down server gracefully", "timeout", s.shutdown)
+	s.logger.Info("shutting down server gracefully", "timeout", s.shutdown)
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdown)
 	defer cancel()
@@ -116,16 +118,42 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.running = false
 
 	if err != nil {
-		s.logger.ErrorContext(ctx, "server shutdown error", "error", err)
+		s.logger.Error("server shutdown error", "error", err)
 		return err
 	}
 
-	s.logger.InfoContext(ctx, "server shutdown complete")
+	s.logger.Info("server shutdown complete")
 	return nil
+}
+
+// Run provides errgroup compatibility for coordinated lifecycle management.
+// Returns a function that starts the server, monitors context cancellation,
+// and performs graceful shutdown when the context is cancelled.
+func (s *Server) Run(ctx context.Context, handler http.Handler) func() error {
+	return func() error {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- s.Start(ctx, handler)
+		}()
+
+		select {
+		case <-ctx.Done():
+			if stopErr := s.Stop(); stopErr != nil {
+				s.logger.Error("failed to stop server during context cancellation", "error", stopErr)
+			}
+			<-errCh
+			return nil
+		case err := <-errCh:
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 // Run is a convenience function that creates and runs a server with default settings.
 func Run(ctx context.Context, addr string, handler http.Handler) error {
 	server := New(addr)
-	return server.Run(ctx, handler)
+	return server.Start(ctx, handler)
 }

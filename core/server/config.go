@@ -41,7 +41,7 @@ func NewFromConfig(cfg Config, opts ...Option) (*Server, error) {
 		return nil, ErrMissingAddress
 	}
 
-	configOpts := make([]Option, 0)
+	var configOpts []Option
 
 	if cfg.ReadTimeout > 0 {
 		configOpts = append(configOpts, WithReadTimeout(cfg.ReadTimeout))
