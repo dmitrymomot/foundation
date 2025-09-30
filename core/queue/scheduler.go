@@ -100,16 +100,14 @@ func NewSchedulerFromConfig(cfg Config, repo SchedulerRepository, opts ...Schedu
 	return NewScheduler(repo, allOpts...)
 }
 
-// AddTask registers a periodic task
+// AddTask registers a periodic task with the scheduler.
 func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTaskOption) error {
-	// Default task options
 	taskOpts := &schedulerTaskOptions{
 		queue:      DefaultQueueName,
 		priority:   PriorityDefault,
 		maxRetries: 3,
 	}
 
-	// Apply options
 	for _, opt := range opts {
 		opt(taskOpts)
 	}
@@ -117,12 +115,10 @@ func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTas
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Check if task already registered
 	if _, exists := s.tasks[name]; exists {
 		return ErrTaskAlreadyRegistered
 	}
 
-	// Register the task
 	task := &scheduledTask{
 		name:       name,
 		schedule:   schedule,
@@ -133,8 +129,6 @@ func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTas
 
 	s.tasks[name] = task
 
-	// Log registration
-	// Use context.Background() since this is during registration
 	s.logger.InfoContext(context.Background(), "registered periodic task",
 		slog.String("task_name", name),
 		slog.String("schedule", schedule.String()))
@@ -164,17 +158,14 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// Reset running flag
 	s.running.Store(true)
 
-	// Ensure ticker is stopped when Start exits
 	defer s.ticker.Stop()
 
 	s.logger.InfoContext(s.ctx, "scheduler started",
 		slog.Int("task_count", taskCount),
 		slog.Duration("check_interval", s.interval))
 
-	// Check immediately on start
 	s.checkTasksWithWait()
 
-	// Then check periodically (blocking loop)
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -182,7 +173,6 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.running.Store(false)
 			return s.ctx.Err()
 		case <-s.ticker.C:
-			// Always call checkTasksWithWait - it will handle the running check internally
 			s.checkTasksWithWait()
 		}
 	}
@@ -197,17 +187,14 @@ func (s *Scheduler) Stop() error {
 		return fmt.Errorf("scheduler not started")
 	}
 
-	// Stop accepting new checks
 	s.running.Store(false)
 
 	cancel := s.cancel
 	s.cancel = nil
 	s.mu.Unlock()
 
-	// Cancel context to stop main loop (ticker cleanup happens in Start's defer)
 	cancel()
 
-	// Wait for any in-progress checkTasks to complete with timeout
 	s.logger.InfoContext(context.Background(), "scheduler stopping, waiting for active checks to complete",
 		slog.Duration("timeout", s.shutdownTimeout))
 
@@ -279,9 +266,8 @@ func (s *Scheduler) checkTasksWithWait() {
 	s.checkTasks(context.Background())
 }
 
-// checkTasks checks all registered tasks and creates any that are due
+// checkTasks checks all registered tasks and creates any that are due.
 func (s *Scheduler) checkTasks(ctx context.Context) {
-	// Get a snapshot of tasks
 	s.mu.RLock()
 	i := 0
 	tasks := make([]*scheduledTask, len(s.tasks))
@@ -293,7 +279,6 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 
 	now := time.Now()
 
-	// Check each task
 	for _, task := range tasks {
 		nextRun := s.calculateNextRun(task, now)
 		if err := s.scheduleTaskIfNeeded(ctx, task, now); err != nil {
@@ -306,7 +291,7 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 	}
 }
 
-// scheduleTaskIfNeeded checks if a task should be scheduled and creates it if needed
+// scheduleTaskIfNeeded checks if a task should be scheduled and creates it if needed.
 func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTask, now time.Time) error {
 	nextRun := s.calculateNextRun(task, now)
 
@@ -321,7 +306,6 @@ func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTas
 	// Also protects against race conditions when multiple scheduler instances run
 	existing, err := s.repo.GetPendingTaskByName(ctx, task.name)
 	if err == nil && existing != nil {
-		// Task already exists for this period - sync our state
 		s.updateTaskState(task.name, &existing.ScheduledAt)
 		s.logger.DebugContext(ctx, "periodic task already pending",
 			slog.String("task_name", task.name),
@@ -329,15 +313,12 @@ func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTas
 		return nil
 	}
 
-	// Create the task
 	if err := s.createTask(ctx, task, nextRun); err != nil {
 		return fmt.Errorf("failed to create periodic task: %w", err)
 	}
 
-	// Update state
 	s.updateTaskState(task.name, &nextRun)
 
-	// Log success
 	if task.lastScheduledAt == nil {
 		s.logger.InfoContext(ctx, "created periodic task (first run)",
 			slog.String("task_name", task.name),
@@ -351,26 +332,21 @@ func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTas
 	return nil
 }
 
-// calculateNextRun determines when the task should run next
+// calculateNextRun determines when the task should run next.
 func (s *Scheduler) calculateNextRun(task *scheduledTask, now time.Time) time.Time {
 	if task.lastScheduledAt == nil {
-		// First run: next run from now
 		return task.schedule.Next(now)
 	}
-	// Subsequent runs: next run from last scheduled
 	return task.schedule.Next(*task.lastScheduledAt)
 }
 
-// shouldScheduleTask determines if a task is due to be scheduled
+// shouldScheduleTask determines if a task is due to be scheduled.
 func (s *Scheduler) shouldScheduleTask(task *scheduledTask, nextRun, now time.Time) bool {
-	// First run is always scheduled
 	if task.lastScheduledAt == nil {
 		return true
 	}
 
-	// Skip if not due yet
 	if nextRun.After(now) {
-		// Use context.Background() for debug logging in this utility method
 		s.logger.DebugContext(context.Background(), "periodic task not due yet",
 			slog.String("task_name", task.name),
 			slog.Time("next_run", nextRun))
@@ -380,7 +356,7 @@ func (s *Scheduler) shouldScheduleTask(task *scheduledTask, nextRun, now time.Ti
 	return true
 }
 
-// updateTaskState updates the lastScheduledAt time for a task
+// updateTaskState updates the lastScheduledAt time for a task.
 func (s *Scheduler) updateTaskState(taskName string, scheduledAt *time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -390,14 +366,14 @@ func (s *Scheduler) updateTaskState(taskName string, scheduledAt *time.Time) {
 	}
 }
 
-// createTask creates a new task instance in the database
+// createTask creates a new task instance in the repository.
 func (s *Scheduler) createTask(ctx context.Context, task *scheduledTask, scheduledAt time.Time) error {
 	newTask := &Task{
 		ID:          uuid.New(),
 		Queue:       task.queue,
 		TaskType:    TaskTypePeriodic,
 		TaskName:    task.name,
-		Payload:     nil, // Periodic tasks have no payload
+		Payload:     nil,
 		Status:      TaskStatusPending,
 		Priority:    task.priority,
 		RetryCount:  0,
@@ -410,13 +386,12 @@ func (s *Scheduler) createTask(ctx context.Context, task *scheduledTask, schedul
 		return err
 	}
 
-	// Increment counter for metrics
 	s.tasksScheduled.Add(1)
 
 	return nil
 }
 
-// RemoveTask removes a periodic task from the scheduler
+// RemoveTask removes a periodic task from the scheduler.
 func (s *Scheduler) RemoveTask(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -427,7 +402,7 @@ func (s *Scheduler) RemoveTask(name string) {
 		slog.String("task_name", name))
 }
 
-// ListTasks returns all registered periodic tasks
+// ListTasks returns all registered periodic task names.
 func (s *Scheduler) ListTasks() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -9,7 +9,7 @@ import (
 // DefaultQueueName is the default queue name used when no queue is specified
 const DefaultQueueName = "default"
 
-// TaskType represents the type of task
+// TaskType categorizes tasks as one-time immediate execution or scheduler-generated periodic tasks.
 type TaskType string
 
 const (
@@ -17,7 +17,7 @@ const (
 	TaskTypePeriodic TaskType = "periodic"
 )
 
-// TaskStatus represents the status of a task
+// TaskStatus tracks the lifecycle state of a task through the queue system.
 type TaskStatus string
 
 const (
@@ -31,7 +31,6 @@ const (
 // Using int8 provides sufficient range while keeping memory footprint minimal
 type Priority int8
 
-// Priority constants
 const (
 	PriorityMin     Priority = 0
 	PriorityLow     Priority = 25
@@ -41,6 +40,7 @@ const (
 	PriorityDefault Priority = PriorityMedium
 )
 
+// Valid checks if the priority is within the allowed range (0-100).
 func (p Priority) Valid() bool {
 	return p >= PriorityMin && p <= PriorityMax
 }
