@@ -279,7 +279,7 @@ func TestMemoryStorage_FailTask(t *testing.T) {
 		require.NoError(t, err)
 
 		// Task should be claimable again but with backoff
-		time.Sleep(100 * time.Millisecond) // Let background routine process
+		time.Sleep(50 * time.Millisecond) // Let lock expiration manager process
 		claimed2, err := storage.ClaimTask(context.Background(), workerID, []string{queue.DefaultQueueName}, 5*time.Minute)
 		assert.ErrorIs(t, err, queue.ErrNoTaskToClaim) // Should be scheduled for future due to backoff
 		assert.Nil(t, claimed2)
@@ -413,8 +413,8 @@ func TestMemoryStorage_LockExpiration(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, claimed)
 
-		// Wait for lock to expire
-		time.Sleep(2 * time.Second)
+		// Wait for lock to expire (500ms lock + 1s check interval)
+		time.Sleep(1100 * time.Millisecond)
 
 		// Another worker should be able to claim it
 		worker2 := uuid.New()
