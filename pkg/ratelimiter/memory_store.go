@@ -171,7 +171,7 @@ func (ms *MemoryStore) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ms.ctx.Done():
-			ms.logger.InfoContext(context.Background(), "memory store cleanup stopping")
+			ms.logger.Info("memory store cleanup stopping")
 			return ms.ctx.Err()
 		case <-ticker.C:
 			ms.cleanupWithWait()
@@ -196,7 +196,7 @@ func (ms *MemoryStore) Stop() error {
 	cancel()
 
 	// Wait for any in-progress cleanup to complete with timeout
-	ms.logger.InfoContext(context.Background(), "memory store stopping, waiting for cleanup to complete",
+	ms.logger.Info("memory store stopping, waiting for cleanup to complete",
 		slog.Duration("timeout", ms.shutdownTimeout))
 
 	ctx, ctxCancel := context.WithTimeout(context.Background(), ms.shutdownTimeout)
@@ -210,10 +210,10 @@ func (ms *MemoryStore) Stop() error {
 
 	select {
 	case <-done:
-		ms.logger.InfoContext(context.Background(), "memory store stopped cleanly")
+		ms.logger.Info("memory store stopped cleanly")
 		return nil
 	case <-ctx.Done():
-		ms.logger.WarnContext(context.Background(), "memory store shutdown timeout exceeded",
+		ms.logger.Warn("memory store shutdown timeout exceeded",
 			slog.Duration("timeout", ms.shutdownTimeout))
 		return fmt.Errorf("shutdown timeout exceeded after %s", ms.shutdownTimeout)
 	}

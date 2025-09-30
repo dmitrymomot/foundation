@@ -357,7 +357,7 @@ func (ms *MemoryStorage) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ms.ctx.Done():
-			ms.logger.InfoContext(context.Background(), "memory storage stopping")
+			ms.logger.Info("memory storage stopping")
 			return ms.ctx.Err()
 		case <-ticker.C:
 			select {
@@ -385,7 +385,7 @@ func (ms *MemoryStorage) Stop() error {
 
 	cancel()
 
-	ms.logger.InfoContext(context.Background(), "memory storage stopping, waiting for lock expiration to complete",
+	ms.logger.Info("memory storage stopping, waiting for lock expiration to complete",
 		slog.Duration("timeout", ms.shutdownTimeout))
 
 	ctx, ctxCancel := context.WithTimeout(context.Background(), ms.shutdownTimeout)
@@ -399,10 +399,10 @@ func (ms *MemoryStorage) Stop() error {
 
 	select {
 	case <-done:
-		ms.logger.InfoContext(context.Background(), "memory storage stopped cleanly")
+		ms.logger.Info("memory storage stopped cleanly")
 		return nil
 	case <-ctx.Done():
-		ms.logger.WarnContext(context.Background(), "memory storage shutdown timeout exceeded",
+		ms.logger.Warn("memory storage shutdown timeout exceeded",
 			slog.Duration("timeout", ms.shutdownTimeout))
 		return fmt.Errorf("shutdown timeout exceeded after %s", ms.shutdownTimeout)
 	}

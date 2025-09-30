@@ -173,7 +173,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-w.ctx.Done():
-			w.logger.InfoContext(context.Background(), "worker stopping")
+			w.logger.Info("worker stopping")
 			return w.ctx.Err()
 		case <-ticker.C:
 			select {
@@ -225,7 +225,7 @@ func (w *Worker) Stop() error {
 
 	cancel()
 
-	w.logger.InfoContext(context.Background(), "worker stopping, waiting for active tasks to complete",
+	w.logger.Info("worker stopping, waiting for active tasks to complete",
 		slog.String("worker_id", w.workerID.String()),
 		slog.Duration("timeout", w.shutdownTimeout))
 
@@ -240,11 +240,11 @@ func (w *Worker) Stop() error {
 
 	select {
 	case <-done:
-		w.logger.InfoContext(context.Background(), "worker stopped cleanly",
+		w.logger.Info("worker stopped cleanly",
 			slog.String("worker_id", w.workerID.String()))
 		return nil
 	case <-ctx.Done():
-		w.logger.WarnContext(context.Background(), "worker shutdown timeout exceeded - some tasks may be abandoned",
+		w.logger.Warn("worker shutdown timeout exceeded - some tasks may be abandoned",
 			slog.String("worker_id", w.workerID.String()),
 			slog.Duration("timeout", w.shutdownTimeout))
 		return fmt.Errorf("shutdown timeout exceeded after %s", w.shutdownTimeout)

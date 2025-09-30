@@ -131,7 +131,7 @@ func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTas
 
 	s.tasks[name] = task
 
-	s.logger.InfoContext(context.Background(), "registered periodic task",
+	s.logger.Info("registered periodic task",
 		slog.String("task_name", name),
 		slog.String("schedule", schedule.String()))
 
@@ -171,7 +171,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-s.ctx.Done():
-			s.logger.InfoContext(context.Background(), "scheduler stopping")
+			s.logger.Info("scheduler stopping")
 			s.running.Store(false)
 			return s.ctx.Err()
 		case <-s.ticker.C:
@@ -197,7 +197,7 @@ func (s *Scheduler) Stop() error {
 
 	cancel()
 
-	s.logger.InfoContext(context.Background(), "scheduler stopping, waiting for active checks to complete",
+	s.logger.Info("scheduler stopping, waiting for active checks to complete",
 		slog.Duration("timeout", s.shutdownTimeout))
 
 	ctx, ctxCancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
@@ -211,10 +211,10 @@ func (s *Scheduler) Stop() error {
 
 	select {
 	case <-done:
-		s.logger.InfoContext(context.Background(), "scheduler stopped cleanly")
+		s.logger.Info("scheduler stopped cleanly")
 		return nil
 	case <-ctx.Done():
-		s.logger.WarnContext(context.Background(), "scheduler shutdown timeout exceeded - some checks may be abandoned",
+		s.logger.Warn("scheduler shutdown timeout exceeded - some checks may be abandoned",
 			slog.Duration("timeout", s.shutdownTimeout))
 		return fmt.Errorf("shutdown timeout exceeded after %s", s.shutdownTimeout)
 	}
@@ -349,7 +349,7 @@ func (s *Scheduler) shouldScheduleTask(task *scheduledTask, nextRun, now time.Ti
 	}
 
 	if nextRun.After(now) {
-		s.logger.DebugContext(context.Background(), "periodic task not due yet",
+		s.logger.Debug("periodic task not due yet",
 			slog.String("task_name", task.name),
 			slog.Time("next_run", nextRun))
 		return false
@@ -401,7 +401,7 @@ func (s *Scheduler) RemoveTask(name string) {
 
 	delete(s.tasks, name)
 
-	s.logger.InfoContext(context.Background(), "removed periodic task",
+	s.logger.Info("removed periodic task",
 		slog.String("task_name", name))
 }
 
