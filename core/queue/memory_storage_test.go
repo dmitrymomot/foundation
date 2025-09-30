@@ -14,7 +14,6 @@ import (
 
 func TestMemoryStorage_CreateTask(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("creates task successfully", func(t *testing.T) {
 		task := &queue.Task{
@@ -199,7 +198,6 @@ func TestMemoryStorage_ClaimTask(t *testing.T) {
 
 func TestMemoryStorage_CompleteTask(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("completes task successfully", func(t *testing.T) {
 		task := &queue.Task{
@@ -256,7 +254,6 @@ func TestMemoryStorage_CompleteTask(t *testing.T) {
 
 func TestMemoryStorage_FailTask(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("fails task with retry", func(t *testing.T) {
 		task := &queue.Task{
@@ -320,7 +317,6 @@ func TestMemoryStorage_FailTask(t *testing.T) {
 
 func TestMemoryStorage_MoveToDLQ(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("moves task to DLQ", func(t *testing.T) {
 		task := &queue.Task{
@@ -352,7 +348,6 @@ func TestMemoryStorage_MoveToDLQ(t *testing.T) {
 
 func TestMemoryStorage_ExtendLock(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("extends lock successfully", func(t *testing.T) {
 		task := &queue.Task{
@@ -390,7 +385,14 @@ func TestMemoryStorage_ExtendLock(t *testing.T) {
 
 func TestMemoryStorage_LockExpiration(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
+
+	// Start the lock expiration manager
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = storage.Start(ctx)
+	}()
+	time.Sleep(10 * time.Millisecond) // Wait for startup
 
 	t.Run("expired locks are released", func(t *testing.T) {
 		task := &queue.Task{
@@ -426,7 +428,6 @@ func TestMemoryStorage_LockExpiration(t *testing.T) {
 
 func TestMemoryStorage_Concurrency(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("concurrent task creation", func(t *testing.T) {
 		const numGoroutines = 10
@@ -521,7 +522,6 @@ func TestMemoryStorage_Concurrency(t *testing.T) {
 
 func TestMemoryStorage_GetPendingTaskByName(t *testing.T) {
 	storage := queue.NewMemoryStorage()
-	defer storage.Close()
 
 	t.Run("finds pending task by name", func(t *testing.T) {
 		task := &queue.Task{
@@ -649,6 +649,175 @@ func TestMemoryStorage_GetPendingTaskByName(t *testing.T) {
 		require.NotNil(t, found2)
 		assert.Equal(t, "immutable-test", found2.TaskName)
 		assert.Equal(t, queue.PriorityMedium, found2.Priority)
+	})
+}
+
+func TestMemoryStorage_StartStop(t *testing.T) {
+	t.Run("start and stop successfully", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start in background
+		go func() {
+			_ = storage.Start(ctx)
+		}()
+
+		// Wait for startup
+		time.Sleep(10 * time.Millisecond)
+
+		// Verify it's running
+		stats := storage.Stats()
+		assert.True(t, stats.IsRunning)
+
+		// Stop gracefully
+		err := storage.Stop()
+		assert.NoError(t, err)
+
+		// Verify it stopped
+		stats = storage.Stats()
+		assert.False(t, stats.IsRunning)
+	})
+
+	t.Run("fails to start when already started", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start first time
+		go func() {
+			_ = storage.Start(ctx)
+		}()
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Try to start again
+		err := storage.Start(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "already started")
+
+		_ = storage.Stop()
+	})
+
+	t.Run("fails to stop when not started", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		err := storage.Stop()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not started")
+	})
+}
+
+func TestMemoryStorage_Run(t *testing.T) {
+	t.Run("run with errgroup pattern", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		// Run in background
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- storage.Run(ctx)()
+		}()
+
+		// Wait for startup
+		time.Sleep(10 * time.Millisecond)
+
+		// Verify it's running
+		stats := storage.Stats()
+		assert.True(t, stats.IsRunning)
+
+		// Cancel context
+		cancel()
+
+		// Wait for graceful shutdown
+		err := <-errCh
+		assert.NoError(t, err)
+
+		// Verify it stopped
+		stats = storage.Stats()
+		assert.False(t, stats.IsRunning)
+	})
+}
+
+func TestMemoryStorage_Stats(t *testing.T) {
+	t.Run("tracks active tasks", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		// Create some tasks
+		for i := range 3 {
+			task := &queue.Task{
+				ID:          uuid.New(),
+				Queue:       queue.DefaultQueueName,
+				TaskType:    queue.TaskTypeOneTime,
+				TaskName:    "test-task",
+				Status:      queue.TaskStatusPending,
+				Priority:    queue.Priority(i),
+				ScheduledAt: time.Now(),
+				CreatedAt:   time.Now(),
+			}
+			_ = storage.CreateTask(context.Background(), task)
+		}
+
+		stats := storage.Stats()
+		assert.Equal(t, 3, stats.ActiveTasks)
+		assert.Equal(t, int64(0), stats.ExpiredLocksFreed)
+		assert.False(t, stats.IsRunning)
+	})
+}
+
+func TestMemoryStorage_Healthcheck(t *testing.T) {
+	t.Run("unhealthy when not running", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		err := storage.Healthcheck(context.Background())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not running")
+	})
+
+	t.Run("healthy when running", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start lock expiration manager
+		go func() {
+			_ = storage.Start(ctx)
+		}()
+
+		time.Sleep(10 * time.Millisecond)
+
+		err := storage.Healthcheck(context.Background())
+		assert.NoError(t, err)
+
+		_ = storage.Stop()
+	})
+}
+
+func TestMemoryStorage_Close(t *testing.T) {
+	t.Run("close calls stop internally", func(t *testing.T) {
+		storage := queue.NewMemoryStorage()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start lock expiration manager
+		go func() {
+			_ = storage.Start(ctx)
+		}()
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Close should stop it
+		err := storage.Close()
+		assert.NoError(t, err)
+
+		stats := storage.Stats()
+		assert.False(t, stats.IsRunning)
 	})
 }
 
