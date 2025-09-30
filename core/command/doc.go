@@ -81,13 +81,15 @@
 //
 // Example:
 //
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel() // Graceful shutdown
+//
 //	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(100, command.WithWorkers(5)),
+//	    command.WithChannelTransport(ctx, 100, command.WithWorkers(5)),
 //	    command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
 //	        logger.Error("command failed", "command", cmdName, "error", err)
 //	    }),
 //	)
-//	defer dispatcher.Stop() // Graceful shutdown
 //
 //	dispatcher.Register(command.NewHandlerFunc(sendEmailHandler))
 //
@@ -206,22 +208,25 @@
 //
 // # Graceful Shutdown
 //
-// Channel transport requires graceful shutdown to drain pending commands:
+// Channel transport uses context-based lifecycle management.
+// Workers drain pending commands when the context is cancelled:
+//
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel() // Triggers graceful shutdown
 //
 //	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(100),
+//	    command.WithChannelTransport(ctx, 100),
 //	    command.WithErrorHandler(errorHandler),
 //	)
-//	defer dispatcher.Stop() // Blocks until workers finish (30s timeout)
 //
-//	// Or with signal handling:
+//	// With signal handling:
 //	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 //	defer stop()
 //
-//	go func() {
-//	    <-ctx.Done()
-//	    dispatcher.Stop()
-//	}()
+//	dispatcher := command.NewDispatcher(
+//	    command.WithChannelTransport(ctx, 100),
+//	    command.WithErrorHandler(errorHandler),
+//	)
 //
 // # Best Practices
 //
@@ -231,7 +236,7 @@
 // 4. Use sync transport for transactional operations
 // 5. Use channel transport for fire-and-forget operations
 // 6. Always provide an error handler with async transports
-// 7. Call dispatcher.Stop() for graceful shutdown with channel transport
+// 7. Pass a cancellable context to WithChannelTransport for lifecycle management
 // 8. Configure middleware at construction time using WithMiddleware()
 // 9. Apply decorators at registration time, not in handlers
 // 10. Use middleware for cross-cutting concerns
@@ -245,5 +250,7 @@
 //	dispatcher := command.NewDispatcher(command.WithSyncTransport())
 //
 //	// Phase 2: Need decoupling, async local
-//	dispatcher := command.NewDispatcher(command.WithChannelTransport(100))
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//	dispatcher := command.NewDispatcher(command.WithChannelTransport(ctx, 100))
 package command

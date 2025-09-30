@@ -5,17 +5,17 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 )
 
 // channelTransport executes commands asynchronously using buffered channels.
 // Commands are dispatched to a channel and processed by worker goroutines.
+// Lifecycle is managed via the context passed to WithChannelTransport.
 //
 // Characteristics:
 // - Non-blocking dispatch
 // - Buffered channel (configurable size)
 // - Local execution (same process)
-// - No persistence (commands lost on shutdown)
+// - Context-based lifecycle management
 // - Error handling via callback
 //
 // Use cases:
@@ -30,9 +30,7 @@ type channelTransport struct {
 	logger       *slog.Logger
 	workers      int
 	ctx          context.Context
-	cancel       context.CancelFunc
 	wg           sync.WaitGroup
-	shutdownOnce sync.Once
 }
 
 // ChannelOption configures the channel transport.
@@ -50,15 +48,15 @@ func WithWorkers(n int) ChannelOption {
 
 // newChannelTransport creates a new channel-based async transport.
 // Workers are started immediately and begin processing commands.
+// When ctx is cancelled, workers drain the channel and exit gracefully.
 func newChannelTransport(
+	ctx context.Context,
 	bufferSize int,
 	getHandler func(string) (Handler, bool),
 	errorHandler func(context.Context, string, error),
 	logger *slog.Logger,
 	opts ...ChannelOption,
 ) Transport {
-	ctx, cancel := context.WithCancel(context.Background())
-
 	t := &channelTransport{
 		ch:           make(chan envelope, bufferSize),
 		getHandler:   getHandler,
@@ -66,7 +64,6 @@ func newChannelTransport(
 		logger:       logger,
 		workers:      1, // default
 		ctx:          ctx,
-		cancel:       cancel,
 	}
 
 	// Apply options
@@ -79,6 +76,13 @@ func newChannelTransport(
 		t.wg.Add(1)
 		go t.worker()
 	}
+
+	// Monitor context and close channel when cancelled
+	go func() {
+		<-ctx.Done()
+		close(t.ch)
+		t.logger.Info("channel transport shutting down")
+	}()
 
 	return t
 }
@@ -109,21 +113,12 @@ func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload
 	}
 }
 
-// worker processes commands from the channel.
+// worker processes commands from the channel until it's closed.
 func (t *channelTransport) worker() {
 	defer t.wg.Done()
 
-	for {
-		select {
-		case <-t.ctx.Done():
-			return
-		case env, ok := <-t.ch:
-			if !ok {
-				// Channel closed
-				return
-			}
-			t.handleCommand(env)
-		}
+	for env := range t.ch {
+		t.handleCommand(env)
 	}
 }
 
@@ -164,31 +159,4 @@ func (t *channelTransport) handleCommand(env envelope) {
 			t.errorHandler(ctx, env.Name, err)
 		}
 	}
-}
-
-// Stop gracefully shuts down the transport.
-// Closes the channel and waits for workers to finish processing.
-// Blocks until all workers are done or timeout (30 seconds).
-func (t *channelTransport) Stop() {
-	t.shutdownOnce.Do(func() {
-		// Signal workers to stop
-		t.cancel()
-
-		// Close channel to drain remaining commands
-		close(t.ch)
-
-		// Wait for workers with timeout
-		done := make(chan struct{})
-		go func() {
-			t.wg.Wait()
-			close(done)
-		}()
-
-		select {
-		case <-done:
-			t.logger.Info("channel transport stopped gracefully")
-		case <-time.After(30 * time.Second):
-			t.logger.Warn("channel transport shutdown timeout")
-		}
-	})
 }

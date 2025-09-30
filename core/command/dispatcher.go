@@ -98,25 +98,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, cmd any) error {
 	return d.transport.Dispatch(ctx, cmdName, cmd)
 }
 
-// Stop gracefully shuts down the dispatcher.
-// For channel transport, this closes the channel and waits for workers to finish.
-// For sync transport, this is a no-op.
-//
-// Example:
-//
-//	dispatcher := command.NewDispatcher(command.WithChannelTransport(100))
-//	defer dispatcher.Stop()
-func (d *Dispatcher) Stop() {
-	// Check if transport supports graceful shutdown
-	type stopper interface {
-		Stop()
-	}
-
-	if s, ok := d.transport.(stopper); ok {
-		s.Stop()
-	}
-}
-
 // getHandler retrieves a handler by command name with middleware applied.
 // This is used by transports to look up and execute handlers.
 func (d *Dispatcher) getHandler(cmdName string) (Handler, bool) {
@@ -153,23 +134,27 @@ func WithSyncTransport() Option {
 
 // WithChannelTransport configures the dispatcher to use channel-based async execution.
 // Commands are dispatched to a buffered channel and processed by worker goroutines.
+// Lifecycle is managed via the provided context - when cancelled, workers drain
+// the channel and exit gracefully.
 //
 // Parameters:
+// - ctx: Context for lifecycle management (cancel to shutdown)
 // - bufferSize: Size of the command buffer (blocks when full)
 // - opts: Optional configuration (worker count, etc.)
 //
-// Important: Call dispatcher.Stop() for graceful shutdown.
-//
 // Example:
 //
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//
 //	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(100, command.WithWorkers(5)),
+//	    command.WithChannelTransport(ctx, 100, command.WithWorkers(5)),
 //	    command.WithErrorHandler(errorHandler),
 //	)
-//	defer dispatcher.Stop()
-func WithChannelTransport(bufferSize int, opts ...ChannelOption) Option {
+func WithChannelTransport(ctx context.Context, bufferSize int, opts ...ChannelOption) Option {
 	return func(d *Dispatcher) {
 		d.transport = newChannelTransport(
+			ctx,
 			bufferSize,
 			d.getHandler,
 			d.errorHandler,
@@ -185,8 +170,11 @@ func WithChannelTransport(bufferSize int, opts ...ChannelOption) Option {
 //
 // Example:
 //
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//
 //	dispatcher := command.NewDispatcher(
-//	    command.WithChannelTransport(100),
+//	    command.WithChannelTransport(ctx, 100),
 //	    command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
 //	        logger.Error("command failed", "command", cmdName, "error", err)
 //	    }),
