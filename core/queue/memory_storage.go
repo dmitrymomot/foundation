@@ -84,27 +84,30 @@ func (ms *MemoryStorage) ClaimTask(ctx context.Context, workerID uuid.UUID, queu
 	var bestTask *Task
 	var bestPriority Priority = -1
 
-	// Find the highest priority available task using a priority-first, time-second algorithm
-	// This ensures critical tasks are processed first while maintaining fairness within priority tiers
+	// Task selection algorithm: Priority-first with time-based tiebreaking
+	// Guarantees: Higher priority tasks always run before lower priority ones
+	// Fairness: Within same priority, earliest scheduled tasks run first
+	// This prevents starvation while ensuring critical tasks get precedence
 	for _, taskID := range ms.byStatus[TaskStatusPending] {
 		task := ms.tasks[taskID]
 
-		// Skip tasks not in requested queues
+		// Queue filtering: Only process tasks from worker's registered queues
 		if !slices.Contains(queues, task.Queue) {
 			continue
 		}
 
-		// Skip tasks scheduled for future execution (delayed tasks)
+		// Scheduling constraint: Respect delayed execution times
 		if task.ScheduledAt.After(now) {
 			continue
 		}
 
-		// Skip tasks still locked by other workers (shouldn't happen in pending status)
+		// Lock safety: Skip tasks with unexpired locks (defensive programming)
 		if task.LockedUntil != nil && task.LockedUntil.After(now) {
 			continue
 		}
 
-		// Priority-first selection: higher priority wins, earliest creation time breaks ties
+		// Selection criteria: Priority first, then chronological order
+		// This implements a stable priority queue with FIFO tiebreaking
 		if bestTask == nil ||
 			task.Priority > bestPriority ||
 			(task.Priority == bestPriority && task.ScheduledAt.Before(bestTask.ScheduledAt)) {
@@ -188,8 +191,10 @@ func (ms *MemoryStorage) FailTask(ctx context.Context, taskID uuid.UUID, errorMs
 		ms.removeFromStatusIndex(taskID, TaskStatusProcessing)
 		ms.byStatus[TaskStatusPending] = append(ms.byStatus[TaskStatusPending], taskID)
 
-		// Apply exponential backoff to prevent thundering herd on persistent failures
-		// Linear progression: 30s, 60s, 90s... balances quick retry with system stability
+		// Retry backoff strategy: Linear progression prevents system overload
+		// Formula: retryCount * 30s (30s, 60s, 90s, 120s...)
+		// Rationale: Faster than exponential for transient issues,
+		// but still protects against persistent failures causing thundering herd
 		backoff := time.Duration(task.RetryCount) * 30 * time.Second
 		task.ScheduledAt = time.Now().Add(backoff)
 	}

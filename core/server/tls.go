@@ -12,13 +12,8 @@ import (
 func DefaultTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS12,
+		// ECDHE cipher suites provide forward secrecy
 		CipherSuites: []uint16{
-			// TLS 1.3 cipher suites (auto-selected when TLS 1.3 is negotiated)
-			// TLS_AES_128_GCM_SHA256
-			// TLS_AES_256_GCM_SHA384
-			// TLS_CHACHA20_POLY1305_SHA256
-
-			// TLS 1.2 cipher suites (ECDHE only for forward secrecy)
 			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
 			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
@@ -39,7 +34,6 @@ func DefaultTLSConfig() *tls.Config {
 func ModernTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
-		// TLS 1.3 cipher suites are auto-selected
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
@@ -75,16 +69,14 @@ func IntermediateTLSConfig() *tls.Config {
 func StrictTLSConfig() *tls.Config {
 	return &tls.Config{
 		MinVersion: tls.VersionTLS13,
-		// TLS 1.3 only with auto-selected cipher suites
 		CurvePreferences: []tls.CurveID{
-			tls.X25519, // Preferred for performance and security
+			tls.X25519, // Best performance and security trade-off
 			tls.CurveP256,
 		},
-		// Additional security settings
-		SessionTicketsDisabled:      true,                 // Disable session tickets for forward secrecy
-		DynamicRecordSizingDisabled: false,                // Keep enabled for performance
-		Renegotiation:               tls.RenegotiateNever, // Prevent renegotiation attacks
-		PreferServerCipherSuites:    false,                // Let Go select the best cipher (Go 1.17+)
+		SessionTicketsDisabled:      true,                 // Ensure forward secrecy
+		DynamicRecordSizingDisabled: false,                // Optimize latency for small responses
+		Renegotiation:               tls.RenegotiateNever, // Block renegotiation attacks
+		PreferServerCipherSuites:    false,                // Go 1.17+ intelligently selects cipher
 	}
 }
 
@@ -109,7 +101,6 @@ func WithTLSCertificate(certFile, keyFile string) TLSConfigOption {
 // WithTLSClientAuth configures client certificate authentication.
 func WithTLSClientAuth(clientAuthType tls.ClientAuthType) TLSConfigOption {
 	return func(cfg *tls.Config) error {
-		// Validate client auth type is within valid range (0-4)
 		switch clientAuthType {
 		case tls.NoClientCert,
 			tls.RequestClientCert,
@@ -127,12 +118,11 @@ func WithTLSClientAuth(clientAuthType tls.ClientAuthType) TLSConfigOption {
 // WithTLSMinVersion sets the minimum TLS version.
 func WithTLSMinVersion(version uint16) TLSConfigOption {
 	return func(cfg *tls.Config) error {
-		// Validate TLS version is within acceptable range
 		if !isValidTLSVersion(version) {
 			return errors.Join(ErrInvalidTLSVersion, fmt.Errorf("0x%04x", version))
 		}
 
-		// Ensure MinVersion <= MaxVersion if MaxVersion is set
+		// Prevent invalid configuration where min > max
 		if cfg.MaxVersion > 0 && version > cfg.MaxVersion {
 			return ErrTLSVersionMismatch
 		}
@@ -145,12 +135,11 @@ func WithTLSMinVersion(version uint16) TLSConfigOption {
 // WithTLSMaxVersion sets the maximum TLS version.
 func WithTLSMaxVersion(version uint16) TLSConfigOption {
 	return func(cfg *tls.Config) error {
-		// Validate TLS version is within acceptable range
 		if !isValidTLSVersion(version) {
 			return errors.Join(ErrInvalidTLSVersion, fmt.Errorf("0x%04x", version))
 		}
 
-		// Ensure MinVersion <= MaxVersion if MinVersion is set
+		// Prevent invalid configuration where max < min
 		if cfg.MinVersion > 0 && version < cfg.MinVersion {
 			return ErrTLSVersionMismatch
 		}

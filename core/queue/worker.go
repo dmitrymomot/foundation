@@ -41,17 +41,30 @@ type Worker struct {
 	sem      chan struct{}
 	wg       sync.WaitGroup
 	mu       sync.RWMutex
-	stopMu   sync.Mutex // Protects stopping state and WaitGroup operations
 
 	// Configuration
-	pullInterval time.Duration
-	lockTimeout  time.Duration
-	logger       *slog.Logger
+	pullInterval    time.Duration
+	lockTimeout     time.Duration
+	shutdownTimeout time.Duration
+	logger          *slog.Logger
 
 	// State management
 	ctx      context.Context
 	cancel   context.CancelFunc
 	stopping atomic.Bool
+
+	// Observability metrics
+	tasksProcessed atomic.Int64
+	tasksFailed    atomic.Int64
+	activeTasks    atomic.Int32
+}
+
+// WorkerStats provides observability metrics for monitoring and debugging
+type WorkerStats struct {
+	TasksProcessed int64 // Total number of successfully completed tasks
+	TasksFailed    int64 // Total number of failed tasks (including those moved to DLQ)
+	ActiveTasks    int32 // Number of tasks currently being processed
+	IsRunning      bool  // Whether the worker is currently running
 }
 
 // NewWorker creates a new task worker
@@ -65,6 +78,7 @@ func NewWorker(repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
 		queues:             []string{DefaultQueueName},
 		pullInterval:       5 * time.Second,
 		lockTimeout:        5 * time.Minute,
+		shutdownTimeout:    30 * time.Second,
 		maxConcurrentTasks: 1,
 		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
 	}
@@ -75,14 +89,15 @@ func NewWorker(repo WorkerRepository, opts ...WorkerOption) (*Worker, error) {
 	}
 
 	return &Worker{
-		repo:         repo,
-		handlers:     make(map[string]Handler),
-		queues:       options.queues,
-		workerID:     uuid.New(),
-		sem:          make(chan struct{}, options.maxConcurrentTasks),
-		pullInterval: options.pullInterval,
-		lockTimeout:  options.lockTimeout,
-		logger:       options.logger,
+		repo:            repo,
+		handlers:        make(map[string]Handler),
+		queues:          options.queues,
+		workerID:        uuid.New(),
+		sem:             make(chan struct{}, options.maxConcurrentTasks),
+		pullInterval:    options.pullInterval,
+		lockTimeout:     options.lockTimeout,
+		shutdownTimeout: options.shutdownTimeout,
+		logger:          options.logger,
 	}, nil
 }
 
@@ -94,6 +109,7 @@ func NewWorkerFromConfig(cfg Config, repo WorkerRepository, opts ...WorkerOption
 	allOpts := append([]WorkerOption{
 		WithPullInterval(cfg.PollInterval),
 		WithLockTimeout(cfg.LockTimeout),
+		WithShutdownTimeout(cfg.ShutdownTimeout),
 		WithMaxConcurrentTasks(cfg.MaxConcurrentTasks),
 		WithQueues(cfg.Queues...),
 	}, opts...)
@@ -124,7 +140,8 @@ func (w *Worker) RegisterHandlers(handlers ...Handler) error {
 	return nil
 }
 
-// Start begins processing tasks in the background
+// Start begins processing tasks. This is a blocking operation that runs until
+// the context is cancelled. Use Run() for errgroup pattern or call this in a goroutine.
 func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.cancel != nil {
@@ -143,87 +160,34 @@ func (w *Worker) Start(ctx context.Context) error {
 	// Reset stopping flag
 	w.stopping.Store(false)
 
-	// Start the main processing loop
-	go w.run()
-
 	w.logger.InfoContext(w.ctx, "worker started",
 		slog.String("worker_id", w.workerID.String()),
 		slog.Any("queues", w.queues),
 		slog.Int("max_concurrent", cap(w.sem)))
 
-	return nil
-}
-
-// Stop gracefully shuts down the worker
-func (w *Worker) Stop() error {
-	w.mu.Lock()
-	if w.cancel == nil {
-		w.mu.Unlock()
-		return fmt.Errorf("worker not started")
-	}
-
-	// Use stopMu to synchronize with run() goroutine
-	w.stopMu.Lock()
-	w.stopping.Store(true)
-	w.stopMu.Unlock()
-
-	cancel := w.cancel
-	w.cancel = nil
-	w.mu.Unlock()
-
-	// Cancel context to stop processing
-	cancel()
-
-	// Wait for all active tasks to complete
-	// Use context.Background() since w.ctx is cancelled
-	w.logger.InfoContext(context.Background(), "worker stopping, waiting for active tasks to complete",
-		slog.String("worker_id", w.workerID.String()))
-
-	w.wg.Wait()
-
-	w.logger.InfoContext(context.Background(), "worker stopped",
-		slog.String("worker_id", w.workerID.String()))
-
-	return nil
-}
-
-// Run starts the worker and returns a function suitable for errgroup
-func (w *Worker) Run(ctx context.Context) func() error {
-	return func() error {
-		if err := w.Start(ctx); err != nil {
-			return err
-		}
-
-		<-ctx.Done()
-
-		return w.Stop()
-	}
-}
-
-// run is the main processing loop
-func (w *Worker) run() {
+	// Main processing loop (blocking)
 	ticker := time.NewTicker(w.pullInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-w.ctx.Done():
-			return
+			w.logger.InfoContext(context.Background(), "worker stopping")
+			return w.ctx.Err()
 		case <-ticker.C:
 			// Try to acquire a slot
 			select {
 			case w.sem <- struct{}{}:
-				// Use stopMu to ensure we don't add to WaitGroup after Stop() starts
-				w.stopMu.Lock()
-				if w.stopping.Load() {
-					w.stopMu.Unlock()
-					<-w.sem // Release slot
-					return
+				// Mutex protects against shutdown race: Must verify worker is still running
+				// AND add to waitgroup atomically, otherwise Stop() might wait on incomplete count
+				w.mu.RLock()
+				if w.cancel == nil {
+					w.mu.RUnlock()
+					<-w.sem // Release semaphore slot
+					return nil
 				}
-
-				// Safe to add to wait group while holding stopMu
 				w.wg.Add(1)
-				w.stopMu.Unlock()
+				w.mu.RUnlock()
 
 				// Got a slot, process task in background
 				go func() {
@@ -243,6 +207,76 @@ func (w *Worker) run() {
 				w.logger.DebugContext(w.ctx, "all worker slots busy, skipping tick",
 					slog.String("worker_id", w.workerID.String()))
 			}
+		}
+	}
+}
+
+// Stop gracefully shuts down the worker with a timeout.
+// Returns an error if the shutdown timeout is exceeded.
+func (w *Worker) Stop() error {
+	w.mu.Lock()
+	if w.cancel == nil {
+		w.mu.Unlock()
+		return fmt.Errorf("worker not started")
+	}
+
+	w.stopping.Store(true)
+	cancel := w.cancel
+	w.cancel = nil
+	w.mu.Unlock()
+
+	// Cancel context to stop main loop
+	cancel()
+
+	// Wait for all active tasks to complete with timeout
+	w.logger.InfoContext(context.Background(), "worker stopping, waiting for active tasks to complete",
+		slog.String("worker_id", w.workerID.String()),
+		slog.Duration("timeout", w.shutdownTimeout))
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), w.shutdownTimeout)
+	defer ctxCancel()
+
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		w.logger.InfoContext(context.Background(), "worker stopped cleanly",
+			slog.String("worker_id", w.workerID.String()))
+		return nil
+	case <-ctx.Done():
+		w.logger.WarnContext(context.Background(), "worker shutdown timeout exceeded - some tasks may be abandoned",
+			slog.String("worker_id", w.workerID.String()),
+			slog.Duration("timeout", w.shutdownTimeout))
+		return fmt.Errorf("shutdown timeout exceeded after %s", w.shutdownTimeout)
+	}
+}
+
+// Run provides errgroup compatibility for coordinated lifecycle management.
+// Returns a function that starts the worker, monitors context cancellation,
+// and performs graceful shutdown when the context is cancelled.
+func (w *Worker) Run(ctx context.Context) func() error {
+	return func() error {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- w.Start(ctx)
+		}()
+
+		select {
+		case <-ctx.Done():
+			// Context cancelled - perform graceful shutdown
+			_ = w.Stop() // Ignore stop error in normal shutdown
+			<-errCh      // Wait for Start() to exit
+			return nil
+		case err := <-errCh:
+			// Start() returned - check if it's a normal shutdown
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
 		}
 	}
 }
@@ -278,7 +312,13 @@ func (w *Worker) pullAndProcess() error {
 func (w *Worker) processTask(task *Task) (retErr error) {
 	start := time.Now()
 
-	// Add panic recovery
+	// Track active tasks for metrics
+	w.activeTasks.Add(1)
+	defer w.activeTasks.Add(-1)
+
+	// Panic recovery ensures system stability
+	// Strategy: Treat panics as task failures with retry eligibility
+	// This prevents a single bad handler from crashing the entire worker
 	defer func() {
 		if r := recover(); r != nil {
 			retErr = fmt.Errorf("panic in handler: %v", r)
@@ -287,7 +327,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 				slog.String("task_id", task.ID.String()),
 				slog.String("task_name", task.TaskName),
 				slog.Any("panic", r))
-			// Treat panic as task failure
+			// Convert panic to regular failure for retry processing
 			duration := time.Since(start)
 			_ = w.handleTaskFailure(task, retErr, duration)
 		}
@@ -302,8 +342,9 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 		return w.handleMissingHandler(task)
 	}
 
-	// Create context with timeout that's not tied to worker lifecycle
-	// This allows graceful shutdown to let tasks complete
+	// Isolation strategy: Create independent context for task execution
+	// Rationale: Worker shutdown should not interrupt running tasks
+	// Tasks get full lockTimeout to complete even during graceful shutdown
 	ctx, cancel := context.WithTimeout(context.Background(), w.lockTimeout)
 	defer cancel()
 
@@ -327,6 +368,9 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 // 2. Manually requeue tasks from DLQ once handler is available
 // 3. Investigate why tasks were enqueued without corresponding handlers
 func (w *Worker) handleMissingHandler(task *Task) error {
+	// Increment failure counter for metrics
+	w.tasksFailed.Add(1)
+
 	w.logger.ErrorContext(w.ctx, "no handler registered for task type",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
@@ -359,6 +403,9 @@ func (w *Worker) handleMissingHandler(task *Task) error {
 // - Implement exponential backoff strategies
 // - Maintain audit trails of task processing attempts
 func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Duration) error {
+	// Increment failure counter for metrics
+	w.tasksFailed.Add(1)
+
 	w.logger.ErrorContext(w.ctx, "task failed",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
@@ -396,6 +443,9 @@ func (w *Worker) handleTaskSuccess(task *Task, duration time.Duration) error {
 	if err := w.repo.CompleteTask(w.ctx, task.ID); err != nil {
 		return fmt.Errorf("failed to mark task %s as completed: %w", task.ID, err)
 	}
+
+	// Increment success counter for metrics
+	w.tasksProcessed.Add(1)
 
 	w.logger.InfoContext(w.ctx, "task completed successfully",
 		slog.String("worker_id", w.workerID.String()),
@@ -448,4 +498,58 @@ func (w *Worker) Queues() []string {
 	result := make([]string, len(w.queues))
 	copy(result, w.queues)
 	return result
+}
+
+// Stats returns current worker statistics for observability and monitoring.
+// This method is thread-safe and can be called at any time.
+//
+// Use cases:
+//   - Prometheus/Grafana metrics
+//   - Health checks
+//   - Debugging production issues
+//   - Testing (verify task processing without sleep)
+func (w *Worker) Stats() WorkerStats {
+	w.mu.RLock()
+	isRunning := w.cancel != nil
+	w.mu.RUnlock()
+
+	return WorkerStats{
+		TasksProcessed: w.tasksProcessed.Load(),
+		TasksFailed:    w.tasksFailed.Load(),
+		ActiveTasks:    w.activeTasks.Load(),
+		IsRunning:      isRunning,
+	}
+}
+
+// Healthcheck validates that the worker is operational and not overloaded.
+// Returns nil if healthy, or an error describing the health issue.
+// This method is thread-safe and suitable for use in health check endpoints.
+//
+// Health criteria:
+//   - Worker must be running
+//   - Active tasks must not exceed capacity (semaphore slots)
+//
+// Use with health check frameworks:
+//
+//	healthSrv.AddCheck("queue-worker", worker.Healthcheck)
+//
+// The returned error can be checked using errors.Is:
+//
+//	if errors.Is(err, queue.ErrWorkerNotRunning) { ... }
+//	if errors.Is(err, queue.ErrWorkerOverloaded) { ... }
+func (w *Worker) Healthcheck(ctx context.Context) error {
+	stats := w.Stats()
+
+	if !stats.IsRunning {
+		return errors.Join(ErrHealthcheckFailed, ErrWorkerNotRunning)
+	}
+
+	// Check if worker is overloaded (all semaphore slots busy)
+	maxConcurrent := int32(cap(w.sem))
+	if stats.ActiveTasks >= maxConcurrent {
+		return errors.Join(ErrHealthcheckFailed, ErrWorkerOverloaded,
+			fmt.Errorf("%d/%d slots busy", stats.ActiveTasks, maxConcurrent))
+	}
+
+	return nil
 }

@@ -41,7 +41,6 @@ const (
 	PriorityDefault Priority = PriorityMedium
 )
 
-// Valid checks if the priority is within valid range
 func (p Priority) Valid() bool {
 	return p >= PriorityMin && p <= PriorityMax
 }

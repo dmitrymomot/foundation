@@ -561,3 +561,210 @@ func TestSchedulerWithLogger(t *testing.T) {
 
 	// Just verify it was created with the logger, don't need to run it
 }
+
+func TestScheduler_Stop(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stops running scheduler", func(t *testing.T) {
+		t.Parallel()
+
+		repo := newMockSchedulerRepo()
+		scheduler, err := queue.NewScheduler(repo,
+			queue.WithCheckInterval(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		err = scheduler.AddTask("test-task", queue.EveryInterval(10*time.Millisecond))
+		require.NoError(t, err)
+
+		ctx := context.Background()
+
+		// Start scheduler in background
+		started := make(chan struct{})
+		stopped := make(chan error, 1)
+		go func() {
+			close(started)
+			err := scheduler.Start(ctx)
+			stopped <- err
+		}()
+
+		// Wait for scheduler to start
+		<-started
+		time.Sleep(30 * time.Millisecond) // Let it run a bit
+
+		// Stop the scheduler
+		err = scheduler.Stop()
+		require.NoError(t, err)
+
+		// Start should return context canceled error
+		select {
+		case err := <-stopped:
+			assert.ErrorIs(t, err, context.Canceled)
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("scheduler did not stop in time")
+		}
+	})
+
+	t.Run("error when not started", func(t *testing.T) {
+		t.Parallel()
+
+		repo := newMockSchedulerRepo()
+		scheduler, err := queue.NewScheduler(repo)
+		require.NoError(t, err)
+
+		err = scheduler.Stop()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not started")
+	})
+
+	t.Run("prevents multiple starts", func(t *testing.T) {
+		t.Parallel()
+
+		repo := newMockSchedulerRepo()
+		scheduler, err := queue.NewScheduler(repo,
+			queue.WithCheckInterval(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		err = scheduler.AddTask("test-task", queue.EveryInterval(10*time.Millisecond))
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start scheduler
+		started := make(chan struct{})
+		go func() {
+			close(started)
+			_ = scheduler.Start(ctx)
+		}()
+
+		<-started
+		time.Sleep(10 * time.Millisecond)
+
+		// Try to start again - should fail
+		ctx2 := context.Background()
+		err = scheduler.Start(ctx2)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "already started")
+
+		// Clean up
+		_ = scheduler.Stop()
+	})
+}
+
+func TestScheduler_Run(t *testing.T) {
+	t.Parallel()
+
+	t.Run("runs and stops with context", func(t *testing.T) {
+		t.Parallel()
+
+		repo := newMockSchedulerRepo()
+		scheduler, err := queue.NewScheduler(repo,
+			queue.WithCheckInterval(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		err = scheduler.AddTask("test-task", queue.EveryInterval(10*time.Millisecond))
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		// Run scheduler
+		runFunc := scheduler.Run(ctx)
+		err = runFunc()
+
+		// Should return nil after graceful shutdown via context
+		assert.NoError(t, err)
+
+		// Verify scheduler created tasks
+		assert.Greater(t, repo.countTasksByName("test-task"), 0)
+	})
+
+	t.Run("returns error if start fails", func(t *testing.T) {
+		t.Parallel()
+
+		repo := newMockSchedulerRepo()
+		scheduler, err := queue.NewScheduler(repo)
+		require.NoError(t, err)
+
+		// Don't add any tasks - Start should fail with ErrSchedulerNotConfigured
+
+		ctx := context.Background()
+		runFunc := scheduler.Run(ctx)
+		err = runFunc()
+
+		assert.ErrorIs(t, err, queue.ErrSchedulerNotConfigured)
+	})
+
+	t.Run("waits for in-progress checks", func(t *testing.T) {
+		t.Parallel()
+
+		checkStarted := make(chan struct{})
+		checkCompleted := make(chan struct{})
+
+		repo := newMockSchedulerRepo()
+		repo.createFunc = func(ctx context.Context, task *queue.Task) error {
+			// Signal that check started
+			select {
+			case <-checkStarted:
+				// Already signaled
+			default:
+				close(checkStarted)
+			}
+
+			// Simulate slow operation
+			time.Sleep(30 * time.Millisecond)
+
+			// Signal completion
+			select {
+			case <-checkCompleted:
+				// Already signaled
+			default:
+				close(checkCompleted)
+			}
+
+			return nil
+		}
+
+		scheduler, err := queue.NewScheduler(repo,
+			queue.WithCheckInterval(10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		err = scheduler.AddTask("slow-task", queue.EveryInterval(10*time.Millisecond))
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Start scheduler
+		runDone := make(chan error, 1)
+		go func() {
+			runFunc := scheduler.Run(ctx)
+			runDone <- runFunc()
+		}()
+
+		// Wait for check to start
+		<-checkStarted
+
+		// Cancel context while check is in progress
+		cancel()
+
+		// Wait for Run to complete
+		select {
+		case err := <-runDone:
+			assert.NoError(t, err)
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("scheduler did not stop in time")
+		}
+
+		// Verify check was allowed to complete
+		select {
+		case <-checkCompleted:
+			// Good, check completed
+		default:
+			t.Fatal("scheduler did not wait for in-progress check")
+		}
+	})
+}

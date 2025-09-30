@@ -53,7 +53,9 @@ type weeklySchedule struct {
 }
 
 func (s weeklySchedule) Next(from time.Time) time.Time {
-	// Calculate days until target weekday (handles week wraparound with modulo)
+	// Weekday calculation: Modulo arithmetic handles week boundaries
+	// Formula: (target - current + 7) % 7
+	// Examples: Mon->Fri = (5-1+7)%7 = 4 days, Fri->Mon = (1-5+7)%7 = 3 days
 	daysUntil := (int(s.weekday) - int(from.Weekday()) + 7) % 7
 
 	next := from.AddDate(0, 0, daysUntil)
@@ -62,8 +64,9 @@ func (s weeklySchedule) Next(from time.Time) time.Time {
 		s.hour, s.minute, 0, 0, next.Location(),
 	)
 
+	// If calculated time has already passed this week, move to next week
 	if !next.After(from) {
-		next = next.AddDate(0, 0, 7) // Next week
+		next = next.AddDate(0, 0, 7)
 	}
 	return next
 }
@@ -102,12 +105,14 @@ func (s hourlySchedule) String() string {
 func (s monthlySchedule) Next(from time.Time) time.Time {
 	year, month := from.Year(), from.Month()
 
-	// Handle month-end overflow (e.g., requesting 31st of February becomes 28th/29th)
+	// Month-end safety: Clamp day to valid range for target month
+	// Prevents panics when scheduling 31st in months with <31 days
+	// Feb 31st becomes Feb 28th/29th, Apr 31st becomes Apr 30th
 	day := min(s.day, daysInMonth(year, month))
 	next := time.Date(year, month, day, s.hour, s.minute, 0, 0, from.Location())
 
 	if !next.After(from) {
-		// Move to next month
+		// Advance to next month with year rollover handling
 		if month == time.December {
 			year++
 			month = time.January
@@ -115,7 +120,7 @@ func (s monthlySchedule) Next(from time.Time) time.Time {
 			month++
 		}
 
-		// Recalculate day for new month
+		// Re-apply day clamping for the new month
 		day = min(s.day, daysInMonth(year, month))
 		next = time.Date(year, month, day, s.hour, s.minute, 0, 0, from.Location())
 	}
@@ -191,9 +196,11 @@ func Monthly(day int) Schedule {
 	return monthlySchedule{day: day, hour: 0, minute: 0}
 }
 
-// Helper function to get days in month
+// daysInMonth calculates the number of days in a given month/year combination.
+// Uses Go's time package overflow behavior: month+1 with day 1, then subtract 1 day
+// to get the last valid day of the target month. Handles leap years automatically.
 func daysInMonth(year int, month time.Month) int {
-	// Get first day of next month, then subtract one day
+	// Overflow trick: Go automatically handles month 13 -> January next year
 	firstOfNext := time.Date(year, month+1, 1, 0, 0, 0, 0, time.UTC)
 	lastOfMonth := firstOfNext.AddDate(0, 0, -1)
 	return lastOfMonth.Day()

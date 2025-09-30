@@ -2,10 +2,12 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +30,24 @@ type Scheduler struct {
 	ticker   *time.Ticker
 	interval time.Duration
 	logger   *slog.Logger
+
+	// State management
+	ctx             context.Context
+	cancel          context.CancelFunc
+	running         atomic.Bool
+	wg              sync.WaitGroup
+	shutdownTimeout time.Duration
+
+	// Observability metrics
+	tasksScheduled atomic.Int64
+	activeChecks   atomic.Int32
+}
+
+// SchedulerStats provides observability metrics for monitoring and debugging
+type SchedulerStats struct {
+	TasksScheduled int64 // Total number of tasks created by the scheduler
+	ActiveChecks   int32 // Number of check operations currently running
+	IsRunning      bool  // Whether the scheduler is currently running
 }
 
 // scheduledTask holds configuration for a periodic task
@@ -48,8 +68,9 @@ func NewScheduler(repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler
 
 	// Default options
 	options := &schedulerOptions{
-		checkInterval: 30 * time.Second,
-		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
+		checkInterval:   30 * time.Second,
+		shutdownTimeout: 30 * time.Second,
+		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
 	}
 
 	// Apply options
@@ -58,10 +79,11 @@ func NewScheduler(repo SchedulerRepository, opts ...SchedulerOption) (*Scheduler
 	}
 
 	return &Scheduler{
-		repo:     repo,
-		tasks:    make(map[string]*scheduledTask),
-		interval: options.checkInterval,
-		logger:   options.logger,
+		repo:            repo,
+		tasks:           make(map[string]*scheduledTask),
+		interval:        options.checkInterval,
+		shutdownTimeout: options.shutdownTimeout,
+		logger:          options.logger,
 	}, nil
 }
 
@@ -72,6 +94,7 @@ func NewSchedulerFromConfig(cfg Config, repo SchedulerRepository, opts ...Schedu
 	// Option functions handle zero/empty values appropriately
 	allOpts := append([]SchedulerOption{
 		WithCheckInterval(cfg.CheckInterval),
+		WithSchedulerShutdownTimeout(cfg.ShutdownTimeout),
 	}, opts...)
 
 	return NewScheduler(repo, allOpts...)
@@ -119,42 +142,152 @@ func (s *Scheduler) AddTask(name string, schedule Schedule, opts ...SchedulerTas
 	return nil
 }
 
-// Start begins the scheduler's periodic task checking
+// Start begins the scheduler's periodic task checking. This is a blocking operation
+// that runs until the context is cancelled. Use Run() for errgroup pattern or call this in a goroutine.
 func (s *Scheduler) Start(ctx context.Context) error {
-	s.mu.RLock()
-	taskCount := len(s.tasks)
-	s.mu.RUnlock()
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler already started")
+	}
 
+	taskCount := len(s.tasks)
 	if taskCount == 0 {
+		s.mu.Unlock()
 		return ErrSchedulerNotConfigured
 	}
 
-	// Create ticker
+	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.ticker = time.NewTicker(s.interval)
+	s.mu.Unlock()
+
+	// Reset running flag
+	s.running.Store(true)
+
+	// Ensure ticker is stopped when Start exits
 	defer s.ticker.Stop()
 
-	// Check immediately on start
-	s.checkTasks(ctx)
+	s.logger.InfoContext(s.ctx, "scheduler started",
+		slog.Int("task_count", taskCount),
+		slog.Duration("check_interval", s.interval))
 
-	// Then check periodically
+	// Check immediately on start
+	s.checkTasksWithWait()
+
+	// Then check periodically (blocking loop)
 	for {
 		select {
-		case <-ctx.Done():
-			s.logger.InfoContext(ctx, "scheduler shutting down")
-			return ctx.Err()
+		case <-s.ctx.Done():
+			s.logger.InfoContext(context.Background(), "scheduler stopping")
+			s.running.Store(false)
+			return s.ctx.Err()
 		case <-s.ticker.C:
-			s.checkTasks(ctx)
+			// Always call checkTasksWithWait - it will handle the running check internally
+			s.checkTasksWithWait()
 		}
 	}
+}
+
+// Stop gracefully shuts down the scheduler with a timeout.
+// Returns an error if the shutdown timeout is exceeded.
+func (s *Scheduler) Stop() error {
+	s.mu.Lock()
+	if s.cancel == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("scheduler not started")
+	}
+
+	// Stop accepting new checks
+	s.running.Store(false)
+
+	cancel := s.cancel
+	s.cancel = nil
+	s.mu.Unlock()
+
+	// Cancel context to stop main loop (ticker cleanup happens in Start's defer)
+	cancel()
+
+	// Wait for any in-progress checkTasks to complete with timeout
+	s.logger.InfoContext(context.Background(), "scheduler stopping, waiting for active checks to complete",
+		slog.Duration("timeout", s.shutdownTimeout))
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
+	defer ctxCancel()
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		s.logger.InfoContext(context.Background(), "scheduler stopped cleanly")
+		return nil
+	case <-ctx.Done():
+		s.logger.WarnContext(context.Background(), "scheduler shutdown timeout exceeded - some checks may be abandoned",
+			slog.Duration("timeout", s.shutdownTimeout))
+		return fmt.Errorf("shutdown timeout exceeded after %s", s.shutdownTimeout)
+	}
+}
+
+// Run provides errgroup compatibility for coordinated lifecycle management.
+// Returns a function that starts the scheduler, monitors context cancellation,
+// and performs graceful shutdown when the context is cancelled.
+func (s *Scheduler) Run(ctx context.Context) func() error {
+	return func() error {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- s.Start(ctx)
+		}()
+
+		select {
+		case <-ctx.Done():
+			// Context cancelled - perform graceful shutdown
+			_ = s.Stop() // Ignore stop error in normal shutdown
+			<-errCh      // Wait for Start() to exit
+			return nil
+		case err := <-errCh:
+			// Start() returned - check if it's a normal shutdown
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+// checkTasksWithWait is a wrapper around checkTasks that tracks the operation with WaitGroup
+func (s *Scheduler) checkTasksWithWait() {
+	// Mutex protects against shutdown race: Must verify scheduler is still running
+	// AND add to waitgroup atomically, otherwise Stop() might wait on incomplete count
+	s.mu.RLock()
+	if s.cancel == nil {
+		s.mu.RUnlock()
+		return
+	}
+	s.wg.Add(1)
+	s.mu.RUnlock()
+
+	defer s.wg.Done()
+
+	// Track active checks for metrics
+	s.activeChecks.Add(1)
+	defer s.activeChecks.Add(-1)
+
+	// Use context.Background() to avoid issues during shutdown when s.ctx is cancelled
+	s.checkTasks(context.Background())
 }
 
 // checkTasks checks all registered tasks and creates any that are due
 func (s *Scheduler) checkTasks(ctx context.Context) {
 	// Get a snapshot of tasks
 	s.mu.RLock()
-	tasks := make([]*scheduledTask, 0, len(s.tasks))
+	i := 0
+	tasks := make([]*scheduledTask, len(s.tasks))
 	for _, task := range s.tasks {
-		tasks = append(tasks, task)
+		tasks[i] = task
+		i++
 	}
 	s.mu.RUnlock()
 
@@ -162,9 +295,12 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 
 	// Check each task
 	for _, task := range tasks {
+		nextRun := s.calculateNextRun(task, now)
 		if err := s.scheduleTaskIfNeeded(ctx, task, now); err != nil {
 			s.logger.ErrorContext(ctx, "failed to schedule task",
 				slog.String("task_name", task.name),
+				slog.Time("next_run", nextRun),
+				slog.String("schedule", task.schedule.String()),
 				slog.String("error", err.Error()))
 		}
 	}
@@ -174,15 +310,18 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 func (s *Scheduler) scheduleTaskIfNeeded(ctx context.Context, task *scheduledTask, now time.Time) error {
 	nextRun := s.calculateNextRun(task, now)
 
-	// Check if task should be scheduled
+	// Scheduling decision: Respect schedule timing - don't create tasks before they're due
+	// This prevents scheduler check frequency from affecting actual schedule accuracy
 	if !s.shouldScheduleTask(task, nextRun, now) {
 		return nil
 	}
 
-	// Check if task already exists in DB
+	// Idempotency check: Prevent duplicate tasks for same schedule period
+	// Critical for reliability - ensures scheduler restarts don't create duplicates
+	// Also protects against race conditions when multiple scheduler instances run
 	existing, err := s.repo.GetPendingTaskByName(ctx, task.name)
 	if err == nil && existing != nil {
-		// Task exists - just update our state
+		// Task already exists for this period - sync our state
 		s.updateTaskState(task.name, &existing.ScheduledAt)
 		s.logger.DebugContext(ctx, "periodic task already pending",
 			slog.String("task_name", task.name),
@@ -267,7 +406,14 @@ func (s *Scheduler) createTask(ctx context.Context, task *scheduledTask, schedul
 		CreatedAt:   time.Now(),
 	}
 
-	return s.repo.CreateTask(ctx, newTask)
+	if err := s.repo.CreateTask(ctx, newTask); err != nil {
+		return err
+	}
+
+	// Increment counter for metrics
+	s.tasksScheduled.Add(1)
+
+	return nil
 }
 
 // RemoveTask removes a periodic task from the scheduler
@@ -291,4 +437,58 @@ func (s *Scheduler) ListTasks() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// Stats returns current scheduler statistics for observability and monitoring.
+// This method is thread-safe and can be called at any time.
+//
+// Use cases:
+//   - Prometheus/Grafana metrics
+//   - Health checks
+//   - Debugging production issues
+//   - Testing (verify task scheduling without sleep)
+func (s *Scheduler) Stats() SchedulerStats {
+	s.mu.RLock()
+	isRunning := s.cancel != nil
+	s.mu.RUnlock()
+
+	return SchedulerStats{
+		TasksScheduled: s.tasksScheduled.Load(),
+		ActiveChecks:   s.activeChecks.Load(),
+		IsRunning:      isRunning,
+	}
+}
+
+// Healthcheck validates that the scheduler is operational.
+// Returns nil if healthy, or an error describing the health issue.
+// This method is thread-safe and suitable for use in health check endpoints.
+//
+// Health criteria:
+//   - Scheduler must be running
+//   - Must have at least one registered task
+//
+// Use with health check frameworks:
+//
+//	healthSrv.AddCheck("queue-scheduler", scheduler.Healthcheck)
+//
+// The returned error can be checked using errors.Is:
+//
+//	if errors.Is(err, queue.ErrSchedulerNotRunning) { ... }
+//	if errors.Is(err, queue.ErrNoTasksRegistered) { ... }
+func (s *Scheduler) Healthcheck(ctx context.Context) error {
+	stats := s.Stats()
+
+	if !stats.IsRunning {
+		return errors.Join(ErrHealthcheckFailed, ErrSchedulerNotRunning)
+	}
+
+	s.mu.RLock()
+	taskCount := len(s.tasks)
+	s.mu.RUnlock()
+
+	if taskCount == 0 {
+		return errors.Join(ErrHealthcheckFailed, ErrNoTasksRegistered)
+	}
+
+	return nil
 }

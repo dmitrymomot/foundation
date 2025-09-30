@@ -9,11 +9,13 @@ import (
 type SchedulerOption func(*schedulerOptions)
 
 type schedulerOptions struct {
-	checkInterval time.Duration
-	logger        *slog.Logger
+	checkInterval   time.Duration
+	shutdownTimeout time.Duration
+	logger          *slog.Logger
 }
 
-// WithCheckInterval sets how often scheduler checks for due tasks
+// WithCheckInterval configures how frequently the scheduler checks for due tasks.
+// Shorter intervals provide more precise scheduling but increase CPU usage.
 func WithCheckInterval(d time.Duration) SchedulerOption {
 	return func(o *schedulerOptions) {
 		if d > 0 {
@@ -22,7 +24,18 @@ func WithCheckInterval(d time.Duration) SchedulerOption {
 	}
 }
 
-// WithSchedulerLogger sets the logger for the scheduler
+// WithSchedulerShutdownTimeout configures maximum wait time for active checks during shutdown.
+// Scheduler will wait this long for in-flight operations to complete before forcing shutdown.
+func WithSchedulerShutdownTimeout(d time.Duration) SchedulerOption {
+	return func(o *schedulerOptions) {
+		if d > 0 {
+			o.shutdownTimeout = d
+		}
+	}
+}
+
+// WithSchedulerLogger configures structured logging for scheduler operations.
+// Use slog.New(slog.NewTextHandler(io.Discard, nil)) to disable logging.
 func WithSchedulerLogger(logger *slog.Logger) SchedulerOption {
 	return func(o *schedulerOptions) {
 		if logger != nil {
@@ -40,7 +53,8 @@ type schedulerTaskOptions struct {
 	maxRetries int8
 }
 
-// WithTaskQueue sets the queue for the scheduled task
+// WithTaskQueue specifies which queue the scheduled task instances should be enqueued to.
+// Allows routing scheduled tasks to specific workers.
 func WithTaskQueue(queue string) SchedulerTaskOption {
 	return func(o *schedulerTaskOptions) {
 		if queue != "" {
@@ -49,7 +63,8 @@ func WithTaskQueue(queue string) SchedulerTaskOption {
 	}
 }
 
-// WithTaskPriority sets the priority for the scheduled task
+// WithTaskPriority sets the priority for scheduled task instances.
+// Higher priority tasks are processed before lower priority ones.
 func WithTaskPriority(priority Priority) SchedulerTaskOption {
 	return func(o *schedulerTaskOptions) {
 		if priority.Valid() {
@@ -58,8 +73,8 @@ func WithTaskPriority(priority Priority) SchedulerTaskOption {
 	}
 }
 
-// WithTaskMaxRetries sets the max retries for the scheduled task (0-10)
-// Capped at 10 to prevent infinite retry loops on persistent failures
+// WithTaskMaxRetries configures retry behavior for scheduled task instances.
+// Capped at 10 to prevent infinite retry loops on persistent failures.
 func WithTaskMaxRetries(maxRetries int8) SchedulerTaskOption {
 	return func(o *schedulerTaskOptions) {
 		if maxRetries >= 0 && maxRetries <= 10 {

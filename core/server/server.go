@@ -31,7 +31,7 @@ type Server struct {
 func New(addr string, opts ...Option) *Server {
 	s := &Server{
 		addr:           addr,
-		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)), // No-op logger by default
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		shutdown:       DefaultShutdownTimeout,
 		readTimeout:    DefaultReadTimeout,
 		writeTimeout:   DefaultWriteTimeout,
@@ -66,7 +66,7 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) error {
 		TLSConfig:      s.tlsConfig,
 	}
 
-	// Avoid race condition by capturing TLS config under lock
+	// Check TLS before unlocking to avoid race when accessing tlsConfig during server start
 	hasTLS := s.tlsConfig != nil
 	s.mu.Unlock()
 

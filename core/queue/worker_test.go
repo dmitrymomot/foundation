@@ -162,6 +162,7 @@ func TestWorker_StartStop(t *testing.T) {
 		defer mockRepo.AssertExpectations(t)
 
 		// Expect ClaimTask to be called multiple times and return no tasks
+		// Using .Maybe() because worker may stop before any polls happen
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(nil, queue.ErrNoTaskToClaim).Maybe()
 
@@ -177,8 +178,12 @@ func TestWorker_StartStop(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Let it run for a bit
 		time.Sleep(20 * time.Millisecond)
@@ -207,6 +212,7 @@ func TestWorker_StartStop(t *testing.T) {
 		defer mockRepo.AssertExpectations(t)
 
 		// Expect ClaimTask to be called multiple times
+		// Using .Maybe() because worker may stop before any polls happen
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(nil, queue.ErrNoTaskToClaim).Maybe()
 
@@ -222,8 +228,12 @@ func TestWorker_StartStop(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		err = worker.Start(ctx)
 		assert.Error(t, err)
@@ -273,14 +283,11 @@ func TestWorker_ProcessTask(t *testing.T) {
 		}
 
 		// Set up expectations
-		// First call returns the task, subsequent calls return no task
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(task, nil).Once()
-		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
 		mockRepo.On("CompleteTask", mock.Anything, task.ID).Return(nil).Once()
 
-		worker, err := queue.NewWorker(mockRepo, queue.WithPullInterval(50*time.Millisecond))
+		worker, err := queue.NewWorker(mockRepo, queue.WithPullInterval(5*time.Millisecond))
 		require.NoError(t, err)
 
 		processed := make(chan testPayload, 1)
@@ -294,17 +301,33 @@ func TestWorker_ProcessTask(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
 
-		// Wait for processing
+		// Wait for task to be processed using Stats (no sleep!)
 		select {
 		case p := <-processed:
 			assert.Equal(t, payload.Message, p.Message)
 			assert.Equal(t, payload.Value, p.Value)
 		case <-time.After(2 * time.Second):
-			t.Fatal("task not processed in time")
+			stats := worker.Stats()
+			t.Fatalf("task not processed in time. Stats: %+v", stats)
 		}
+
+		// Wait for metrics to stabilize (goroutine cleanup)
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for worker.Stats().ActiveTasks > 0 && time.Now().Before(deadline) {
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		// Verify metrics
+		stats := worker.Stats()
+		assert.Equal(t, int64(1), stats.TasksProcessed, "should have processed 1 task")
+		assert.Equal(t, int64(0), stats.TasksFailed, "should have 0 failed tasks")
+		assert.Equal(t, int32(0), stats.ActiveTasks, "should have 0 active tasks")
 
 		_ = worker.Stop()
 	})
@@ -335,16 +358,14 @@ func TestWorker_ProcessTask(t *testing.T) {
 		// Set up expectations
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(task, nil).Once()
-		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
 		mockRepo.On("FailTask", mock.Anything, task.ID, "processing failed").Return(nil).Once()
 
-		worker, err := queue.NewWorker(mockRepo, queue.WithPullInterval(50*time.Millisecond))
+		worker, err := queue.NewWorker(mockRepo, queue.WithPullInterval(5*time.Millisecond))
 		require.NoError(t, err)
 
-		attempts := atomic.Int32{}
+		done := make(chan struct{})
 		handler := queue.NewTaskHandler(func(ctx context.Context, payload testPayload) error {
-			attempts.Add(1)
+			defer close(done)
 			return errors.New("processing failed")
 		})
 		err = worker.RegisterHandler(handler)
@@ -353,13 +374,32 @@ func TestWorker_ProcessTask(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
 
-		// Wait for first attempt
-		time.Sleep(100 * time.Millisecond)
+		// Wait for task to fail using channel (no sleep!)
+		select {
+		case <-done:
+			// Task processed (failed)
+		case <-time.After(2 * time.Second):
+			stats := worker.Stats()
+			t.Fatalf("task not processed in time. Stats: %+v", stats)
+		}
 
-		assert.Equal(t, int32(1), attempts.Load())
+		// Wait for metrics to stabilize (goroutine cleanup)
+		deadline := time.Now().Add(100 * time.Millisecond)
+		for worker.Stats().ActiveTasks > 0 && time.Now().Before(deadline) {
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		// Verify metrics
+		stats := worker.Stats()
+		assert.Equal(t, int64(0), stats.TasksProcessed, "should have 0 successful tasks")
+		assert.Equal(t, int64(1), stats.TasksFailed, "should have 1 failed task")
+		assert.Equal(t, int32(0), stats.ActiveTasks, "should have 0 active tasks")
 
 		_ = worker.Stop()
 	})
@@ -391,7 +431,7 @@ func TestWorker_ProcessTask(t *testing.T) {
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(task, nil).Once()
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
+			Return(nil, queue.ErrNoTaskToClaim)
 		mockRepo.On("FailTask", mock.Anything, task.ID, "permanent failure").Return(nil).Once()
 		mockRepo.On("MoveToDLQ", mock.Anything, task.ID).Return(nil).Once()
 
@@ -407,8 +447,12 @@ func TestWorker_ProcessTask(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for processing
 		time.Sleep(150 * time.Millisecond)
@@ -440,7 +484,7 @@ func TestWorker_ProcessTask(t *testing.T) {
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(task, nil).Once()
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
+			Return(nil, queue.ErrNoTaskToClaim)
 		mockRepo.On("FailTask", mock.Anything, task.ID, "no handler registered for task type: unregistered.Handler").Return(nil).Once()
 		mockRepo.On("MoveToDLQ", mock.Anything, task.ID).Return(nil).Once()
 
@@ -457,8 +501,12 @@ func TestWorker_ProcessTask(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for processing
 		time.Sleep(150 * time.Millisecond)
@@ -493,7 +541,7 @@ func TestWorker_ProcessTask(t *testing.T) {
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(task, nil).Once()
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
+			Return(nil, queue.ErrNoTaskToClaim)
 		mockRepo.On("FailTask", mock.Anything, task.ID, mock.MatchedBy(func(msg string) bool {
 			return strings.Contains(msg, "panic")
 		})).Return(nil).Once()
@@ -510,8 +558,12 @@ func TestWorker_ProcessTask(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for processing - needs more time than pull interval
 		// to ensure task is claimed, processed (panic), and FailTask is called
@@ -552,14 +604,14 @@ func TestWorker_ConcurrentProcessing(t *testing.T) {
 		}
 
 		// Set up expectations - tasks will be claimed and completed
-		// Set up claim expectations sequentially
+		// Exactly 6 tasks will be claimed
 		for _, task := range tasks {
 			mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 				Return(task, nil).Once()
 		}
-		// After all tasks are claimed, return no task
+		// After all tasks are claimed, return no task (poll count varies with timing)
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
+			Return(nil, queue.ErrNoTaskToClaim)
 
 		// Expect CompleteTask for each task
 		for _, task := range tasks {
@@ -567,21 +619,24 @@ func TestWorker_ConcurrentProcessing(t *testing.T) {
 		}
 
 		worker, err := queue.NewWorker(mockRepo,
-			queue.WithPullInterval(10*time.Millisecond),
+			queue.WithPullInterval(5*time.Millisecond),
 			queue.WithMaxConcurrentTasks(3),
 		)
 		require.NoError(t, err)
 
-		// Track concurrent executions
+		// Synchronization primitives
 		concurrent := atomic.Int32{}
 		maxConcurrent := atomic.Int32{}
 		processed := atomic.Int32{}
+		barrier := make(chan struct{}) // Tasks wait here until 3 are concurrent
+		ready := atomic.Int32{}        // Count of tasks at barrier
+		allDone := make(chan struct{}) // Signal when all 6 tasks complete
 
 		handler := queue.NewTaskHandler(func(ctx context.Context, payload testPayload) error {
 			current := concurrent.Add(1)
 			defer concurrent.Add(-1)
 
-			// Update max concurrent
+			// Update max concurrent using atomic compare-and-swap
 			for {
 				max := maxConcurrent.Load()
 				if current <= max || maxConcurrent.CompareAndSwap(max, current) {
@@ -589,9 +644,17 @@ func TestWorker_ConcurrentProcessing(t *testing.T) {
 				}
 			}
 
-			// Simulate work
-			time.Sleep(20 * time.Millisecond)
-			processed.Add(1)
+			// Barrier synchronization: wait until 3 tasks are running concurrently
+			if ready.Add(1) == 3 {
+				close(barrier) // Third task releases all
+			}
+			<-barrier // Block until 3 tasks are concurrent
+
+			// Signal completion
+			if processed.Add(1) == 6 {
+				close(allDone) // Last task signals completion
+			}
+
 			return nil
 		})
 		err = worker.RegisterHandler(handler)
@@ -600,19 +663,25 @@ func TestWorker_ConcurrentProcessing(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
 
-		// Wait for all tasks to process
-		deadline := time.Now().Add(2 * time.Second)
-		for processed.Load() < 6 && time.Now().Before(deadline) {
-			time.Sleep(50 * time.Millisecond)
+		// Wait for all tasks to complete (no sleep polling!)
+		select {
+		case <-allDone:
+			// Success - all 6 tasks processed, stop worker immediately
+			err = worker.Stop()
+			assert.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timeout waiting for tasks: processed=%d, max_concurrent=%d",
+				processed.Load(), maxConcurrent.Load())
 		}
 
 		assert.Equal(t, int32(6), processed.Load(), "all tasks should be processed")
 		assert.Equal(t, int32(3), maxConcurrent.Load(), "max concurrent should be 3")
-
-		_ = worker.Stop()
 	})
 }
 
@@ -645,7 +714,7 @@ func TestWorker_GracefulShutdown(t *testing.T) {
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(task, nil).Once()
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
+			Return(nil, queue.ErrNoTaskToClaim)
 		mockRepo.On("CompleteTask", mock.Anything, task.ID).Return(nil).Once()
 
 		worker, err := queue.NewWorker(mockRepo, queue.WithPullInterval(10*time.Millisecond))
@@ -666,8 +735,12 @@ func TestWorker_GracefulShutdown(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for task to start
 		<-taskStarted
@@ -699,6 +772,7 @@ func TestWorker_RunFunction(t *testing.T) {
 		defer mockRepo.AssertExpectations(t)
 
 		// Expect ClaimTask to be called and return no tasks
+		// Using .Maybe() because context timeout may occur before any polls
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{queue.DefaultQueueName}, mock.Anything).
 			Return(nil, queue.ErrNoTaskToClaim).Maybe()
 
@@ -805,7 +879,7 @@ func TestWorker_QueueFiltering(t *testing.T) {
 			Return(tasks["batch"], nil).Once()
 		// All subsequent claims return no task
 		mockRepo.On("ClaimTask", mock.Anything, mock.Anything, []string{"priority", "batch"}, mock.Anything).
-			Return(nil, queue.ErrNoTaskToClaim).Maybe()
+			Return(nil, queue.ErrNoTaskToClaim)
 
 		// Expect CompleteTask for the two tasks that should be processed
 		mockRepo.On("CompleteTask", mock.Anything, tasks["priority"].ID).Return(nil).Once()
@@ -832,8 +906,12 @@ func TestWorker_QueueFiltering(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		err = worker.Start(ctx)
-		require.NoError(t, err)
+		go func() {
+			if err := worker.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				t.Errorf("worker start error: %v", err)
+			}
+		}()
+		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for processing with timeout
 		deadline := time.Now().Add(200 * time.Millisecond)
@@ -858,7 +936,6 @@ func TestWorker_QueueFiltering(t *testing.T) {
 	})
 }
 
-// Helper function
 func ptrTime(t time.Time) *time.Time {
 	return &t
 }

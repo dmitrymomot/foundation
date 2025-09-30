@@ -19,4 +19,11 @@ var (
 	ErrFailedToUpdateTaskStatus = errors.New("failed to update task status")
 	ErrFailedToMoveToDLQ        = errors.New("failed to move task to dead letter queue")
 	ErrNoTaskToClaim            = errors.New("no task available to claim")
+
+	// Healthcheck errors
+	ErrHealthcheckFailed   = errors.New("healthcheck failed")
+	ErrWorkerNotRunning    = errors.New("worker not running")
+	ErrWorkerOverloaded    = errors.New("worker overloaded")
+	ErrSchedulerNotRunning = errors.New("scheduler not running")
+	ErrNoTasksRegistered   = errors.New("no tasks registered in scheduler")
 )
