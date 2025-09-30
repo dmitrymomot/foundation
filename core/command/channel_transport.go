@@ -2,7 +2,6 @@ package command
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -94,15 +93,9 @@ func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload
 		return fmt.Errorf("%w: %s", ErrHandlerNotFound, cmdName)
 	}
 
-	// Serialize command
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal command %s: %w", cmdName, err)
-	}
-
 	env := envelope{
 		Name:    cmdName,
-		Payload: data,
+		Payload: payload,
 	}
 
 	// Non-blocking send with timeout from context
@@ -149,19 +142,6 @@ func (t *channelTransport) handleCommand(env envelope) {
 		}
 	}()
 
-	// Deserialize command
-	cmd, err := UnmarshalCommand(env.Name, env.Payload)
-	if err != nil {
-		t.logger.Error("failed to unmarshal command",
-			slog.String("command", env.Name),
-			slog.String("error", err.Error()))
-
-		if t.errorHandler != nil {
-			t.errorHandler(context.Background(), env.Name, err)
-		}
-		return
-	}
-
 	// Get handler (with middleware applied)
 	handler, exists := t.getHandler(env.Name)
 	if !exists {
@@ -179,7 +159,7 @@ func (t *channelTransport) handleCommand(env envelope) {
 
 	// Execute handler with fresh context
 	ctx := context.Background()
-	if err := handler.Handle(ctx, cmd); err != nil {
+	if err := handler.Handle(ctx, env.Payload); err != nil {
 		if t.errorHandler != nil {
 			t.errorHandler(ctx, env.Name, err)
 		}

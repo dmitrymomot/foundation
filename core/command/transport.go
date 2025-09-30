@@ -12,10 +12,3 @@ type Transport interface {
 	// Returns an error if dispatch fails (e.g., buffer full, handler not found).
 	Dispatch(ctx context.Context, cmdName string, payload any) error
 }
-
-// envelope is an internal type used by async transports to pass commands
-// through channels with their metadata.
-type envelope struct {
-	Name    string // Command name for handler lookup
-	Payload []byte // JSON-serialized command data
-}
