@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
 )
 
 // envelope is an internal type used by async transports to pass commands
@@ -14,22 +15,38 @@ type envelope struct {
 	Payload any             // Command data
 }
 
+// commandNameCache caches reflection results for command name lookups.
+// Key is reflect.Type, value is the command name string.
+var commandNameCache sync.Map
+
 // getCommandName derives the command name from a reflect.Type.
 // For structs, it returns the struct name.
 // For pointers to structs, it returns the struct name.
+// Results are cached to avoid repeated reflection overhead.
 func getCommandName(t reflect.Type) string {
+	// Check cache first
+	if name, ok := commandNameCache.Load(t); ok {
+		return name.(string)
+	}
+
 	// Dereference pointers
+	original := t
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
 	// For named types, use the name
+	var name string
 	if t.Name() != "" {
-		return t.Name()
+		name = t.Name()
+	} else {
+		// Fallback to string representation
+		name = t.String()
 	}
 
-	// Fallback to string representation
-	return t.String()
+	// Cache the result using the original type (before dereferencing)
+	commandNameCache.Store(original, name)
+	return name
 }
 
 // getCommandNameFromInstance returns the command name for a given command instance.

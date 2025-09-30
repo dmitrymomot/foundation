@@ -75,7 +75,7 @@ func (d *Dispatcher) Register(handler Handler) {
 
 	cmdName := handler.Name()
 	if _, exists := d.handlers[cmdName]; exists {
-		panic(fmt.Sprintf("%s: %s", ErrDuplicateHandler, cmdName))
+		panic(fmt.Sprintf("command: %s: %s", ErrDuplicateHandler, cmdName))
 	}
 
 	d.handlers[cmdName] = handler

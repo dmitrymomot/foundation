@@ -58,7 +58,7 @@ func newChannelTransport(
 	opts ...ChannelOption,
 ) Transport {
 	if bufferSize < 1 {
-		panic("bufferSize must be at least 1")
+		panic("command: bufferSize must be at least 1")
 	}
 
 	t := &channelTransport{
