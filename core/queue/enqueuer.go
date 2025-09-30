@@ -62,30 +62,25 @@ func (e *Enqueuer) Enqueue(ctx context.Context, payload any, opts ...EnqueueOpti
 		return ErrPayloadNil
 	}
 
-	// Apply default options from enqueuer configuration
 	options := &enqueueOptions{
 		queue:      e.defaultQueue,
 		priority:   e.defaultPriority,
 		maxRetries: 3,
 	}
 
-	// Apply user-provided options to override defaults
 	for _, opt := range opts {
 		opt(options)
 	}
 
-	// Validate priority is within allowed range
 	if !options.priority.Valid() {
 		return ErrInvalidPriority
 	}
 
-	// Build task with payload and options
 	task, err := e.buildTask(payload, options)
 	if err != nil {
 		return err
 	}
 
-	// Store task in repository
 	if err := e.repo.CreateTask(ctx, task); err != nil {
 		return fmt.Errorf("failed to create task %q in queue %q: %w", task.TaskName, task.Queue, err)
 	}
@@ -94,21 +89,17 @@ func (e *Enqueuer) Enqueue(ctx context.Context, payload any, opts ...EnqueueOpti
 }
 
 // buildTask constructs a Task from payload and options.
-// Marshals payload to JSON and generates UUID and timestamps.
 func (e *Enqueuer) buildTask(payload any, options *enqueueOptions) (*Task, error) {
-	// Marshal payload to JSON for storage
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal payload of type %T: %w", payload, err)
 	}
 
-	// Determine task name from options or infer from payload type
 	taskName := options.taskName
 	if taskName == "" {
 		taskName = qualifiedStructName(payload)
 	}
 
-	// Calculate scheduled time based on delay or explicit scheduling
 	scheduledAt := time.Now()
 	if options.scheduledAt != nil {
 		scheduledAt = *options.scheduledAt

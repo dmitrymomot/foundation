@@ -2,7 +2,8 @@ package queue
 
 import "time"
 
-// Config holds the configuration for the task queue
+// Config holds the configuration for worker, scheduler, and enqueuer components.
+// Designed for environment-based configuration using popular env parsing libraries.
 type Config struct {
 	// Worker configuration
 	PollInterval       time.Duration `env:"QUEUE_POLL_INTERVAL" envDefault:"5s"`
@@ -16,23 +17,19 @@ type Config struct {
 
 	// Enqueuer configuration
 	DefaultQueue    string   `env:"QUEUE_DEFAULT_QUEUE" envDefault:"default"`
-	DefaultPriority Priority `env:"QUEUE_DEFAULT_PRIORITY" envDefault:"50"` // PriorityMedium
+	DefaultPriority Priority `env:"QUEUE_DEFAULT_PRIORITY" envDefault:"50"`
 }
 
+// DefaultConfig returns sensible defaults for production use.
 func DefaultConfig() Config {
 	return Config{
-		// Worker defaults
 		PollInterval:       5 * time.Second,
 		LockTimeout:        5 * time.Minute,
 		ShutdownTimeout:    30 * time.Second,
 		MaxConcurrentTasks: 10,
 		Queues:             []string{"default"},
-
-		// Scheduler defaults
-		CheckInterval: 10 * time.Second,
-
-		// Enqueuer defaults
-		DefaultQueue:    "default",
-		DefaultPriority: PriorityMedium,
+		CheckInterval:      10 * time.Second,
+		DefaultQueue:       "default",
+		DefaultPriority:    PriorityMedium,
 	}
 }

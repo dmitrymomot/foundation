@@ -455,7 +455,7 @@ func TestWorker_ProcessTask(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for processing
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 
 		_ = worker.Stop()
 	})
@@ -509,7 +509,7 @@ func TestWorker_ProcessTask(t *testing.T) {
 		time.Sleep(10 * time.Millisecond) // Give worker time to start
 
 		// Wait for processing
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 
 		_ = worker.Stop()
 	})

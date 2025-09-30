@@ -24,7 +24,6 @@ func TestMemoryStore_ConsumeTokens(t *testing.T) {
 
 	t.Run("creates new bucket with full capacity", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		remaining, resetAt, err := store.ConsumeTokens(ctx, "new-key", 3, config)
 		assert.NoError(t, err)
@@ -34,7 +33,6 @@ func TestMemoryStore_ConsumeTokens(t *testing.T) {
 
 	t.Run("consumes tokens correctly", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "test-consume"
 
@@ -53,7 +51,6 @@ func TestMemoryStore_ConsumeTokens(t *testing.T) {
 
 	t.Run("refills tokens over time", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "test-refill"
 
@@ -76,7 +73,6 @@ func TestMemoryStore_ConsumeTokens(t *testing.T) {
 
 	t.Run("caps tokens at capacity", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "test-cap"
 
@@ -92,7 +88,6 @@ func TestMemoryStore_ConsumeTokens(t *testing.T) {
 
 	t.Run("handles zero token consumption", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "test-zero"
 
@@ -107,7 +102,6 @@ func TestMemoryStore_ConsumeTokens(t *testing.T) {
 
 	t.Run("handles negative remaining correctly", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "test-negative"
 
@@ -135,7 +129,6 @@ func TestMemoryStore_Reset(t *testing.T) {
 
 	t.Run("resets existing bucket", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "test-reset"
 
@@ -152,76 +145,129 @@ func TestMemoryStore_Reset(t *testing.T) {
 
 	t.Run("reset non-existent key succeeds", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		err := store.Reset(ctx, "non-existent")
 		assert.NoError(t, err)
 	})
 }
 
-func TestMemoryStore_WithCleanupInterval(t *testing.T) {
+func TestMemoryStore_StartStop(t *testing.T) {
 	t.Parallel()
 
-	t.Run("custom cleanup interval", func(t *testing.T) {
+	t.Run("start and stop cleanup successfully", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore(
 			ratelimiter.WithCleanupInterval(50 * time.Millisecond),
 		)
-		defer store.Close()
 
-		ctx := context.Background()
-		config := ratelimiter.Config{
-			Capacity:       10,
-			RefillRate:     1,
-			RefillInterval: 10 * time.Millisecond,
-		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		_, _, err := store.ConsumeTokens(ctx, "temp-key", 1, config)
+		// Start in background
+		go func() {
+			_ = store.Start(ctx)
+		}()
+
+		// Wait for startup
+		time.Sleep(10 * time.Millisecond)
+
+		// Verify it's running
+		stats := store.Stats()
+		assert.True(t, stats.IsRunning)
+
+		// Stop gracefully
+		err := store.Stop()
 		assert.NoError(t, err)
 
-		time.Sleep(100 * time.Millisecond)
+		// Verify it stopped
+		stats = store.Stats()
+		assert.False(t, stats.IsRunning)
 	})
 
-	t.Run("disabled cleanup with zero interval", func(t *testing.T) {
+	t.Run("fails to start when already started", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore(
+			ratelimiter.WithCleanupInterval(50 * time.Millisecond),
+		)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start first time
+		go func() {
+			_ = store.Start(ctx)
+		}()
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Try to start again
+		err := store.Start(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "already started")
+
+		_ = store.Stop()
+	})
+
+	t.Run("fails to stop when not started", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore()
+
+		err := store.Stop()
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not started")
+	})
+
+	t.Run("fails to start with zero cleanup interval", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore(
 			ratelimiter.WithCleanupInterval(0),
 		)
-		defer store.Close()
 
 		ctx := context.Background()
-		config := ratelimiter.Config{
-			Capacity:       10,
-			RefillRate:     1,
-			RefillInterval: 10 * time.Millisecond,
-		}
-
-		_, _, err := store.ConsumeTokens(ctx, "no-cleanup", 1, config)
-		assert.NoError(t, err)
+		err := store.Start(ctx)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "must be > 0")
 	})
 }
 
-func TestMemoryStore_Close(t *testing.T) {
+func TestMemoryStore_Run(t *testing.T) {
 	t.Parallel()
 
-	t.Run("close stops cleanup", func(t *testing.T) {
+	t.Run("run with errgroup pattern", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore(
 			ratelimiter.WithCleanupInterval(50 * time.Millisecond),
 		)
 
-		store.Close()
-		time.Sleep(100 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		// Run in background
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- store.Run(ctx)()
+		}()
+
+		// Wait for startup
+		time.Sleep(10 * time.Millisecond)
+
+		// Verify it's running
+		stats := store.Stats()
+		assert.True(t, stats.IsRunning)
+
+		// Cancel context
+		cancel()
+
+		// Wait for graceful shutdown
+		err := <-errCh
+		assert.NoError(t, err)
+
+		// Verify it stopped
+		stats = store.Stats()
+		assert.False(t, stats.IsRunning)
 	})
+}
 
-	t.Run("multiple close calls are safe", func(t *testing.T) {
+func TestMemoryStore_Stats(t *testing.T) {
+	t.Parallel()
+
+	t.Run("tracks bucket creation and removal", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-
-		store.Close()
-		store.Close()
-		store.Close()
-	})
-
-	t.Run("operations work after close", func(t *testing.T) {
-		store := ratelimiter.NewMemoryStore()
-		store.Close()
 
 		ctx := context.Background()
 		config := ratelimiter.Config{
@@ -230,7 +276,99 @@ func TestMemoryStore_Close(t *testing.T) {
 			RefillInterval: 100 * time.Millisecond,
 		}
 
-		remaining, _, err := store.ConsumeTokens(ctx, "after-close", 1, config)
+		// Create some buckets
+		_, _, _ = store.ConsumeTokens(ctx, "key1", 1, config)
+		_, _, _ = store.ConsumeTokens(ctx, "key2", 1, config)
+		_, _, _ = store.ConsumeTokens(ctx, "key3", 1, config)
+
+		stats := store.Stats()
+		assert.Equal(t, int64(3), stats.BucketsCreated)
+		assert.Equal(t, 3, stats.ActiveBuckets)
+		assert.Equal(t, int64(0), stats.BucketsRemoved)
+		assert.False(t, stats.IsRunning)
+	})
+}
+
+func TestMemoryStore_Healthcheck(t *testing.T) {
+	t.Parallel()
+
+	t.Run("healthy when cleanup disabled", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore(
+			ratelimiter.WithCleanupInterval(0),
+		)
+
+		err := store.Healthcheck(context.Background())
+		assert.NoError(t, err)
+	})
+
+	t.Run("unhealthy when cleanup configured but not running", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore(
+			ratelimiter.WithCleanupInterval(50 * time.Millisecond),
+		)
+
+		err := store.Healthcheck(context.Background())
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not running")
+	})
+
+	t.Run("healthy when cleanup running", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore(
+			ratelimiter.WithCleanupInterval(50 * time.Millisecond),
+		)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start cleanup
+		go func() {
+			_ = store.Start(ctx)
+		}()
+
+		time.Sleep(10 * time.Millisecond)
+
+		err := store.Healthcheck(context.Background())
+		assert.NoError(t, err)
+
+		_ = store.Stop()
+	})
+}
+
+func TestMemoryStore_Close(t *testing.T) {
+	t.Parallel()
+
+	t.Run("close calls stop internally", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore(
+			ratelimiter.WithCleanupInterval(50 * time.Millisecond),
+		)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Start cleanup
+		go func() {
+			_ = store.Start(ctx)
+		}()
+
+		time.Sleep(10 * time.Millisecond)
+
+		// Close should stop it
+		store.Close()
+
+		stats := store.Stats()
+		assert.False(t, stats.IsRunning)
+	})
+
+	t.Run("operations work without cleanup", func(t *testing.T) {
+		store := ratelimiter.NewMemoryStore()
+
+		ctx := context.Background()
+		config := ratelimiter.Config{
+			Capacity:       10,
+			RefillRate:     1,
+			RefillInterval: 100 * time.Millisecond,
+		}
+
+		remaining, _, err := store.ConsumeTokens(ctx, "test-key", 1, config)
 		assert.NoError(t, err)
 		assert.Equal(t, 9, remaining)
 	})
@@ -243,7 +381,6 @@ func TestMemoryStore_IntegerOverflowPrevention(t *testing.T) {
 
 	t.Run("prevents overflow with large refill calculations", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		config := ratelimiter.Config{
 			Capacity:       1000,
@@ -267,7 +404,6 @@ func TestMemoryStore_IntegerOverflowPrevention(t *testing.T) {
 
 	t.Run("handles max int values", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		config := ratelimiter.Config{
 			Capacity:       1<<31 - 1,
@@ -295,7 +431,6 @@ func TestMemoryStore_ConcurrentAccess(t *testing.T) {
 
 	t.Run("concurrent consumption same key", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		key := "concurrent-same"
 		goroutines := 10
@@ -325,7 +460,6 @@ func TestMemoryStore_ConcurrentAccess(t *testing.T) {
 
 	t.Run("concurrent different keys", func(t *testing.T) {
 		store := ratelimiter.NewMemoryStore()
-		defer store.Close()
 
 		goroutines := 20
 		var wg sync.WaitGroup

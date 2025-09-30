@@ -57,14 +57,16 @@ type Worker struct {
 	tasksProcessed atomic.Int64
 	tasksFailed    atomic.Int64
 	activeTasks    atomic.Int32
+	lastActivityAt atomic.Int64 // Unix timestamp of last task processing
 }
 
 // WorkerStats provides observability metrics for monitoring and debugging
 type WorkerStats struct {
-	TasksProcessed int64 // Total number of successfully completed tasks
-	TasksFailed    int64 // Total number of failed tasks (including those moved to DLQ)
-	ActiveTasks    int32 // Number of tasks currently being processed
-	IsRunning      bool  // Whether the worker is currently running
+	TasksProcessed int64     // Total number of successfully completed tasks
+	TasksFailed    int64     // Total number of failed tasks (including those moved to DLQ)
+	ActiveTasks    int32     // Number of tasks currently being processed
+	IsRunning      bool      // Whether the worker is currently running
+	LastActivityAt time.Time // Timestamp of last task processing (zero if never)
 }
 
 // NewWorker creates a new task worker
@@ -117,7 +119,7 @@ func NewWorkerFromConfig(cfg Config, repo WorkerRepository, opts ...WorkerOption
 	return NewWorker(repo, allOpts...)
 }
 
-// RegisterHandler registers a single task handler
+// RegisterHandler registers a single task handler.
 func (w *Worker) RegisterHandler(handler Handler) error {
 	if handler == nil {
 		return nil
@@ -130,7 +132,7 @@ func (w *Worker) RegisterHandler(handler Handler) error {
 	return nil
 }
 
-// RegisterHandlers registers multiple task handlers
+// RegisterHandlers registers multiple task handlers.
 func (w *Worker) RegisterHandlers(handlers ...Handler) error {
 	for _, h := range handlers {
 		if err := w.RegisterHandler(h); err != nil {
@@ -146,7 +148,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.cancel != nil {
 		w.mu.Unlock()
-		return fmt.Errorf("worker already started")
+		return ErrWorkerAlreadyStarted
 	}
 
 	if len(w.handlers) == 0 {
@@ -165,17 +167,15 @@ func (w *Worker) Start(ctx context.Context) error {
 		slog.Any("queues", w.queues),
 		slog.Int("max_concurrent", cap(w.sem)))
 
-	// Main processing loop (blocking)
 	ticker := time.NewTicker(w.pullInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-w.ctx.Done():
-			w.logger.InfoContext(context.Background(), "worker stopping")
+			w.logger.Info("worker stopping")
 			return w.ctx.Err()
 		case <-ticker.C:
-			// Try to acquire a slot
 			select {
 			case w.sem <- struct{}{}:
 				// Mutex protects against shutdown race: Must verify worker is still running
@@ -183,16 +183,15 @@ func (w *Worker) Start(ctx context.Context) error {
 				w.mu.RLock()
 				if w.cancel == nil {
 					w.mu.RUnlock()
-					<-w.sem // Release semaphore slot
+					<-w.sem
 					return nil
 				}
 				w.wg.Add(1)
 				w.mu.RUnlock()
 
-				// Got a slot, process task in background
 				go func() {
 					defer w.wg.Done()
-					defer func() { <-w.sem }() // Release slot
+					defer func() { <-w.sem }()
 
 					if err := w.pullAndProcess(); err != nil {
 						if err != ErrHandlerNotFound {
@@ -203,7 +202,6 @@ func (w *Worker) Start(ctx context.Context) error {
 					}
 				}()
 			default:
-				// All slots busy, skip this tick
 				w.logger.DebugContext(w.ctx, "all worker slots busy, skipping tick",
 					slog.String("worker_id", w.workerID.String()))
 			}
@@ -217,7 +215,7 @@ func (w *Worker) Stop() error {
 	w.mu.Lock()
 	if w.cancel == nil {
 		w.mu.Unlock()
-		return fmt.Errorf("worker not started")
+		return ErrWorkerNotStarted
 	}
 
 	w.stopping.Store(true)
@@ -225,11 +223,9 @@ func (w *Worker) Stop() error {
 	w.cancel = nil
 	w.mu.Unlock()
 
-	// Cancel context to stop main loop
 	cancel()
 
-	// Wait for all active tasks to complete with timeout
-	w.logger.InfoContext(context.Background(), "worker stopping, waiting for active tasks to complete",
+	w.logger.Info("worker stopping, waiting for active tasks to complete",
 		slog.String("worker_id", w.workerID.String()),
 		slog.Duration("timeout", w.shutdownTimeout))
 
@@ -244,11 +240,11 @@ func (w *Worker) Stop() error {
 
 	select {
 	case <-done:
-		w.logger.InfoContext(context.Background(), "worker stopped cleanly",
+		w.logger.Info("worker stopped cleanly",
 			slog.String("worker_id", w.workerID.String()))
 		return nil
 	case <-ctx.Done():
-		w.logger.WarnContext(context.Background(), "worker shutdown timeout exceeded - some tasks may be abandoned",
+		w.logger.Warn("worker shutdown timeout exceeded - some tasks may be abandoned",
 			slog.String("worker_id", w.workerID.String()),
 			slog.Duration("timeout", w.shutdownTimeout))
 		return fmt.Errorf("shutdown timeout exceeded after %s", w.shutdownTimeout)
@@ -281,19 +277,16 @@ func (w *Worker) Run(ctx context.Context) func() error {
 	}
 }
 
-// pullAndProcess pulls a task and processes it
+// pullAndProcess pulls a task and processes it.
 func (w *Worker) pullAndProcess() error {
-	// Claim next available task
 	task, err := w.repo.ClaimTask(w.ctx, w.workerID, w.queues, w.lockTimeout)
 	if err != nil {
-		// Check if it's ErrNoTaskToClaim - this is normal, not an error
 		if errors.Is(err, ErrNoTaskToClaim) {
 			return nil
 		}
 		return fmt.Errorf("failed to claim task: %w", err)
 	}
 
-	// No task available is normal
 	if task == nil {
 		return nil
 	}
@@ -304,15 +297,13 @@ func (w *Worker) pullAndProcess() error {
 		slog.String("task_name", task.TaskName),
 		slog.String("queue", task.Queue))
 
-	// Process the task
 	return w.processTask(task)
 }
 
-// processTask executes a task with its handler
+// processTask executes a task with its handler.
 func (w *Worker) processTask(task *Task) (retErr error) {
 	start := time.Now()
 
-	// Track active tasks for metrics
 	w.activeTasks.Add(1)
 	defer w.activeTasks.Add(-1)
 
@@ -327,13 +318,11 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 				slog.String("task_id", task.ID.String()),
 				slog.String("task_name", task.TaskName),
 				slog.Any("panic", r))
-			// Convert panic to regular failure for retry processing
 			duration := time.Since(start)
 			_ = w.handleTaskFailure(task, retErr, duration)
 		}
 	}()
 
-	// Find handler
 	w.mu.RLock()
 	handler, ok := w.handlers[task.TaskName]
 	w.mu.RUnlock()
@@ -348,7 +337,6 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.lockTimeout)
 	defer cancel()
 
-	// Execute handler
 	err := handler.Handle(ctx, task.Payload)
 	duration := time.Since(start)
 
@@ -368,21 +356,19 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 // 2. Manually requeue tasks from DLQ once handler is available
 // 3. Investigate why tasks were enqueued without corresponding handlers
 func (w *Worker) handleMissingHandler(task *Task) error {
-	// Increment failure counter for metrics
 	w.tasksFailed.Add(1)
+	w.lastActivityAt.Store(time.Now().Unix())
 
 	w.logger.ErrorContext(w.ctx, "no handler registered for task type",
 		slog.String("worker_id", w.workerID.String()),
 		slog.String("task_id", task.ID.String()),
 		slog.String("task_name", task.TaskName))
 
-	// Mark as failed to record the specific error
 	errorMsg := "no handler registered for task type: " + task.TaskName
 	if err := w.repo.FailTask(w.ctx, task.ID, errorMsg); err != nil {
 		return fmt.Errorf("failed to mark task %s as failed: %w", task.ID, err)
 	}
 
-	// Move directly to DLQ - no point in retrying without a handler
 	if err := w.repo.MoveToDLQ(w.ctx, task.ID); err != nil {
 		return fmt.Errorf("failed to move task %s to DLQ: %w", task.ID, err)
 	}
@@ -403,8 +389,8 @@ func (w *Worker) handleMissingHandler(task *Task) error {
 // - Implement exponential backoff strategies
 // - Maintain audit trails of task processing attempts
 func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Duration) error {
-	// Increment failure counter for metrics
 	w.tasksFailed.Add(1)
+	w.lastActivityAt.Store(time.Now().Unix())
 
 	w.logger.ErrorContext(w.ctx, "task failed",
 		slog.String("worker_id", w.workerID.String()),
@@ -415,14 +401,11 @@ func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Dura
 		slog.Duration("duration", duration),
 		slog.String("error", execErr.Error()))
 
-	// Always mark as failed first to record the error
 	if err := w.repo.FailTask(w.ctx, task.ID, execErr.Error()); err != nil {
 		return fmt.Errorf("failed to update task %s status to failed: %w", task.ID, err)
 	}
 
-	// Check if this was the last retry (FailTask may have updated retry count)
 	if task.RetryCount >= task.MaxRetries {
-		// Move to DLQ
 		if err := w.repo.MoveToDLQ(w.ctx, task.ID); err != nil {
 			return fmt.Errorf("failed to move task %s to DLQ after max retries: %w", task.ID, err)
 		}
@@ -438,14 +421,14 @@ func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Dura
 	return nil
 }
 
-// handleTaskSuccess processes successful task completion
+// handleTaskSuccess processes successful task completion.
 func (w *Worker) handleTaskSuccess(task *Task, duration time.Duration) error {
 	if err := w.repo.CompleteTask(w.ctx, task.ID); err != nil {
 		return fmt.Errorf("failed to mark task %s as completed: %w", task.ID, err)
 	}
 
-	// Increment success counter for metrics
 	w.tasksProcessed.Add(1)
+	w.lastActivityAt.Store(time.Now().Unix())
 
 	w.logger.InfoContext(w.ctx, "task completed successfully",
 		slog.String("worker_id", w.workerID.String()),
@@ -457,13 +440,13 @@ func (w *Worker) handleTaskSuccess(task *Task, duration time.Duration) error {
 	return nil
 }
 
-// ExtendLockForTask extends the lock timeout for a long-running task
-// This should be called periodically for tasks that take longer than lockTimeout
+// ExtendLockForTask extends the lock timeout for a long-running task.
+// Call this periodically for tasks that take longer than lockTimeout.
 func (w *Worker) ExtendLockForTask(ctx context.Context, taskID uuid.UUID, extension time.Duration) error {
 	return w.repo.ExtendLock(ctx, taskID, extension)
 }
 
-// WorkerInfo returns information about the worker
+// WorkerInfo returns identifying information about the worker instance.
 func (w *Worker) WorkerInfo() (id string, hostname string, pid int) {
 	hostname, _ = os.Hostname()
 	return w.workerID.String(), hostname, os.Getpid()
@@ -513,11 +496,18 @@ func (w *Worker) Stats() WorkerStats {
 	isRunning := w.cancel != nil
 	w.mu.RUnlock()
 
+	lastActivity := w.lastActivityAt.Load()
+	var lastActivityTime time.Time
+	if lastActivity > 0 {
+		lastActivityTime = time.Unix(lastActivity, 0)
+	}
+
 	return WorkerStats{
 		TasksProcessed: w.tasksProcessed.Load(),
 		TasksFailed:    w.tasksFailed.Load(),
 		ActiveTasks:    w.activeTasks.Load(),
 		IsRunning:      isRunning,
+		LastActivityAt: lastActivityTime,
 	}
 }
 
