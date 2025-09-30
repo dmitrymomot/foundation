@@ -64,14 +64,3 @@ func LoggingMiddleware(logger *slog.Logger) Middleware {
 		}
 	}
 }
-
-// chainMiddleware applies multiple middleware in order.
-// The first middleware in the slice is the outermost (executed first).
-func chainMiddleware(handler Handler, middleware []Middleware) Handler {
-	// Apply middleware in reverse order so the first middleware
-	// in the slice becomes the outermost wrapper
-	for i := len(middleware) - 1; i >= 0; i-- {
-		handler = middleware[i](handler)
-	}
-	return handler
-}

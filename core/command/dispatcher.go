@@ -15,8 +15,8 @@ import (
 //	dispatcher := command.NewDispatcher(
 //	    command.WithSyncTransport(),
 //	    command.WithLogger(logger),
+//	    command.WithMiddleware(command.LoggingMiddleware(logger)),
 //	)
-//	dispatcher.Use(command.LoggingMiddleware(logger))
 //	dispatcher.Register(command.NewHandlerFunc(createUserHandler))
 //	dispatcher.Dispatch(ctx, CreateUser{Email: "user@example.com"})
 type Dispatcher struct {
@@ -81,19 +81,6 @@ func (d *Dispatcher) Register(handler Handler) {
 	d.handlers[cmdName] = handler
 }
 
-// Use adds middleware to the dispatcher.
-// Middleware is applied to all handlers in the order they are added.
-//
-// Example:
-//
-//	dispatcher.Use(command.LoggingMiddleware(logger))
-//	dispatcher.Use(metricsMiddleware)
-func (d *Dispatcher) Use(middleware ...Middleware) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.middleware = append(d.middleware, middleware...)
-}
-
 // Dispatch sends a command for execution via the configured transport.
 // The command is routed to its registered handler.
 //
@@ -107,7 +94,7 @@ func (d *Dispatcher) Use(middleware ...Middleware) {
 //	    Name:  "John Doe",
 //	})
 func (d *Dispatcher) Dispatch(ctx context.Context, cmd any) error {
-	cmdName := GetCommandName(cmd)
+	cmdName := getCommandNameFromInstance(cmd)
 	return d.transport.Dispatch(ctx, cmdName, cmd)
 }
 
@@ -134,16 +121,17 @@ func (d *Dispatcher) Stop() {
 // This is used by transports to look up and execute handlers.
 func (d *Dispatcher) getHandler(cmdName string) (Handler, bool) {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	handler, exists := d.handlers[cmdName]
+	middleware := d.middleware
+	d.mu.RUnlock()
+
 	if !exists {
 		return nil, false
 	}
 
 	// Apply middleware to handler
-	if len(d.middleware) > 0 {
-		handler = chainMiddleware(handler, d.middleware)
+	if len(middleware) > 0 {
+		handler = chainMiddleware(handler, middleware)
 	}
 
 	return handler, true
@@ -218,5 +206,23 @@ func WithErrorHandler(handler func(context.Context, string, error)) Option {
 func WithLogger(logger *slog.Logger) Option {
 	return func(d *Dispatcher) {
 		d.logger = logger
+	}
+}
+
+// WithMiddleware sets middleware for the dispatcher.
+// Middleware is applied to all handlers in the order provided.
+// Middleware must be configured at construction time and cannot be changed later.
+//
+// Example:
+//
+//	dispatcher := command.NewDispatcher(
+//	    command.WithMiddleware(
+//	        command.LoggingMiddleware(logger),
+//	        metricsMiddleware,
+//	    ),
+//	)
+func WithMiddleware(middleware ...Middleware) Option {
+	return func(d *Dispatcher) {
+		d.middleware = middleware
 	}
 }

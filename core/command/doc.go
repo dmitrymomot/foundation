@@ -103,14 +103,20 @@
 // Middleware wraps handlers to add cross-cutting functionality like logging,
 // metrics, tracing, validation, or authorization.
 //
+// Middleware must be configured at construction time using WithMiddleware().
+// It cannot be added or modified after the dispatcher is created.
+//
 // Built-in middleware:
 //   - LoggingMiddleware: Logs command execution with timing
 //
 // Example:
 //
-//	dispatcher := command.NewDispatcher()
-//	dispatcher.Use(command.LoggingMiddleware(logger))
-//	dispatcher.Use(metricsMiddleware)
+//	dispatcher := command.NewDispatcher(
+//	    command.WithMiddleware(
+//	        command.LoggingMiddleware(logger),
+//	        metricsMiddleware,
+//	    ),
+//	)
 //	dispatcher.Register(command.NewHandlerFunc(handler))
 //
 // Custom middleware:
@@ -226,9 +232,10 @@
 // 5. Use channel transport for fire-and-forget operations
 // 6. Always provide an error handler with async transports
 // 7. Call dispatcher.Stop() for graceful shutdown with channel transport
-// 8. Apply decorators at registration time, not in handlers
-// 9. Use middleware for cross-cutting concerns
-// 10. Keep handlers simple and focused
+// 8. Configure middleware at construction time using WithMiddleware()
+// 9. Apply decorators at registration time, not in handlers
+// 10. Use middleware for cross-cutting concerns
+// 11. Keep handlers simple and focused
 //
 // # Upgrade Path
 //
