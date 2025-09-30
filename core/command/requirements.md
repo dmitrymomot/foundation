@@ -35,8 +35,8 @@ Two built-in transports with different characteristics:
 - Consistent with command one-to-one semantics
 
 ```go
-bus.Register(command.HandlerFunc(createUser))
-bus.Register(command.HandlerFunc(createUser)) // PANIC: duplicate handler
+dispatcher.Register(command.NewHandlerFunc(createUser))
+dispatcher.Register(command.NewHandlerFunc(createUser)) // PANIC: duplicate handler
 ```
 
 ### 2. Missing Handler Behavior
@@ -55,13 +55,6 @@ bus.Register(command.HandlerFunc(createUser)) // PANIC: duplicate handler
 - Returns `ErrHandlerNotFound` immediately
 - Rationale: Fail fast, no point buffering unhandleable command
 
-**Queue Transport**:
-
-- Accepts command without validation (enqueues)
-- Worker validates handler when processing
-- Missing handler → moves task to DLQ
-- Rationale: Command may be handled by different instance
-
 ### 3. Type Safety
 
 **Decision**: Use generics for type-safe handlers
@@ -79,7 +72,7 @@ func createUser(ctx context.Context, cmd CreateUser) error {
     return db.Insert(cmd.Email, cmd.Name)
 }
 
-bus.Register(command.HandlerFunc(createUser))
+dispatcher.Register(command.NewHandlerFunc(createUser))
 ```
 
 ### 4. Serialization
@@ -112,25 +105,24 @@ bus.Register(command.HandlerFunc(createUser))
 **Sync Transport**:
 
 ```go
-err := bus.Dispatch(ctx, cmd)
+err := dispatcher.Dispatch(ctx, cmd)
 // err is handler error or ErrHandlerNotFound
 ```
 
-**Async Transports (Channel/Queue)**:
+**Channel Transport**:
 
 ```go
-err := bus.Dispatch(ctx, cmd)
-// err is enqueue error (ErrBufferFull, network error)
+err := dispatcher.Dispatch(ctx, cmd)
+// err is enqueue error (ErrBufferFull)
 // Handler errors handled via:
 // - Error handler callback
 // - Middleware logging
-// - DLQ (queue transport)
 ```
 
 **Decision**: Provide error handler callback option
 
 ```go
-bus := command.New(
+dispatcher := command.NewDispatcher(
     command.WithChannelTransport(100),
     command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
         logger.Error("command failed", "command", cmdName, "error", err)
@@ -151,10 +143,10 @@ bus := command.New(
 
 ```go
 handler := command.WithRetry(
-    command.WithBackoff(createUserHandler),
-    maxRetries: 3,
+    command.NewHandlerFunc(createUserHandler),
+    3, // maxRetries
 )
-bus.Register(handler)
+dispatcher.Register(handler)
 ```
 
 ### 8. Middleware Support
@@ -173,8 +165,8 @@ bus.Register(handler)
 - Authorization
 
 ```go
-bus.Use(command.LoggingMiddleware(logger))
-bus.Use(command.MetricsMiddleware(metrics))
+dispatcher.Use(command.LoggingMiddleware(logger))
+dispatcher.Use(metricsMiddleware)
 ```
 
 ### 9. API Naming
@@ -182,11 +174,11 @@ bus.Use(command.MetricsMiddleware(metrics))
 **Decision**: Follow established patterns
 
 - `Dispatch(ctx, cmd)` - execute command (standard CQRS terminology)
-- `Start(ctx)` - begin processing (async transports)
-- `Stop()` - graceful shutdown
-- `Run(ctx) func() error` - errgroup compatibility
+- `Register(handler)` - register command handler
+- `Use(middleware)` - add middleware
+- `Stop()` - graceful shutdown (channel transport only)
 
-**Rationale**: Consistent with `core/queue` and `core/server` packages
+**Rationale**: Simple and clear API focused on command dispatching
 
 ## Transport Specifications
 
@@ -209,11 +201,11 @@ bus.Use(command.MetricsMiddleware(metrics))
 **API**:
 
 ```go
-bus := command.New(command.WithSyncTransport())
-bus.Register(handler)
+dispatcher := command.NewDispatcher(command.WithSyncTransport())
+dispatcher.Register(handler)
 
-// No Start() needed
-err := bus.Dispatch(ctx, cmd) // Blocks until complete
+// No lifecycle management needed
+err := dispatcher.Dispatch(ctx, cmd) // Blocks until complete
 if err != nil {
     // Handler error or ErrHandlerNotFound
 }
@@ -239,26 +231,18 @@ if err != nil {
 **API**:
 
 ```go
-bus := command.New(
-    command.WithChannelTransport(bufferSize: 100),
+dispatcher := command.NewDispatcher(
+    command.WithChannelTransport(100, command.WithWorkers(5)),
     command.WithErrorHandler(errorHandler),
 )
-bus.Register(handler)
+defer dispatcher.Stop() // Graceful shutdown
 
-ctx, cancel := context.WithCancel(context.Background())
-go func() {
-    if err := bus.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-}()
+dispatcher.Register(handler)
 
-err := bus.Dispatch(ctx, cmd) // Returns immediately
+err := dispatcher.Dispatch(ctx, cmd) // Returns immediately
 if err != nil {
     // ErrBufferFull or ErrHandlerNotFound
 }
-
-cancel()
-bus.Stop() // Graceful shutdown
 ```
 
 **Configuration options**:
@@ -267,52 +251,19 @@ bus.Stop() // Graceful shutdown
 - Number of workers (default: 1)
 - Error handler (optional)
 
-### Queue Transport (Async Distributed)
-
-**Characteristics**:
-
-- Non-blocking dispatch
-- Persistent (survives restart)
-- Cross-instance execution
-- Retry/DLQ support
-- Handler validation deferred to worker
-
-**Use cases**:
-
-- Background jobs
-- Cross-instance work distribution
-- Reliable task processing
-- Image processing, notifications, etc.
-
-**API**:
-
-```go
-// Dispatcher instance (e.g., web server)
-bus := command.New(command.WithQueueTransport(repo))
-err := bus.Dispatch(ctx, cmd) // Enqueues, returns immediately
-
-// Worker instance (e.g., background worker)
-bus := command.New(command.WithQueueTransport(repo))
-bus.Register(handler)
-bus.Start(ctx) // Blocks, processing commands from queue
-```
-
-**Implementation note**: Wraps existing `core/queue` package internally
-
 ## Package Structure
 
 ```
 core/command/
-  - bus.go              // Main Bus type
-  - transport.go        // Transport interface
-  - handler.go          // Handler interface, HandlerFunc
-  - middleware.go       // Middleware types and built-ins
-  - sync_transport.go   // Sync transport implementation
+  - dispatcher.go        // Main Dispatcher type
+  - transport.go         // Transport interface
+  - handler.go           // Handler interface, HandlerFunc
+  - middleware.go        // Middleware types and built-ins
+  - sync_transport.go    // Sync transport implementation
   - channel_transport.go // Async local transport
-  - queue_transport.go  // Async distributed transport (wraps core/queue)
-  - decorators.go       // Retry, backoff decorators
-  - errors.go           // Package errors
-  - doc.go              // Package documentation
+  - decorators.go        // Retry, backoff decorators
+  - errors.go            // Package errors
+  - doc.go               // Package documentation
 ```
 
 **Note**: Flat structure, no sub-folders
@@ -331,10 +282,10 @@ func createUserHandler(ctx context.Context, cmd CreateUser) error {
     return db.Insert(ctx, cmd.Email, cmd.Name)
 }
 
-bus := command.New(command.WithSyncTransport())
-bus.Register(command.HandlerFunc(createUserHandler))
+dispatcher := command.NewDispatcher(command.WithSyncTransport())
+dispatcher.Register(command.NewHandlerFunc(createUserHandler))
 
-if err := bus.Dispatch(ctx, CreateUser{Email: "test@example.com"}); err != nil {
+if err := dispatcher.Dispatch(ctx, CreateUser{Email: "test@example.com"}); err != nil {
     return err
 }
 ```
@@ -342,38 +293,31 @@ if err := bus.Dispatch(ctx, CreateUser{Email: "test@example.com"}); err != nil {
 ### Async Local with Error Handling
 
 ```go
-bus := command.New(
+dispatcher := command.NewDispatcher(
     command.WithChannelTransport(100),
     command.WithErrorHandler(func(ctx context.Context, cmdName string, err error) {
         logger.Error("command failed", "command", cmdName, "error", err)
         metrics.Inc("command.errors", "command", cmdName)
     }),
 )
-bus.Use(command.LoggingMiddleware(logger))
-bus.Register(command.HandlerFunc(sendEmailHandler))
+defer dispatcher.Stop()
 
-go bus.Start(ctx)
+dispatcher.Use(command.LoggingMiddleware(logger))
+dispatcher.Register(command.NewHandlerFunc(sendEmailHandler))
 
 // Fire and forget
-bus.Dispatch(ctx, SendEmail{To: "user@example.com"})
+dispatcher.Dispatch(ctx, SendEmail{To: "user@example.com"})
 ```
 
-### Distributed Queue with Retry
+### With Retry Decorator
 
 ```go
-// Web server - dispatch only
-dispatchBus := command.New(command.WithQueueTransport(repo))
-dispatchBus.Dispatch(ctx, GenerateThumbnail{ImageID: "123"})
-
-// Worker server - handles commands
-workerBus := command.New(command.WithQueueTransport(repo))
-
 handler := command.WithRetry(
-    command.HandlerFunc(generateThumbnailHandler),
-    maxRetries: 3,
+    command.NewHandlerFunc(generateThumbnailHandler),
+    3, // maxRetries
 )
-workerBus.Register(handler)
-workerBus.Start(ctx)
+dispatcher.Register(handler)
+dispatcher.Dispatch(ctx, GenerateThumbnail{ImageID: "123"})
 ```
 
 ## Upgrade Path
@@ -382,13 +326,10 @@ Developers can start simple and progressively add complexity:
 
 ```go
 // Phase 1: Simple app, sync
-bus := command.New(command.WithSyncTransport())
+dispatcher := command.NewDispatcher(command.WithSyncTransport())
 
 // Phase 2: Need decoupling, async local
-bus := command.New(command.WithChannelTransport(100))
-
-// Phase 3: Scale to multiple instances
-bus := command.New(command.WithQueueTransport(repo))
+dispatcher := command.NewDispatcher(command.WithChannelTransport(100))
 ```
 
 ## Testing Considerations
@@ -402,10 +343,10 @@ bus := command.New(command.WithQueueTransport(repo))
 
 ```go
 func TestCreateUser(t *testing.T) {
-    bus := command.New(command.WithSyncTransport())
-    bus.Register(command.HandlerFunc(createUserHandler))
+    dispatcher := command.NewDispatcher(command.WithSyncTransport())
+    dispatcher.Register(command.NewHandlerFunc(createUserHandler))
 
-    err := bus.Dispatch(ctx, CreateUser{Email: "test@example.com"})
+    err := dispatcher.Dispatch(ctx, CreateUser{Email: "test@example.com"})
     require.NoError(t, err)
 
     // Assertions run immediately after
@@ -413,13 +354,13 @@ func TestCreateUser(t *testing.T) {
 }
 ```
 
-## Open Questions
+## Implementation Decisions
 
-1. Should sync transport support `Start()` as no-op for API consistency?
-2. Default transport if none specified - sync or channel?
-3. Channel transport worker count configuration?
-4. Should middleware apply to all transports or be transport-specific?
-5. Panic recovery strategy for handlers?
+1. **Sync transport lifecycle**: No Start/Stop methods - stateless by design
+2. **Default transport**: Sync transport (simplest, most efficient)
+3. **Channel transport workers**: Configurable via `WithWorkers(n)` option (default: 1)
+4. **Middleware scope**: Applies globally to all handlers regardless of transport
+5. **Panic recovery**: Built into channel transport, logged and passed to error handler
 
 ## References
 
