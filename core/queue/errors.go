@@ -20,6 +20,14 @@ var (
 	ErrFailedToMoveToDLQ        = errors.New("failed to move task to dead letter queue")
 	ErrNoTaskToClaim            = errors.New("no task available to claim")
 
+	// Lifecycle errors
+	ErrSchedulerAlreadyStarted     = errors.New("scheduler already started")
+	ErrSchedulerNotStarted         = errors.New("scheduler not started")
+	ErrWorkerAlreadyStarted        = errors.New("worker already started")
+	ErrWorkerNotStarted            = errors.New("worker not started")
+	ErrMemoryStorageAlreadyStarted = errors.New("memory storage already started")
+	ErrMemoryStorageNotStarted     = errors.New("memory storage not started")
+
 	// Healthcheck errors
 	ErrHealthcheckFailed   = errors.New("healthcheck failed")
 	ErrWorkerNotRunning    = errors.New("worker not running")

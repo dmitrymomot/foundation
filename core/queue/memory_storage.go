@@ -16,9 +16,10 @@ import (
 
 // MemoryStorageStats provides observability metrics for monitoring and debugging
 type MemoryStorageStats struct {
-	ActiveTasks       int   // Current number of tasks in storage
-	ExpiredLocksFreed int64 // Total number of expired locks freed
-	IsRunning         bool  // Whether the lock expiration manager is running
+	ActiveTasks       int       // Current number of tasks in storage
+	ExpiredLocksFreed int64     // Total number of expired locks freed
+	IsRunning         bool      // Whether the lock expiration manager is running
+	LastActivityAt    time.Time // Timestamp of last lock expiration (zero if never)
 }
 
 // MemoryStorage implements all queue repository interfaces for testing and local development
@@ -44,6 +45,7 @@ type MemoryStorage struct {
 
 	// Observability metrics
 	expiredLocksFreed atomic.Int64
+	lastActivityAt    atomic.Int64 // Unix timestamp of last lock expiration
 }
 
 // MemoryStorageOption configures a MemoryStorage.
@@ -96,7 +98,7 @@ func NewMemoryStorage(opts ...MemoryStorageOption) *MemoryStorage {
 	return ms
 }
 
-// Close stops the background goroutines.
+// Close stops the lock expiration manager.
 // Deprecated: Use Stop() instead for consistency with other components.
 func (ms *MemoryStorage) Close() error {
 	return ms.Stop()
@@ -337,7 +339,7 @@ func (ms *MemoryStorage) Start(ctx context.Context) error {
 	ms.mu.Lock()
 	if ms.cancel != nil {
 		ms.mu.Unlock()
-		return fmt.Errorf("memory storage already started")
+		return ErrMemoryStorageAlreadyStarted
 	}
 
 	ms.ctx, ms.cancel = context.WithCancel(ctx)
@@ -374,7 +376,7 @@ func (ms *MemoryStorage) Stop() error {
 	ms.mu.Lock()
 	if ms.cancel == nil {
 		ms.mu.Unlock()
-		return fmt.Errorf("memory storage not started")
+		return ErrMemoryStorageNotStarted
 	}
 
 	cancel := ms.cancel
@@ -469,6 +471,7 @@ func (ms *MemoryStorage) expireLocks() {
 
 	if freed > 0 {
 		ms.expiredLocksFreed.Add(int64(freed))
+		ms.lastActivityAt.Store(time.Now().Unix())
 	}
 }
 
@@ -480,10 +483,17 @@ func (ms *MemoryStorage) Stats() MemoryStorageStats {
 	activeTasks := len(ms.tasks)
 	ms.mu.RUnlock()
 
+	lastActivity := ms.lastActivityAt.Load()
+	var lastActivityTime time.Time
+	if lastActivity > 0 {
+		lastActivityTime = time.Unix(lastActivity, 0)
+	}
+
 	return MemoryStorageStats{
 		ActiveTasks:       activeTasks,
 		ExpiredLocksFreed: ms.expiredLocksFreed.Load(),
 		IsRunning:         isRunning,
+		LastActivityAt:    lastActivityTime,
 	}
 }
 

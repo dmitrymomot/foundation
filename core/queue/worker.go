@@ -57,14 +57,16 @@ type Worker struct {
 	tasksProcessed atomic.Int64
 	tasksFailed    atomic.Int64
 	activeTasks    atomic.Int32
+	lastActivityAt atomic.Int64 // Unix timestamp of last task processing
 }
 
 // WorkerStats provides observability metrics for monitoring and debugging
 type WorkerStats struct {
-	TasksProcessed int64 // Total number of successfully completed tasks
-	TasksFailed    int64 // Total number of failed tasks (including those moved to DLQ)
-	ActiveTasks    int32 // Number of tasks currently being processed
-	IsRunning      bool  // Whether the worker is currently running
+	TasksProcessed int64     // Total number of successfully completed tasks
+	TasksFailed    int64     // Total number of failed tasks (including those moved to DLQ)
+	ActiveTasks    int32     // Number of tasks currently being processed
+	IsRunning      bool      // Whether the worker is currently running
+	LastActivityAt time.Time // Timestamp of last task processing (zero if never)
 }
 
 // NewWorker creates a new task worker
@@ -146,7 +148,7 @@ func (w *Worker) Start(ctx context.Context) error {
 	w.mu.Lock()
 	if w.cancel != nil {
 		w.mu.Unlock()
-		return fmt.Errorf("worker already started")
+		return ErrWorkerAlreadyStarted
 	}
 
 	if len(w.handlers) == 0 {
@@ -213,7 +215,7 @@ func (w *Worker) Stop() error {
 	w.mu.Lock()
 	if w.cancel == nil {
 		w.mu.Unlock()
-		return fmt.Errorf("worker not started")
+		return ErrWorkerNotStarted
 	}
 
 	w.stopping.Store(true)
@@ -355,6 +357,7 @@ func (w *Worker) processTask(task *Task) (retErr error) {
 // 3. Investigate why tasks were enqueued without corresponding handlers
 func (w *Worker) handleMissingHandler(task *Task) error {
 	w.tasksFailed.Add(1)
+	w.lastActivityAt.Store(time.Now().Unix())
 
 	w.logger.ErrorContext(w.ctx, "no handler registered for task type",
 		slog.String("worker_id", w.workerID.String()),
@@ -387,6 +390,7 @@ func (w *Worker) handleMissingHandler(task *Task) error {
 // - Maintain audit trails of task processing attempts
 func (w *Worker) handleTaskFailure(task *Task, execErr error, duration time.Duration) error {
 	w.tasksFailed.Add(1)
+	w.lastActivityAt.Store(time.Now().Unix())
 
 	w.logger.ErrorContext(w.ctx, "task failed",
 		slog.String("worker_id", w.workerID.String()),
@@ -424,6 +428,7 @@ func (w *Worker) handleTaskSuccess(task *Task, duration time.Duration) error {
 	}
 
 	w.tasksProcessed.Add(1)
+	w.lastActivityAt.Store(time.Now().Unix())
 
 	w.logger.InfoContext(w.ctx, "task completed successfully",
 		slog.String("worker_id", w.workerID.String()),
@@ -491,11 +496,18 @@ func (w *Worker) Stats() WorkerStats {
 	isRunning := w.cancel != nil
 	w.mu.RUnlock()
 
+	lastActivity := w.lastActivityAt.Load()
+	var lastActivityTime time.Time
+	if lastActivity > 0 {
+		lastActivityTime = time.Unix(lastActivity, 0)
+	}
+
 	return WorkerStats{
 		TasksProcessed: w.tasksProcessed.Load(),
 		TasksFailed:    w.tasksFailed.Load(),
 		ActiveTasks:    w.activeTasks.Load(),
 		IsRunning:      isRunning,
+		LastActivityAt: lastActivityTime,
 	}
 }
 

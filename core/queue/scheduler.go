@@ -41,13 +41,15 @@ type Scheduler struct {
 	// Observability metrics
 	tasksScheduled atomic.Int64
 	activeChecks   atomic.Int32
+	lastActivityAt atomic.Int64 // Unix timestamp of last task scheduling
 }
 
 // SchedulerStats provides observability metrics for monitoring and debugging
 type SchedulerStats struct {
-	TasksScheduled int64 // Total number of tasks created by the scheduler
-	ActiveChecks   int32 // Number of check operations currently running
-	IsRunning      bool  // Whether the scheduler is currently running
+	TasksScheduled int64     // Total number of tasks created by the scheduler
+	ActiveChecks   int32     // Number of check operations currently running
+	IsRunning      bool      // Whether the scheduler is currently running
+	LastActivityAt time.Time // Timestamp of last task scheduling (zero if never)
 }
 
 // scheduledTask holds configuration for a periodic task
@@ -142,7 +144,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.cancel != nil {
 		s.mu.Unlock()
-		return fmt.Errorf("scheduler already started")
+		return ErrSchedulerAlreadyStarted
 	}
 
 	taskCount := len(s.tasks)
@@ -184,7 +186,7 @@ func (s *Scheduler) Stop() error {
 	s.mu.Lock()
 	if s.cancel == nil {
 		s.mu.Unlock()
-		return fmt.Errorf("scheduler not started")
+		return ErrSchedulerNotStarted
 	}
 
 	s.running.Store(false)
@@ -387,6 +389,7 @@ func (s *Scheduler) createTask(ctx context.Context, task *scheduledTask, schedul
 	}
 
 	s.tasksScheduled.Add(1)
+	s.lastActivityAt.Store(time.Now().Unix())
 
 	return nil
 }
@@ -427,10 +430,17 @@ func (s *Scheduler) Stats() SchedulerStats {
 	isRunning := s.cancel != nil
 	s.mu.RUnlock()
 
+	lastActivity := s.lastActivityAt.Load()
+	var lastActivityTime time.Time
+	if lastActivity > 0 {
+		lastActivityTime = time.Unix(lastActivity, 0)
+	}
+
 	return SchedulerStats{
 		TasksScheduled: s.tasksScheduled.Load(),
 		ActiveChecks:   s.activeChecks.Load(),
 		IsRunning:      isRunning,
+		LastActivityAt: lastActivityTime,
 	}
 }
 
