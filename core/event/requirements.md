@@ -1,12 +1,33 @@
-# Event Bus Requirements
+# Event Publisher Requirements
 
 ## Overview
 
-Event bus implementation for publishing events with pluggable transport strategies. Events represent **facts/notifications** with one-to-many handler relationships (one event = multiple handlers).
+Event publisher implementation for publishing events with pluggable transport strategies. Events represent **facts/notifications** with one-to-many handler relationships (one event = multiple handlers).
+
+**Follows Watermill-inspired architecture** like `core/command` package for consistency.
+
+## Architecture (Watermill-Inspired)
+
+Following the same pattern as `core/command`:
+
+- **Publisher** = Stateless client (like Watermill's Publisher)
+- **Transport** = Passive wire (like Watermill's Subscriber - provides channel)
+- **Processor** = Active router (like Watermill's Router - manages workers)
+
+```
+┌───────────┐                                    ┌────────────┐
+│ Publisher │──Publish()──▶ Transport ──────▶   │ Processor  │
+│(stateless)│               (wire)               │(has Run()) │
+└───────────┘                                    └────────────┘
+                                                       │
+                                                Manages workers
+                                                Executes handlers
+```
 
 ## Core Concepts
 
 ### Event Semantics
+
 - **Fact-based**: Events are notifications that something happened (UserCreated, OrderPlaced)
 - **One-to-many**: Each event can have zero or more handlers
 - **Fan-out pattern**: All registered handlers receive the event
@@ -14,76 +35,38 @@ Event bus implementation for publishing events with pluggable transport strategi
 - **Idempotent handlers**: Same event may be delivered multiple times
 
 ### Event vs Command
-Clear semantic distinction:
 
-| Aspect | Event | Command |
-|--------|-------|---------|
-| Intent | Notification (happened) | Order (do this) |
-| Tense | Past (UserCreated) | Imperative (CreateUser) |
-| Handlers | Many (0+) | One (exactly 1) |
-| Pattern | Fan-out (broadcast) | Competitive (one executes) |
-| Missing handler | Warning, not error | Error |
-| Use case | State sync, cache invalidation | Work distribution, actions |
+| Aspect            | Event                          | Command                    |
+| ----------------- | ------------------------------ | -------------------------- |
+| Intent            | Notification (happened)        | Order (do this)            |
+| Tense             | Past (UserCreated)             | Imperative (CreateUser)    |
+| Handlers          | Many (0+)                      | One (exactly 1)            |
+| Pattern           | Fan-out (broadcast)            | Competitive (one executes) |
+| Missing handler   | Warning, not error             | Error (ErrHandlerNotFound) |
+| Duplicate handler | Allowed (many-to-many)         | Panic (enforces 1:1)       |
 
-### Transport Abstraction
-Similar to commands, but always fan-out semantics:
-
-| Transport | Execution | Blocking | Use Case |
-|-----------|-----------|----------|----------|
-| **Sync** | Direct call | Yes | Testing, simple apps |
-| **Channel** | Goroutine + buffer | No | Local async, same instance |
-| **Distributed** | Pub/Sub (Redis, NATS) | No | Multi-instance, broadcast |
-
-**Important**: For competitive work (one instance processes), use commands instead.
-
-## Architecture Decisions
+## Key Architecture Decisions
 
 ### 1. Zero Handlers Behavior
-**Decision**: Zero handlers is valid, log warning only
 
-**Rationale**:
-- Events are facts - whether anyone listens is separate concern
-- Partial deployments: Instance A has handler, Instance B doesn't
-- Future extensibility: Publish event now, add handlers later
-- Prevents coupling publisher to consumer existence
+**Decision**: Zero handlers is valid, log warning only
 
 ```go
 // Valid - logs warning but doesn't error
-bus.Publish(ctx, UserCreated{UserID: "123"})
-// Log: "no handlers registered for event: UserCreated"
+publisher.Publish(ctx, UserCreated{UserID: "123"})
 ```
 
 **Optional strict mode**:
 ```go
-bus := event.New(
+processor := event.NewProcessor(
+    transport,
     event.WithStrictHandlers(true), // error if zero handlers
 )
 ```
 
-### 2. Handler Registration Order
-**Decision**: Handlers execute in FIFO registration order
+### 2. Handler Isolation
 
-**Rationale**:
-- Deterministic behavior
-- Predictable execution
-- Easy to reason about
-- Documented guarantee
-
-```go
-bus.Register(event.HandlerFunc(invalidateCache))  // Runs first
-bus.Register(event.HandlerFunc(updateMetrics))    // Runs second
-bus.Register(event.HandlerFunc(notifyWebhook))    // Runs third
-```
-
-**Note**: Order matters for dependencies (e.g., cache invalidation before metrics)
-
-### 3. Handler Isolation
 **Decision**: Handler errors don't stop other handlers
-
-**Rationale**:
-- One failing handler shouldn't prevent others from executing
-- Better system resilience
-- Failures are logged/tracked independently
 
 ```go
 handler1() // succeeds
@@ -91,200 +74,146 @@ handler2() // FAILS
 handler3() // still executes
 ```
 
-**Error collection**: All handler errors are collected and returned/logged
+All handler errors are collected and reported.
 
-### 4. Duplicate Handlers
-**Decision**: Allow duplicate handler registration
+### 3. Type Safety
 
-**Rationale**:
-- Unlike commands (one-to-one), events are one-to-many
-- User might want same handler multiple times (e.g., different configs)
-- User responsibility to manage
-
-**Alternative**: Panic on duplicate if `WithStrictHandlers(true)`
-
-### 5. Type Safety
-**Decision**: Use generics for type-safe handlers (same as commands)
+Use generics for type-safe handlers (same as commands):
 
 ```go
+type UserCreated struct {
+    UserID string
+    Email  string
+}
+
 func onUserCreated(ctx context.Context, evt UserCreated) error {
-    // evt is strongly typed
     return cache.Invalidate(evt.UserID)
 }
 
-bus.Register(event.HandlerFunc(onUserCreated))
+processor.Register(event.NewHandlerFunc(onUserCreated))
 ```
 
-### 6. Serialization
-**Decision**: Use standard library `encoding/json` (same as commands)
+### 4. Transport Pattern (Watermill-Inspired)
 
-### 7. Context Usage
-**Decision**: All handlers receive `context.Context` (same as commands)
-
-**Note**: Async transports create fresh context for handlers
-
-### 8. Middleware Support
-**Decision**: Support middleware chain (same as commands)
-
-**Built-in middleware**:
-- Logging (default, requires `*slog.Logger`)
+**Transport is passive wire** - just provides channel:
 
 ```go
-bus.Use(event.LoggingMiddleware(logger))
-bus.Use(event.MetricsMiddleware(metrics))
-```
-
-### 9. API Naming
-**Decision**: Follow event-driven conventions
-
-- `Publish(ctx, evt)` - publish event to all handlers
-- `Start(ctx)` - begin processing (async transports)
-- `Stop()` - graceful shutdown
-- `Run(ctx) func() error` - errgroup compatibility
-
-**Rationale**: `Publish` is standard event bus terminology
-
-### 10. Competitive Work Pattern
-**Decision**: Use commands for competitive work, not events
-
-**Problem scenario**:
-```go
-// WRONG: Using event for work that should happen once
-OnUserCreated -> SendWelcomeEmail() // Runs on ALL instances!
-```
-
-**Correct approach**:
-```go
-// Event handler publishes command for competitive work
-func onUserCreated(ctx context.Context, evt UserCreated) error {
-    // This handler runs on all instances, but command is competitive
-    return commandBus.Dispatch(ctx, SendWelcomeEmail{
-        UserID: evt.UserID,
-    })
+// PublisherTransport sends events
+type PublisherTransport interface {
+    Dispatch(ctx context.Context, eventName string, payload any) error
 }
 
-// Command handler executes once via queue transport
-func sendEmailHandler(ctx context.Context, cmd SendWelcomeEmail) error {
-    return mailer.Send(...)
+// ProcessorTransport provides event channel
+type ProcessorTransport interface {
+    // Subscribe returns channel of events to process
+    // Returns nil for sync transports (special case)
+    Subscribe(ctx context.Context) (<-chan envelope, error)
+    Close() error
 }
 ```
 
-**Rationale**:
-- Events = fan-out (all instances)
-- Commands = competitive (one instance)
-- Clear separation of concerns
-- Aligns with existing `core/queue` (competitive)
+**Processor manages workers**:
+
+```go
+processor := event.NewProcessor(
+    transport,
+    event.WithWorkers(5),  // Processor controls workers!
+    event.WithErrorHandler(errorHandler),
+)
+```
+
+### 5. Middleware & Decorators
+
+**Middleware** (cross-cutting, all handlers):
+```go
+processor := event.NewProcessor(
+    transport,
+    event.WithMiddleware(
+        event.LoggingMiddleware(logger),
+        metricsMiddleware,
+    ),
+)
+```
+
+**Decorators** (per-handler):
+```go
+handler := event.Decorate(
+    event.NewHandlerFunc(notifyWebhook),
+    event.Retry(3),
+    event.Backoff(5, 100*time.Millisecond, 10*time.Second),
+    event.Timeout(30*time.Second),
+)
+processor.Register(handler)
+```
 
 ## Transport Specifications
 
 ### Sync Transport
 
-**Characteristics**:
-- Direct function call
-- All handlers execute sequentially
-- Blocks until all handlers complete
-- Returns aggregated errors
+**Passive, no split needed**:
 
-**Use cases**:
-- Testing (deterministic)
-- Simple applications
-- Transaction boundaries
-
-**API**:
 ```go
-bus := event.New(event.WithSyncTransport())
-bus.Register(handler1)
-bus.Register(handler2)
+transport := event.NewSyncTransport()
 
-// Blocks until all handlers complete
-err := bus.Publish(ctx, UserCreated{UserID: "123"})
-if err != nil {
-    // Aggregated handler errors (if any)
-}
+processor := event.NewProcessor(transport)
+processor.Register(handler1)
+processor.Register(handler2)
+
+go processor.Run(ctx) // Just blocks, no workers needed
+
+// Can use processor.Publish() directly for sync transport
+err := processor.Publish(ctx, UserCreated{UserID: "123"})
+// Returns aggregated errors via errors.Join()
 ```
 
-### Channel Transport (Async Local)
+### Channel Transport
 
-**Characteristics**:
-- Non-blocking publish
-- Buffered channel
-- Handlers execute on same instance
-- No persistence
-- Error handling via callback/middleware
+**Passive wire, processor manages workers**:
 
-**Use cases**:
-- Local async notifications
-- Cache invalidation across goroutines
-- Decoupling within instance
-
-**API**:
 ```go
-bus := event.New(
-    event.WithChannelTransport(bufferSize: 100),
+// Passive transport - just a channel
+transport := event.NewChannelTransport(100)
+
+// Publisher (stateless client)
+publisher := event.NewPublisher(transport)
+publisher.Publish(ctx, UserCreated{}) // Returns immediately
+
+// Processor (active manager with workers)
+processor := event.NewProcessor(
+    transport,
+    event.WithWorkers(5),  // Processor controls workers
     event.WithErrorHandler(errorHandler),
 )
-bus.Register(handler)
+processor.Register(handler1)
+processor.Register(handler2)
 
-go bus.Start(ctx)
-
-err := bus.Publish(ctx, UserCreated{UserID: "123"}) // Returns immediately
-if err != nil {
-    // ErrBufferFull
-}
+go processor.Run(ctx) // Manages workers, blocks until shutdown
 ```
 
-### Distributed Transport (Pub/Sub)
+### Distributed Transport (Future)
 
-**Characteristics**:
-- Non-blocking publish
-- All instances receive event
-- Persistent (depends on infrastructure)
-- Fan-out pattern
+**Same pattern**:
 
-**Use cases**:
-- Cache invalidation across instances
-- State synchronization
-- Metrics collection
-- Multi-instance notifications
-
-**Implementation options**:
-- Redis Pub/Sub
-- NATS
-- Kafka (with unique consumer group per instance)
-
-**API**:
 ```go
-// All instances
-bus := event.New(event.WithRedisPubSubTransport(client))
-bus.Register(event.HandlerFunc(invalidateCache))
-bus.Register(event.HandlerFunc(updateMetrics))
-bus.Start(ctx)
+// Web server (publisher only)
+transport := redis.NewTransport("redis://localhost")
+publisher := event.NewPublisher(transport)
+publisher.Publish(ctx, UserCreated{})
 
-// Any instance can publish
-bus.Publish(ctx, UserCreated{UserID: "123"})
-// All instances receive and process
+// Worker service (processor only)
+transport := redis.NewTransport("redis://localhost")
+processor := event.NewProcessor(
+    transport,
+    event.WithWorkers(10),
+)
+processor.Register(handlers...)
+processor.Run(ctx) // Transport Subscribe() polls Redis
 ```
-
-## Package Structure
-
-```
-core/event/
-  - bus.go              // Main Bus type
-  - transport.go        // Transport interface
-  - handler.go          // Handler interface, HandlerFunc
-  - middleware.go       // Middleware types and built-ins
-  - sync_transport.go   // Sync transport implementation
-  - channel_transport.go // Async local transport
-  - errors.go           // Package errors
-  - doc.go              // Package documentation
-```
-
-**Note**: Flat structure, no sub-folders
-**Note**: Distributed transports (Redis, NATS) can be added later or kept in separate packages
 
 ## Usage Examples
 
 ### Simple Sync Example
+
 ```go
 type UserCreated struct {
     UserID string
@@ -295,119 +224,83 @@ func invalidateCache(ctx context.Context, evt UserCreated) error {
     return cache.Delete(ctx, "user:"+evt.UserID)
 }
 
-func updateMetrics(ctx context.Context, evt UserCreated) error {
-    metrics.Inc("users.created")
-    return nil
-}
+// Sync transport
+transport := event.NewSyncTransport()
+processor := event.NewProcessor(transport)
+processor.Register(event.NewHandlerFunc(invalidateCache))
+processor.Register(event.NewHandlerFunc(updateMetrics))
 
-bus := event.New(event.WithSyncTransport())
-bus.Register(event.HandlerFunc(invalidateCache))
-bus.Register(event.HandlerFunc(updateMetrics))
+go processor.Run(ctx)
 
-if err := bus.Publish(ctx, UserCreated{UserID: "123"}); err != nil {
-    // Handle aggregated errors
+// Direct publish (sync execution)
+if err := processor.Publish(ctx, UserCreated{UserID: "123"}); err != nil {
+    log.Fatal(err)
 }
 ```
 
 ### Async Local with Multiple Handlers
+
 ```go
-bus := event.New(
-    event.WithChannelTransport(100),
-    event.WithErrorHandler(func(ctx context.Context, evtName string, err error) {
-        logger.Error("event handler failed",
-            "event", evtName,
-            "error", err)
-    }),
+// Shared transport (passive wire)
+transport := event.NewChannelTransport(100)
+
+// Publisher (HTTP handlers)
+publisher := event.NewPublisher(transport)
+publisher.Publish(ctx, UserCreated{UserID: "123"}) // Fire and forget
+
+// Processor (worker)
+processor := event.NewProcessor(
+    transport,
+    event.WithWorkers(5),  // Processor manages workers
+    event.WithErrorHandler(errorHandler),
+    event.WithMiddleware(event.LoggingMiddleware(logger)),
 )
+processor.Register(event.NewHandlerFunc(invalidateCache))
+processor.Register(event.NewHandlerFunc(updateMetrics))
+processor.Register(event.NewHandlerFunc(notifyWebhook))
 
-bus.Use(event.LoggingMiddleware(logger))
-
-bus.Register(event.HandlerFunc(invalidateCache))
-bus.Register(event.HandlerFunc(updateMetrics))
-bus.Register(event.HandlerFunc(notifyWebhook))
-
-go bus.Start(ctx)
-
-// Fire and forget - all handlers will be called
-bus.Publish(ctx, UserCreated{UserID: "123"})
+g, ctx := errgroup.WithContext(ctx)
+g.Go(func() error {
+    return processor.Run(ctx) // Starts workers, blocks until shutdown
+})
 ```
 
 ### Event → Command Pattern
+
 ```go
 // Event handler publishes command for competitive work
-type EmailDispatcher struct {
-    commandBus *command.Bus
-}
-
-func (h *EmailDispatcher) OnUserCreated(ctx context.Context, evt UserCreated) error {
-    // This runs on all instances, but command is competitive
-    return h.commandBus.Dispatch(ctx, SendWelcomeEmail{
+func onUserCreated(ctx context.Context, evt UserCreated) error {
+    // This runs on all processor instances (broadcast)
+    // But command executes competitively (one instance only)
+    return cmdDispatcher.Dispatch(ctx, SendWelcomeEmail{
         UserID: evt.UserID,
         Email:  evt.Email,
     })
 }
 
-// Register event handler
-eventBus.Register(event.HandlerFunc(emailDispatcher.OnUserCreated))
+// Event processor (all instances receive event)
+eventProcessor.Register(event.NewHandlerFunc(onUserCreated))
 
-// Command handler (on worker instance)
-commandBus.Register(command.HandlerFunc(sendEmailHandler))
+// Command processor (one instance executes command)
+commandProcessor.Register(command.NewHandlerFunc(sendEmailHandler))
 ```
 
-### Testing with Sync Transport
-```go
-func TestUserCreatedEvent(t *testing.T) {
-    var invalidateCalled, metricsCalled bool
-
-    bus := event.New(event.WithSyncTransport())
-
-    bus.Register(event.HandlerFunc(func(ctx context.Context, evt UserCreated) error {
-        invalidateCalled = true
-        return nil
-    }))
-
-    bus.Register(event.HandlerFunc(func(ctx context.Context, evt UserCreated) error {
-        metricsCalled = true
-        return nil
-    }))
-
-    err := bus.Publish(ctx, UserCreated{UserID: "123"})
-    require.NoError(t, err)
-
-    // Synchronous - can assert immediately
-    assert.True(t, invalidateCalled)
-    assert.True(t, metricsCalled)
-}
-```
-
-## Handler Error Handling
+## Error Handling
 
 ### Sync Transport
-All handler errors collected and returned:
-
+All handler errors collected and returned via `errors.Join()`:
 ```go
-err := bus.Publish(ctx, evt)
-// err contains all handler errors via errors.Join()
+err := processor.Publish(ctx, evt)
+// err contains all handler errors
 ```
 
 ### Async Transports
-Handler errors cannot return to publisher:
-
-**Options**:
-1. Error handler callback (configured on bus)
-2. Logging middleware (logs all errors)
-3. Metrics middleware (tracks error counts)
-
+Handler errors reported via callback on processor:
 ```go
-bus := event.New(
-    event.WithChannelTransport(100),
-    event.WithErrorHandler(func(ctx context.Context, evtName string, handlerIdx int, err error) {
-        logger.Error("event handler failed",
-            "event", evtName,
-            "handler_index", handlerIdx,
-            "error", err)
-
-        // Optional: custom logic (alert, retry, etc.)
+processor := event.NewProcessor(
+    transport,
+    event.WithErrorHandler(func(ctx context.Context, evtName string, err error) {
+        logger.Error("event handler failed", "event", evtName, "error", err)
     }),
 )
 ```
@@ -416,182 +309,160 @@ bus := event.New(
 
 ### Sync Transport
 No lifecycle needed:
-
 ```go
-bus := event.New(event.WithSyncTransport())
-bus.Register(handlers...)
-bus.Publish(ctx, evt) // Just works
+processor := event.NewProcessor(transport)
+processor.Publish(ctx, evt) // Just works
 ```
 
 ### Async Transports
-Require Start/Stop:
-
+Standard lifecycle with Run():
 ```go
-bus := event.New(event.WithChannelTransport(100))
-bus.Register(handlers...)
+processor := event.NewProcessor(
+    transport,
+    event.WithWorkers(5),
+    event.WithErrorHandler(errorHandler),
+)
+processor.Register(handlers...)
 
-ctx, cancel := context.WithCancel(context.Background())
-
-go func() {
-    if err := bus.Start(ctx); err != nil {
-        log.Fatal(err)
-    }
-}()
-
-// Publish events...
-bus.Publish(ctx, evt)
-
-// Graceful shutdown
-cancel()
-if err := bus.Stop(); err != nil {
-    log.Error("shutdown error", err)
+// Run() starts workers and blocks
+if err := processor.Run(ctx); err != nil {
+    log.Fatal(err)
 }
 ```
 
 ### errgroup Pattern
 ```go
 g, ctx := errgroup.WithContext(context.Background())
-g.Go(bus.Run(ctx))
-// ...
+
+g.Go(func() error {
+    return processor.Run(ctx)
+})
+
 if err := g.Wait(); err != nil {
     log.Fatal(err)
 }
 ```
 
-## Observability
+## Package Structure
 
-### Built-in Metrics (via middleware)
-- Events published count
-- Handler execution count
-- Handler error count
-- Handler execution duration
-
-### Logging (default middleware)
 ```
-level=INFO msg="event published" event=UserCreated handlers=3
-level=INFO msg="event handler completed" event=UserCreated handler=InvalidateCache duration=5ms
-level=ERROR msg="event handler failed" event=UserCreated handler=NotifyWebhook error="connection timeout"
-```
-
-## Testing Strategies
-
-### Unit Testing (Sync Transport)
-```go
-bus := event.New(event.WithSyncTransport())
-// Register test handlers
-// Publish event
-// Assert synchronously
-```
-
-### Integration Testing (Channel Transport)
-```go
-bus := event.New(event.WithChannelTransport(10))
-go bus.Start(ctx)
-
-bus.Publish(ctx, evt)
-
-// Wait for processing with stats
-stats := bus.Stats()
-require.Eventually(t, func() bool {
-    return stats.EventsProcessed > 0
-}, time.Second, 10*time.Millisecond)
-```
-
-### Mocking
-```go
-type MockEventBus struct {
-    PublishedEvents []any
-}
-
-func (m *MockEventBus) Publish(ctx context.Context, evt any) error {
-    m.PublishedEvents = append(m.PublishedEvents, evt)
-    return nil
-}
+core/event/
+  - publisher.go        // Publisher type (stateless client)
+  - processor.go        // Processor type (active manager)
+  - transport.go        // Transport interfaces
+  - handler.go          // Handler interface, NewHandlerFunc
+  - middleware.go       // Middleware (processor only)
+  - decorators.go       // Handler decorators
+  - sync_transport.go   // Sync transport
+  - channel_transport.go // Async local transport
+  - utils.go            // Helpers
+  - errors.go           // Package errors
+  - doc.go              // Documentation
 ```
 
 ## Configuration Options
 
+**Transport creation**:
 ```go
-event.New(
-    // Transport (required, one of)
-    event.WithSyncTransport(),
-    event.WithChannelTransport(bufferSize),
-    event.WithRedisPubSubTransport(client),
+transport := event.NewSyncTransport()
+transport := event.NewChannelTransport(bufferSize)
+```
 
-    // Error handling
-    event.WithErrorHandler(handler),
+**Publisher** (no options):
+```go
+publisher := event.NewPublisher(transport)
+```
 
-    // Validation
-    event.WithStrictHandlers(true), // error on zero handlers
-
-    // Logging
-    event.WithLogger(logger),
+**Processor options**:
+```go
+processor := event.NewProcessor(
+    transport,
+    event.WithWorkers(5),          // Worker count (processor manages)
+    event.WithMiddleware(...),     // Immutable middleware
+    event.WithErrorHandler(...),   // Error callback (async)
+    event.WithStrictHandlers(true),// Validate zero handlers
+    event.WithLogger(logger),      // Logger
 )
 ```
 
-## Upgrade Path
+## Key Differences from Commands
 
-```go
-// Phase 1: Simple app, sync
-bus := event.New(event.WithSyncTransport())
+| Aspect                | Event                           | Command                    |
+| --------------------- | ------------------------------- | -------------------------- |
+| **Semantic**          | Notification (happened)         | Order (do this)            |
+| **Handlers**          | Many (0+)                       | One (exactly 1)            |
+| **Pattern**           | Fan-out (broadcast)             | Competitive (one executes) |
+| **Missing handler**   | Warning only                    | Error                      |
+| **Duplicate handler** | Allowed                         | Panic                      |
+| **Worker control**    | Processor via WithWorkers()     | Processor via WithWorkers()|
+| **Transport role**    | Passive wire (Subscribe)        | Passive wire (Subscribe)   |
 
-// Phase 2: Async within instance
-bus := event.New(event.WithChannelTransport(100))
+**Shared patterns** (consistent between both):
+- Watermill-inspired architecture (Publisher/Dispatcher, Transport, Processor)
+- Transport is passive wire (Subscribe pattern)
+- Processor manages workers and lifecycle
+- Generic HandlerFunc[T] with reflection
+- Immutable middleware at construction
+- Decorators with Decorate() helper
+- Unified panic recovery
+- Same transport types (Sync, Channel)
 
-// Phase 3: Multi-instance broadcasting
-bus := event.New(event.WithRedisPubSubTransport(client))
-```
+## Best Practices
 
-## Anti-Patterns
+1. **Event types should be self-contained** with all needed data
+2. **Use sync transport for testing** (deterministic)
+3. **Split Publisher and Processor** for async transports
+4. **Publisher is stateless** - just publishes
+5. **Processor manages lifecycle** - use Run(ctx)
+6. **Processor controls workers** via WithWorkers()
+7. **Always provide WithErrorHandler** for async transports
+8. **Configure middleware at construction** (immutable)
+9. **Make handlers idempotent** - events may be delivered multiple times
+10. **Use commands for competitive work**, events for broadcasting
+11. **Transport is passive wire** - Subscribe() provides channel
+12. **Let processor manage workers** - not transport
 
-### ❌ Using Events for Competitive Work
-```go
-// WRONG: Email sent by ALL instances
-OnUserCreated -> SendEmail()
-```
+## Implementation Checklist
 
-**Fix**: Use command bus for competitive work
+**Core types**:
+- [ ] `Publisher` type (stateless client)
+- [ ] `Processor` type (active manager with Run())
+- [ ] Generic `HandlerFunc[T]`
+- [ ] `Handler` interface
 
-### ❌ Depending on Handler Order (Without Documentation)
-```go
-// WRONG: Implicit dependency on execution order
-bus.Register(handler1) // Must run first (undocumented)
-bus.Register(handler2) // Depends on handler1
-```
+**Transport layer** (Watermill pattern):
+- [ ] `PublisherTransport.Dispatch(ctx, name, payload) error`
+- [ ] `ProcessorTransport.Subscribe(ctx) (<-chan envelope, error)` - returns channel
+- [ ] `ProcessorTransport.Close() error`
+- [ ] Sync transport (Subscribe returns nil)
+- [ ] Channel transport (Subscribe returns channel)
 
-**Fix**: Document order dependency or make handlers independent
+**Processor options**:
+- [ ] `WithWorkers(n)` - processor controls workers
+- [ ] `WithMiddleware()` - immutable
+- [ ] `WithErrorHandler()` - async errors
+- [ ] `WithStrictHandlers()` - validation
+- [ ] `WithLogger()`
 
-### ❌ Blocking Operations in Handlers
-```go
-// WRONG: Long-running work blocks other handlers
-func onUserCreated(ctx context.Context, evt UserCreated) error {
-    processImageForHours() // Blocks!
-    return nil
-}
-```
+**Decorators**:
+- [ ] `Decorator` type
+- [ ] Factories: `Retry()`, `Backoff()`, `Timeout()`
+- [ ] Helpers: `WithRetry()`, `WithBackoff()`, `WithTimeout()`
+- [ ] `Decorate(handler, decorators...)`
 
-**Fix**: Publish command for long-running work
+**Lifecycle**:
+- [ ] `Processor.Run(ctx) error` - manages workers, blocks
+- [ ] Graceful shutdown on context cancel
+- [ ] Workers drain events before exit
 
-### ❌ Expecting Synchronous Results
-```go
-// WRONG: Async bus doesn't return handler results
-bus.Publish(ctx, evt)
-result := ??? // No way to get handler result
-```
+**Behavior**:
+- [ ] Unified panic recovery
+- [ ] Allow zero handlers (warn), allow duplicates
+- [ ] FIFO handler execution
+- [ ] Handler isolation (continue on error)
+- [ ] `Stats()` method on Processor
 
-**Fix**: Use sync transport for testing, or use command bus for request-response
-
-## Open Questions
-
-1. Should distributed transport implementations be in this package or separate?
-2. Handler timeout configuration - per-handler or global?
-3. Handler panic recovery strategy?
-4. Should middleware be able to filter/modify events?
-5. Event versioning strategy for schema evolution?
-
-## References
-
-- Event-driven architecture patterns
-- Pub/Sub semantics
-- Fan-out vs competitive patterns
-- Existing patterns: `core/queue`, `core/server`
+**Documentation**:
+- [ ] Comprehensive doc.go (Watermill-inspired)
+- [ ] Black-box tests
+- [ ] Examples for all patterns
