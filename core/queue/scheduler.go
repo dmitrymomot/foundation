@@ -283,9 +283,11 @@ func (s *Scheduler) checkTasksWithWait() {
 func (s *Scheduler) checkTasks(ctx context.Context) {
 	// Get a snapshot of tasks
 	s.mu.RLock()
-	tasks := make([]*scheduledTask, 0, len(s.tasks))
+	i := 0
+	tasks := make([]*scheduledTask, len(s.tasks))
 	for _, task := range s.tasks {
-		tasks = append(tasks, task)
+		tasks[i] = task
+		i++
 	}
 	s.mu.RUnlock()
 
@@ -293,9 +295,12 @@ func (s *Scheduler) checkTasks(ctx context.Context) {
 
 	// Check each task
 	for _, task := range tasks {
+		nextRun := s.calculateNextRun(task, now)
 		if err := s.scheduleTaskIfNeeded(ctx, task, now); err != nil {
 			s.logger.ErrorContext(ctx, "failed to schedule task",
 				slog.String("task_name", task.name),
+				slog.Time("next_run", nextRun),
+				slog.String("schedule", task.schedule.String()),
 				slog.String("error", err.Error()))
 		}
 	}
