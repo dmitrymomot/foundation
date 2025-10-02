@@ -13,4 +13,10 @@ var (
 	// ErrBufferFull is returned by channel transport when the command buffer is full
 	// and cannot accept more commands without blocking.
 	ErrBufferFull = errors.New("command buffer is full")
+
+	// ErrProcessorAlreadyStarted is returned when attempting to start a processor that is already running.
+	ErrProcessorAlreadyStarted = errors.New("processor already started")
+
+	// ErrProcessorNotStarted is returned when attempting to stop a processor that is not running.
+	ErrProcessorNotStarted = errors.New("processor not started")
 )

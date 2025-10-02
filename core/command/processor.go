@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Processor handles commands with lifecycle management.
@@ -22,7 +23,7 @@ import (
 //	    command.WithErrorHandler(errorHandler),
 //	)
 //	processor.Register(command.NewHandlerFunc(createUserHandler))
-//	err := processor.Run(ctx)
+//	err := processor.Start(ctx)
 type Processor struct {
 	handlers     map[string]Handler
 	middleware   []Middleware
@@ -31,6 +32,12 @@ type Processor struct {
 	logger       *slog.Logger
 	workers      int // Number of workers for async transports
 	mu           sync.RWMutex
+
+	// Lifecycle management
+	ctx             context.Context
+	cancel          context.CancelFunc
+	wg              sync.WaitGroup
+	shutdownTimeout time.Duration
 
 	// Stats tracking
 	received  atomic.Uint64
@@ -53,11 +60,12 @@ type ProcessorOption func(*Processor)
 //	)
 func NewProcessor(transport ProcessorTransport, opts ...ProcessorOption) *Processor {
 	p := &Processor{
-		handlers:   make(map[string]Handler),
-		middleware: []Middleware{},
-		transport:  transport,
-		logger:     slog.Default(),
-		workers:    1, // Default to 1 worker
+		handlers:        make(map[string]Handler),
+		middleware:      []Middleware{},
+		transport:       transport,
+		logger:          slog.Default(),
+		workers:         1,                // Default to 1 worker
+		shutdownTimeout: 30 * time.Second, // Default shutdown timeout
 	}
 
 	for _, opt := range opts {
@@ -93,57 +101,146 @@ func (p *Processor) Register(handler Handler) {
 	p.handlers[cmdName] = handler
 }
 
-// Run starts the processor and blocks until the context is cancelled.
+// Start starts the processor and blocks until the context is cancelled or Stop is called.
 // For async transports, this starts workers that consume from the transport's channel.
 // For sync transports, this just blocks (commands execute immediately on dispatch).
-// This method should be called in a goroutine, typically via errgroup.
+// Returns ErrProcessorAlreadyStarted if the processor is already running.
+// Use Stop() for graceful shutdown.
 //
 // Example:
 //
-//	g, ctx := errgroup.WithContext(context.Background())
-//	g.Go(func() error {
-//	    return processor.Run(ctx)
-//	})
-func (p *Processor) Run(ctx context.Context) error {
+//	if err := processor.Start(ctx); err != nil {
+//	    log.Fatal(err)
+//	}
+func (p *Processor) Start(ctx context.Context) error {
+	p.mu.Lock()
+	if p.cancel != nil {
+		p.mu.Unlock()
+		return ErrProcessorAlreadyStarted
+	}
+
+	// Create internal context for lifecycle management
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.mu.Unlock()
+
 	// Get command channel from transport (Watermill Subscribe pattern)
-	ch, err := p.transport.Subscribe(ctx)
+	ch, err := p.transport.Subscribe(p.ctx)
 	if err != nil {
+		p.mu.Lock()
+		p.cancel = nil
+		p.mu.Unlock()
 		return fmt.Errorf("failed to subscribe to transport: %w", err)
 	}
 
 	// Handle sync transport special case (ch == nil)
 	if ch == nil {
-		p.logger.InfoContext(ctx, "processor started (sync mode)")
+		p.logger.InfoContext(p.ctx, "processor started (sync mode)")
 		// Sync transport - just block until context cancelled
-		<-ctx.Done()
-		p.logger.InfoContext(ctx, "processor shutdown complete")
-		return nil
+		<-p.ctx.Done()
+		p.logger.InfoContext(p.ctx, "processor shutdown complete")
+
+		p.mu.Lock()
+		p.cancel = nil
+		p.mu.Unlock()
+		return p.ctx.Err()
 	}
 
 	// Async transport - start workers (Watermill Router pattern)
-	var wg sync.WaitGroup
 	for i := 0; i < p.workers; i++ {
-		wg.Add(1)
-		go p.worker(ctx, ch, &wg)
+		p.wg.Add(1)
+		go p.worker(p.ctx, ch, &p.wg)
 	}
 
-	p.logger.InfoContext(ctx, "processor started",
+	p.logger.InfoContext(p.ctx, "processor started",
 		slog.Int("workers", p.workers))
 
 	// Block until context is cancelled
-	<-ctx.Done()
+	<-p.ctx.Done()
 
 	// Close transport (closes channel)
-	p.logger.InfoContext(ctx, "processor shutting down, draining commands")
+	p.logger.InfoContext(p.ctx, "processor shutting down, draining commands")
 	if err := p.transport.Close(); err != nil {
-		p.logger.ErrorContext(ctx, "error closing transport", slog.Any("error", err))
+		p.logger.ErrorContext(p.ctx, "error closing transport", slog.Any("error", err))
 	}
 
 	// Wait for all workers to finish processing
-	wg.Wait()
-	p.logger.InfoContext(ctx, "processor shutdown complete")
+	p.wg.Wait()
+	p.logger.InfoContext(p.ctx, "processor shutdown complete")
 
-	return nil
+	p.mu.Lock()
+	p.cancel = nil
+	p.mu.Unlock()
+
+	return p.ctx.Err()
+}
+
+// Stop gracefully shuts down the processor with a timeout.
+// Returns an error if the shutdown timeout is exceeded.
+func (p *Processor) Stop() error {
+	p.mu.Lock()
+	if p.cancel == nil {
+		p.mu.Unlock()
+		return ErrProcessorNotStarted
+	}
+
+	cancel := p.cancel
+	p.cancel = nil
+	p.mu.Unlock()
+
+	cancel()
+
+	p.logger.Info("processor stopping, waiting for active workers to complete",
+		slog.Duration("timeout", p.shutdownTimeout))
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), p.shutdownTimeout)
+	defer ctxCancel()
+
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		p.logger.Info("processor stopped cleanly")
+		return nil
+	case <-ctx.Done():
+		p.logger.Warn("processor shutdown timeout exceeded - some commands may be abandoned",
+			slog.Duration("timeout", p.shutdownTimeout))
+		return fmt.Errorf("shutdown timeout exceeded after %s", p.shutdownTimeout)
+	}
+}
+
+// Run provides errgroup compatibility for coordinated lifecycle management.
+// Returns a function that starts the processor, monitors context cancellation,
+// and performs graceful shutdown when the context is cancelled.
+//
+// Example:
+//
+//	g, ctx := errgroup.WithContext(context.Background())
+//	g.Go(processor.Run(ctx))
+func (p *Processor) Run(ctx context.Context) func() error {
+	return func() error {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- p.Start(ctx)
+		}()
+
+		select {
+		case <-ctx.Done():
+			// Context cancelled - perform graceful shutdown
+			_ = p.Stop() // Ignore stop error in normal shutdown
+			<-errCh      // Wait for Start() to exit
+			return nil
+		case err := <-errCh:
+			// Start() returned - check if it's a normal shutdown
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		}
+	}
 }
 
 // worker processes commands from the channel until it's closed.
@@ -296,6 +393,24 @@ func WithErrorHandler(handler func(context.Context, string, error)) ProcessorOpt
 func WithLogger(logger *slog.Logger) ProcessorOption {
 	return func(p *Processor) {
 		p.logger = logger
+	}
+}
+
+// WithShutdownTimeout sets the graceful shutdown timeout for the processor.
+// Default is 30 seconds. If workers don't finish within this timeout,
+// Stop() returns an error but the processor still stops.
+//
+// Example:
+//
+//	processor := command.NewProcessor(
+//	    transport,
+//	    command.WithShutdownTimeout(60 * time.Second),
+//	)
+func WithShutdownTimeout(timeout time.Duration) ProcessorOption {
+	return func(p *Processor) {
+		if timeout > 0 {
+			p.shutdownTimeout = timeout
+		}
 	}
 }
 

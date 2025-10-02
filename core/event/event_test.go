@@ -158,7 +158,7 @@ func TestHandlerFunc_PanicRecovery(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.Error(t, err)
@@ -180,7 +180,7 @@ func TestHandlerFunc_ErrorPropagation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.Error(t, err)
@@ -209,7 +209,7 @@ func TestSyncTransport_BasicExecution(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Small delay to ensure processor is ready
 	time.Sleep(10 * time.Millisecond)
@@ -242,7 +242,7 @@ func TestSyncTransport_MultipleHandlers(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
@@ -258,7 +258,7 @@ func TestSyncTransport_ZeroHandlers(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Should not error with zero handlers (just warning)
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
@@ -286,7 +286,7 @@ func TestSyncTransport_ErrorAggregation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.Error(t, err)
@@ -307,7 +307,7 @@ func TestSyncTransport_ContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Cancel context before dispatch
 	dispatchCtx, dispatchCancel := context.WithCancel(context.Background())
@@ -339,7 +339,7 @@ func TestSyncTransport_ContextPropagation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Small delay to ensure processor is ready
 	time.Sleep(10 * time.Millisecond)
@@ -367,7 +367,7 @@ func TestSyncTransport_ConcurrentCalls(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Publish from multiple goroutines
 	var wg sync.WaitGroup
@@ -406,7 +406,7 @@ func TestChannelTransport_BasicExecution(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123", Message: "test"})
@@ -440,7 +440,7 @@ func TestChannelTransport_BufferFull(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Give processor time to start
 	time.Sleep(50 * time.Millisecond)
@@ -476,7 +476,7 @@ func TestChannelTransport_NonBlockingDispatch(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -497,7 +497,7 @@ func TestChannelTransport_CloseIdempotence(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Close multiple times should not panic
 	require.NotPanics(t, func() {
@@ -523,7 +523,7 @@ func TestChannelTransport_GracefulShutdown(t *testing.T) {
 	processor.Register(handler)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -564,7 +564,7 @@ func TestChannelTransport_ContextPreservation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	dispatchCtx := context.WithValue(context.Background(), key, "async-value")
@@ -608,7 +608,7 @@ func TestPublisher_SyncTransport(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
@@ -632,7 +632,7 @@ func TestPublisher_ChannelTransport(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
@@ -659,7 +659,7 @@ func TestPublisher_EventNameDerivation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Small delay to ensure processor is ready
 	time.Sleep(10 * time.Millisecond)
@@ -681,7 +681,7 @@ func TestProcessor_RegisterAfterRunPanics(t *testing.T) {
 	processor := event.NewProcessor(transport)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Wait for processor to start
 	time.Sleep(50 * time.Millisecond)
@@ -718,7 +718,7 @@ func TestProcessor_MultipleWorkers(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -752,7 +752,7 @@ func TestProcessor_StatsTracking(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -788,7 +788,7 @@ func TestProcessor_ZeroHandlersNormalMode(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -823,7 +823,7 @@ func TestProcessor_ZeroHandlersStrictMode(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
@@ -864,7 +864,7 @@ func TestProcessor_ErrorHandler(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
@@ -899,7 +899,7 @@ func TestProcessor_HandlerIsolation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
@@ -927,7 +927,7 @@ func TestProcessor_PublishConvenience(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Use processor.Publish() convenience method
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
@@ -953,7 +953,7 @@ func TestProcessor_PublishAsyncTransportError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Processor.Publish() works with channel transport (implements PublisherTransport)
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
@@ -990,7 +990,7 @@ func TestMiddleware_LoggingMiddleware(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
@@ -1049,7 +1049,7 @@ func TestMiddleware_MultipleMiddleware(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
@@ -1089,7 +1089,7 @@ func TestMiddleware_AppliedOnceAtRegistration(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Publish multiple times
 	for i := 0; i < 5; i++ {
@@ -1162,7 +1162,7 @@ func TestDecorator_WithRetry(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			go processor.Run(ctx)
+			go processor.Start(ctx)
 
 			err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 
@@ -1206,7 +1206,7 @@ func TestDecorator_WithRetryContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Small delay to ensure processor is ready
 	time.Sleep(10 * time.Millisecond)
@@ -1246,7 +1246,7 @@ func TestDecorator_WithBackoff(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.Error(t, err)
@@ -1292,7 +1292,7 @@ func TestDecorator_WithBackoffContextCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	dispatchCtx, dispatchCancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer dispatchCancel()
@@ -1350,7 +1350,7 @@ func TestDecorator_WithTimeout(t *testing.T) {
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			go processor.Run(ctx)
+			go processor.Start(ctx)
 
 			err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 
@@ -1392,7 +1392,7 @@ func TestDecorator_Decorate(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
@@ -1451,7 +1451,7 @@ func TestIntegration_SyncTransportWorkflow(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1489,7 +1489,7 @@ func TestIntegration_ChannelTransportWorkflow(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1536,8 +1536,8 @@ func TestIntegration_MultipleProcessorsSameTransport(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	go processor1.Run(ctx)
-	go processor2.Run(ctx)
+	go processor1.Start(ctx)
+	go processor2.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1573,7 +1573,7 @@ func TestIntegration_ConcurrentPublishing(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1620,7 +1620,7 @@ func TestIntegration_GracefulShutdownUnderLoad(t *testing.T) {
 	processor.Register(handler)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1654,7 +1654,7 @@ func TestIntegration_StatsConcurrency(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1694,7 +1694,7 @@ func TestIntegration_StatsConcurrency(t *testing.T) {
 // Race Condition Tests
 // =============================================================================
 
-func TestRace_ProcessorRegisterBeforeAfterRun(t *testing.T) {
+func TestRace_ProcessorRegisterBeforeAfterStart(t *testing.T) {
 	t.Parallel()
 
 	transport := event.NewChannelTransport(10)
@@ -1704,15 +1704,15 @@ func TestRace_ProcessorRegisterBeforeAfterRun(t *testing.T) {
 		return nil
 	})
 
-	// Register before Run - should work
+	// Register before Start - should work
 	processor.Register(handler)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	time.Sleep(50 * time.Millisecond)
 
-	// Register after Run - should panic
+	// Register after Start - should panic
 	require.Panics(t, func() {
 		processor.Register(handler)
 	})
@@ -1736,7 +1736,7 @@ func TestRace_SyncTransportConcurrentDispatch(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1762,7 +1762,7 @@ func TestRace_ChannelTransportConcurrentClose(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	// Close from multiple goroutines
 	var wg sync.WaitGroup
@@ -1790,7 +1790,7 @@ func TestRace_StatsCounters(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1843,7 +1843,7 @@ func TestRace_GetHandlersConcurrency(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 
@@ -1882,7 +1882,7 @@ func TestEdgeCase_MultipleRegisterSameEventType(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
@@ -1904,7 +1904,7 @@ func TestEdgeCase_HandlerReturnsNilError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
@@ -1924,7 +1924,7 @@ func TestEdgeCase_PublisherWithOptions(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport, event.WithPublisherLogger(logger))
 
@@ -1955,7 +1955,7 @@ func TestEdgeCase_ProcessorWithAllOptions(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	publisher := event.NewPublisher(transport)
 	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
@@ -2002,11 +2002,254 @@ func TestEdgeCase_MiddlewareImmutability(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go processor.Run(ctx)
+	go processor.Start(ctx)
 
 	err := processor.Publish(context.Background(), TestEvent{ID: "123"})
 	require.NoError(t, err)
 
 	// No way to add more middleware after construction
 	// This is just a documentation test
+}
+
+// =============================================================================
+// Lifecycle Tests
+// =============================================================================
+
+func TestProcessorLifecycle_StartAlreadyStarted(t *testing.T) {
+	t.Parallel()
+
+	transport := event.NewChannelTransport(10)
+	processor := event.NewProcessor(transport)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start first time
+	go processor.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	// Try to start again - should error
+	err := processor.Start(ctx)
+	require.Error(t, err)
+	assert.Equal(t, event.ErrProcessorAlreadyStarted, err)
+}
+
+func TestProcessorLifecycle_StopNotStarted(t *testing.T) {
+	t.Parallel()
+
+	transport := event.NewChannelTransport(10)
+	processor := event.NewProcessor(transport)
+
+	// Try to stop before starting - should error
+	err := processor.Stop()
+	require.Error(t, err)
+	assert.Equal(t, event.ErrProcessorNotStarted, err)
+}
+
+func TestProcessorLifecycle_StopGracefulShutdown(t *testing.T) {
+	t.Parallel()
+
+	var processed atomic.Int32
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt TestEvent) error {
+		time.Sleep(100 * time.Millisecond) // Simulate work
+		processed.Add(1)
+		return nil
+	})
+
+	transport := event.NewChannelTransport(100)
+	processor := event.NewProcessor(transport, event.WithWorkers(2))
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go processor.Start(ctx)
+
+	publisher := event.NewPublisher(transport)
+
+	// Publish events
+	for i := 0; i < 5; i++ {
+		err := publisher.Publish(context.Background(), TestEvent{ID: fmt.Sprintf("%d", i)})
+		require.NoError(t, err)
+	}
+
+	// Give it a moment to start processing
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop gracefully
+	err := processor.Stop()
+	require.NoError(t, err)
+
+	// All events should be processed
+	assert.Equal(t, int32(5), processed.Load())
+}
+
+func TestProcessorLifecycle_StopShutdownTimeout(t *testing.T) {
+	t.Parallel()
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt TestEvent) error {
+		time.Sleep(2 * time.Second) // Longer than shutdown timeout
+		return nil
+	})
+
+	transport := event.NewChannelTransport(10)
+	processor := event.NewProcessor(
+		transport,
+		event.WithWorkers(1),
+		event.WithShutdownTimeout(100*time.Millisecond), // Short timeout
+	)
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go processor.Start(ctx)
+
+	publisher := event.NewPublisher(transport)
+	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
+	require.NoError(t, err)
+
+	// Give it time to start processing
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop should timeout
+	err = processor.Stop()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shutdown timeout exceeded")
+}
+
+func TestProcessorLifecycle_RunErrgroupPattern(t *testing.T) {
+	t.Parallel()
+
+	var executed atomic.Bool
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt TestEvent) error {
+		executed.Store(true)
+		return nil
+	})
+
+	transport := event.NewChannelTransport(10)
+	processor := event.NewProcessor(transport)
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Use errgroup pattern
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- processor.Run(ctx)()
+	}()
+
+	// Give it time to start
+	time.Sleep(50 * time.Millisecond)
+
+	publisher := event.NewPublisher(transport)
+	err := publisher.Publish(context.Background(), TestEvent{ID: "123"})
+	require.NoError(t, err)
+
+	// Wait for processing
+	require.Eventually(t, func() bool {
+		return executed.Load()
+	}, time.Second, 10*time.Millisecond)
+
+	// Cancel context to trigger shutdown
+	cancel()
+
+	// Should shutdown cleanly
+	err = <-errCh
+	require.NoError(t, err)
+}
+
+func TestProcessorLifecycle_RunContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	var processed atomic.Int32
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt TestEvent) error {
+		processed.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		return nil
+	})
+
+	transport := event.NewChannelTransport(100)
+	processor := event.NewProcessor(transport, event.WithWorkers(2))
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- processor.Run(ctx)()
+	}()
+
+	publisher := event.NewPublisher(transport)
+
+	// Publish events
+	for i := 0; i < 10; i++ {
+		err := publisher.Publish(context.Background(), TestEvent{ID: fmt.Sprintf("%d", i)})
+		require.NoError(t, err)
+	}
+
+	// Cancel context to trigger shutdown
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	// Should shutdown cleanly
+	err := <-errCh
+	require.NoError(t, err)
+
+	// All events should be processed
+	assert.Equal(t, int32(10), processed.Load())
+}
+
+func TestProcessorLifecycle_StartStopRestart(t *testing.T) {
+	t.Parallel()
+
+	var count atomic.Int32
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt TestEvent) error {
+		count.Add(1)
+		return nil
+	})
+
+	transport := event.NewChannelTransport(100)
+	processor := event.NewProcessor(transport)
+	processor.Register(handler)
+
+	publisher := event.NewPublisher(transport)
+
+	// First start/stop cycle
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go processor.Start(ctx1)
+	time.Sleep(50 * time.Millisecond)
+
+	err := publisher.Publish(context.Background(), TestEvent{ID: "1"})
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	cancel1()
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, int32(1), count.Load())
+
+	// Second start/stop cycle - processor should be restartable
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+
+	// Create new transport for restart (channel was closed)
+	transport2 := event.NewChannelTransport(100)
+	processor2 := event.NewProcessor(transport2)
+	processor2.Register(handler)
+	publisher2 := event.NewPublisher(transport2)
+
+	go processor2.Start(ctx2)
+	time.Sleep(50 * time.Millisecond)
+
+	err = publisher2.Publish(context.Background(), TestEvent{ID: "2"})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return count.Load() == 2
+	}, time.Second, 10*time.Millisecond)
 }

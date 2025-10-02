@@ -111,7 +111,7 @@ func TestSyncTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{
@@ -131,7 +131,7 @@ func TestSyncTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), InvalidCommand{})
@@ -152,7 +152,7 @@ func TestSyncTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -195,7 +195,7 @@ func TestSyncTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), PanicCommand{})
@@ -246,7 +246,7 @@ func TestSyncTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		// Use Processor.Dispatch() directly for sync transport
 		err := processor.Dispatch(context.Background(), CreateUser{
@@ -275,7 +275,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -309,7 +309,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 
@@ -362,7 +362,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -396,7 +396,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 
@@ -427,9 +427,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		g, ctx := errgroup.WithContext(ctx)
-		g.Go(func() error {
-			return processor.Run(ctx)
-		})
+		g.Go(processor.Run(ctx))
 
 		dispatcher := command.NewDispatcher(transport)
 
@@ -471,7 +469,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		dispatchCtx := context.WithValue(context.Background(), key, expectedValue)
@@ -510,7 +508,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), PanicCommand{})
@@ -545,7 +543,7 @@ func TestChannelTransportExecution(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 
@@ -628,7 +626,7 @@ func TestMiddlewareChaining(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -666,7 +664,7 @@ func TestMiddlewareChaining(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -694,7 +692,7 @@ func TestMiddlewareChaining(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -726,7 +724,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -752,7 +750,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -809,7 +807,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		start := time.Now()
@@ -838,7 +836,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		start := time.Now()
@@ -866,7 +864,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -899,7 +897,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -932,7 +930,7 @@ func TestDecoratorPatterns(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 		err := dispatcher.Dispatch(context.Background(), CreateUser{})
@@ -960,7 +958,7 @@ func TestConcurrentDispatch(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 
@@ -995,7 +993,7 @@ func TestConcurrentDispatch(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		go processor.Run(ctx)
+		go processor.Start(ctx)
 
 		dispatcher := command.NewDispatcher(transport)
 
@@ -1031,4 +1029,247 @@ func (h *testHandler) Name() string {
 
 func (h *testHandler) Handle(ctx context.Context, payload any) error {
 	return h.fn(ctx, payload)
+}
+
+// =============================================================================
+// Lifecycle Tests
+// =============================================================================
+
+func TestProcessorLifecycle_StartAlreadyStarted(t *testing.T) {
+	t.Parallel()
+
+	transport := command.NewChannelTransport(10)
+	processor := command.NewProcessor(transport)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start first time
+	go processor.Start(ctx)
+	time.Sleep(50 * time.Millisecond)
+
+	// Try to start again - should error
+	err := processor.Start(ctx)
+	require.Error(t, err)
+	assert.Equal(t, command.ErrProcessorAlreadyStarted, err)
+}
+
+func TestProcessorLifecycle_StopNotStarted(t *testing.T) {
+	t.Parallel()
+
+	transport := command.NewChannelTransport(10)
+	processor := command.NewProcessor(transport)
+
+	// Try to stop before starting - should error
+	err := processor.Stop()
+	require.Error(t, err)
+	assert.Equal(t, command.ErrProcessorNotStarted, err)
+}
+
+func TestProcessorLifecycle_StopGracefulShutdown(t *testing.T) {
+	t.Parallel()
+
+	var processed atomic.Int32
+
+	handler := command.NewHandlerFunc(func(ctx context.Context, cmd CreateUser) error {
+		time.Sleep(100 * time.Millisecond) // Simulate work
+		processed.Add(1)
+		return nil
+	})
+
+	transport := command.NewChannelTransport(100)
+	processor := command.NewProcessor(transport, command.WithWorkers(2))
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go processor.Start(ctx)
+
+	dispatcher := command.NewDispatcher(transport)
+
+	// Dispatch commands
+	for i := 0; i < 5; i++ {
+		err := dispatcher.Dispatch(context.Background(), CreateUser{Email: fmt.Sprintf("user%d@example.com", i)})
+		require.NoError(t, err)
+	}
+
+	// Give it a moment to start processing
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop gracefully
+	err := processor.Stop()
+	require.NoError(t, err)
+
+	// All commands should be processed
+	assert.Equal(t, int32(5), processed.Load())
+}
+
+func TestProcessorLifecycle_StopShutdownTimeout(t *testing.T) {
+	t.Parallel()
+
+	handler := command.NewHandlerFunc(func(ctx context.Context, cmd CreateUser) error {
+		time.Sleep(2 * time.Second) // Longer than shutdown timeout
+		return nil
+	})
+
+	transport := command.NewChannelTransport(10)
+	processor := command.NewProcessor(
+		transport,
+		command.WithWorkers(1),
+		command.WithShutdownTimeout(100*time.Millisecond), // Short timeout
+	)
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go processor.Start(ctx)
+
+	dispatcher := command.NewDispatcher(transport)
+	err := dispatcher.Dispatch(context.Background(), CreateUser{Email: "test@example.com"})
+	require.NoError(t, err)
+
+	// Give it time to start processing
+	time.Sleep(50 * time.Millisecond)
+
+	// Stop should timeout
+	err = processor.Stop()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "shutdown timeout exceeded")
+}
+
+func TestProcessorLifecycle_RunErrgroupPattern(t *testing.T) {
+	t.Parallel()
+
+	var executed atomic.Bool
+
+	handler := command.NewHandlerFunc(func(ctx context.Context, cmd CreateUser) error {
+		executed.Store(true)
+		return nil
+	})
+
+	transport := command.NewChannelTransport(10)
+	processor := command.NewProcessor(transport)
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Use errgroup pattern
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- processor.Run(ctx)()
+	}()
+
+	// Give it time to start
+	time.Sleep(50 * time.Millisecond)
+
+	dispatcher := command.NewDispatcher(transport)
+	err := dispatcher.Dispatch(context.Background(), CreateUser{Email: "test@example.com"})
+	require.NoError(t, err)
+
+	// Wait for processing
+	require.Eventually(t, func() bool {
+		return executed.Load()
+	}, time.Second, 10*time.Millisecond)
+
+	// Cancel context to trigger shutdown
+	cancel()
+
+	// Should shutdown cleanly
+	err = <-errCh
+	require.NoError(t, err)
+}
+
+func TestProcessorLifecycle_RunContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	var processed atomic.Int32
+
+	handler := command.NewHandlerFunc(func(ctx context.Context, cmd CreateUser) error {
+		processed.Add(1)
+		time.Sleep(50 * time.Millisecond)
+		return nil
+	})
+
+	transport := command.NewChannelTransport(100)
+	processor := command.NewProcessor(transport, command.WithWorkers(2))
+	processor.Register(handler)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- processor.Run(ctx)()
+	}()
+
+	dispatcher := command.NewDispatcher(transport)
+
+	// Dispatch commands
+	for i := 0; i < 10; i++ {
+		err := dispatcher.Dispatch(context.Background(), CreateUser{Email: fmt.Sprintf("user%d@example.com", i)})
+		require.NoError(t, err)
+	}
+
+	// Cancel context to trigger shutdown
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	// Should shutdown cleanly
+	err := <-errCh
+	require.NoError(t, err)
+
+	// All commands should be processed
+	assert.Equal(t, int32(10), processed.Load())
+}
+
+func TestProcessorLifecycle_StartStopRestart(t *testing.T) {
+	t.Parallel()
+
+	var count atomic.Int32
+
+	handler := command.NewHandlerFunc(func(ctx context.Context, cmd CreateUser) error {
+		count.Add(1)
+		return nil
+	})
+
+	transport := command.NewChannelTransport(100)
+	processor := command.NewProcessor(transport)
+	processor.Register(handler)
+
+	dispatcher := command.NewDispatcher(transport)
+
+	// First start/stop cycle
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	go processor.Start(ctx1)
+	time.Sleep(50 * time.Millisecond)
+
+	err := dispatcher.Dispatch(context.Background(), CreateUser{Email: "user1@example.com"})
+	require.NoError(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	cancel1()
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, int32(1), count.Load())
+
+	// Second start/stop cycle - processor should be restartable
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+
+	// Create new transport for restart (channel was closed)
+	transport2 := command.NewChannelTransport(100)
+	processor2 := command.NewProcessor(transport2)
+	processor2.Register(handler)
+	dispatcher2 := command.NewDispatcher(transport2)
+
+	go processor2.Start(ctx2)
+	time.Sleep(50 * time.Millisecond)
+
+	err = dispatcher2.Dispatch(context.Background(), CreateUser{Email: "user2@example.com"})
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return count.Load() == 2
+	}, time.Second, 10*time.Millisecond)
 }
