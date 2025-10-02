@@ -37,9 +37,10 @@ type Processor struct {
 	stuckThreshold        int32
 	logger                *slog.Logger
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	running    atomic.Bool
+	cancelFunc atomic.Value // stores context.CancelFunc
+	done       chan struct{}
+	wg         sync.WaitGroup
 
 	eventsProcessed atomic.Int64
 	eventsFailed    atomic.Int64
@@ -93,25 +94,28 @@ func NewProcessor(opts ...ProcessorOption) *Processor {
 // Start begins processing events from the event source. This is a blocking operation
 // that runs until the context is cancelled. Use Run() for errgroup pattern or call this in a goroutine.
 func (p *Processor) Start(ctx context.Context) error {
-	p.mu.Lock()
-	if p.cancel != nil {
-		p.mu.Unlock()
+	if !p.running.CompareAndSwap(false, true) {
 		return ErrProcessorAlreadyStarted
 	}
+	defer p.running.Store(false)
+
+	p.mu.RLock()
+	hasHandlers := len(p.handlers) > 0 || p.fallbackHandler != nil
+	p.mu.RUnlock()
 
 	if p.eventBus == nil {
-		p.mu.Unlock()
 		return ErrEventSourceNil
 	}
 
-	if len(p.handlers) == 0 && p.fallbackHandler == nil {
-		p.mu.Unlock()
+	if !hasHandlers {
 		return ErrNoHandlers
 	}
 
-	p.ctx, p.cancel = context.WithCancel(ctx)
-	procCtx := p.ctx
-	p.mu.Unlock()
+	procCtx, cancel := context.WithCancel(ctx)
+	p.cancelFunc.Store(cancel)
+	p.done = make(chan struct{})
+
+	defer close(p.done)
 
 	p.logger.InfoContext(procCtx, "event processor started",
 		slog.Int("handler_count", len(p.handlers)))
@@ -136,7 +140,7 @@ func (p *Processor) Start(ctx context.Context) error {
 				continue
 			}
 
-			if err := p.processHandlers(event); err != nil {
+			if err := p.processHandlers(procCtx, event); err != nil {
 				if !errors.Is(err, ErrNoHandlers) {
 					p.logger.ErrorContext(procCtx, "failed to process event",
 						slog.String("event_id", event.ID),
@@ -151,31 +155,30 @@ func (p *Processor) Start(ctx context.Context) error {
 // Stop gracefully shuts down the processor with a timeout.
 // Returns an error if the shutdown timeout is exceeded.
 func (p *Processor) Stop() error {
-	p.mu.Lock()
-	if p.cancel == nil {
-		p.mu.Unlock()
+	if !p.running.Load() {
 		return ErrProcessorNotStarted
 	}
 
-	cancel := p.cancel
-	p.cancel = nil
-	p.mu.Unlock()
-	cancel() // Call after releasing lock to avoid holding lock unnecessarily
+	if cancel := p.cancelFunc.Load(); cancel != nil {
+		cancel.(context.CancelFunc)()
+	}
 
 	p.logger.Info("event processor stopping, waiting for active handlers to complete",
 		slog.Duration("timeout", p.shutdownTimeout))
 
+	<-p.done
+
 	ctx, ctxCancel := context.WithTimeout(context.Background(), p.shutdownTimeout)
 	defer ctxCancel()
 
-	done := make(chan struct{})
+	waitDone := make(chan struct{})
 	go func() {
 		p.wg.Wait()
-		close(done)
+		close(waitDone)
 	}()
 
 	select {
-	case <-done:
+	case <-waitDone:
 		p.logger.Info("event processor stopped cleanly")
 		return nil
 	case <-ctx.Done():
@@ -233,7 +236,7 @@ func (p *Processor) releaseSemaphore() {
 	}
 }
 
-func (p *Processor) processHandlers(event Event) error {
+func (p *Processor) processHandlers(ctx context.Context, event Event) error {
 	p.mu.RLock()
 	handlers, exists := p.handlers[event.Name]
 	fallback := p.fallbackHandler
@@ -248,17 +251,17 @@ func (p *Processor) processHandlers(event Event) error {
 				defer p.wg.Done()
 				defer p.activeEvents.Add(-1)
 
-				ctx := WithStartProcessingTime(WithEventMeta(p.ctx, event), time.Now())
+				handlerCtx := WithStartProcessingTime(WithEventMeta(ctx, event), time.Now())
 
 				// Acquire semaphore slot if limiting is enabled
-				if !p.acquireSemaphore(ctx) {
+				if !p.acquireSemaphore(handlerCtx) {
 					return // Context cancelled while waiting
 				}
 				defer p.releaseSemaphore()
 
 				// Check if processor is shutting down before starting work
 				select {
-				case <-ctx.Done():
+				case <-handlerCtx.Done():
 					return
 				default:
 				}
@@ -266,7 +269,7 @@ func (p *Processor) processHandlers(event Event) error {
 				defer func() {
 					if r := recover(); r != nil {
 						p.eventsFailed.Add(1)
-						p.logger.ErrorContext(ctx, "fallback handler panicked",
+						p.logger.ErrorContext(handlerCtx, "fallback handler panicked",
 							slog.String("event_id", event.ID),
 							slog.String("event_name", event.Name),
 							slog.Any("panic", r))
@@ -275,22 +278,22 @@ func (p *Processor) processHandlers(event Event) error {
 
 				start := time.Now()
 
-				if err := fallback(ctx, event); err != nil {
+				if err := fallback(handlerCtx, event); err != nil {
 					p.eventsFailed.Add(1)
-					p.logger.ErrorContext(ctx, "fallback handler failed",
+					p.logger.ErrorContext(handlerCtx, "fallback handler failed",
 						slog.String("event_id", event.ID),
 						slog.String("event_name", event.Name),
 						slog.Duration("duration", time.Since(start)),
 						slog.String("error", err.Error()))
 				} else {
 					p.eventsProcessed.Add(1)
-					p.logger.DebugContext(ctx, "fallback handler completed",
+					p.logger.DebugContext(handlerCtx, "fallback handler completed",
 						slog.String("event_id", event.ID),
 						slog.String("event_name", event.Name),
 						slog.Duration("duration", time.Since(start)))
 				}
 
-				p.lastActivityAt.Store(time.Now().Unix())
+				p.lastActivityAt.Store(time.Now().UnixNano())
 			}()
 
 			return nil
@@ -306,17 +309,17 @@ func (p *Processor) processHandlers(event Event) error {
 			defer p.wg.Done()
 			defer p.activeEvents.Add(-1)
 
-			ctx := WithStartProcessingTime(WithEventMeta(p.ctx, event), time.Now())
+			handlerCtx := WithStartProcessingTime(WithEventMeta(ctx, event), time.Now())
 
 			// Acquire semaphore slot if limiting is enabled
-			if !p.acquireSemaphore(ctx) {
+			if !p.acquireSemaphore(handlerCtx) {
 				return // Context cancelled while waiting
 			}
 			defer p.releaseSemaphore()
 
 			// Check if processor is shutting down before starting work
 			select {
-			case <-ctx.Done():
+			case <-handlerCtx.Done():
 				return
 			default:
 			}
@@ -324,7 +327,7 @@ func (p *Processor) processHandlers(event Event) error {
 			defer func() {
 				if r := recover(); r != nil {
 					p.eventsFailed.Add(1)
-					p.logger.ErrorContext(ctx, "event handler panicked",
+					p.logger.ErrorContext(handlerCtx, "event handler panicked",
 						slog.String("event_id", event.ID),
 						slog.String("event_name", event.Name),
 						slog.String("handler", handler.EventName()),
@@ -334,9 +337,9 @@ func (p *Processor) processHandlers(event Event) error {
 
 			start := time.Now()
 
-			if err := handler.Handle(ctx, event.Payload); err != nil {
+			if err := handler.Handle(handlerCtx, event.Payload); err != nil {
 				p.eventsFailed.Add(1)
-				p.logger.ErrorContext(ctx, "event handler failed",
+				p.logger.ErrorContext(handlerCtx, "event handler failed",
 					slog.String("event_id", event.ID),
 					slog.String("event_name", event.Name),
 					slog.String("handler", handler.EventName()),
@@ -344,14 +347,14 @@ func (p *Processor) processHandlers(event Event) error {
 					slog.String("error", err.Error()))
 			} else {
 				p.eventsProcessed.Add(1)
-				p.logger.DebugContext(ctx, "event handler completed",
+				p.logger.DebugContext(handlerCtx, "event handler completed",
 					slog.String("event_id", event.ID),
 					slog.String("event_name", event.Name),
 					slog.String("handler", handler.EventName()),
 					slog.Duration("duration", time.Since(start)))
 			}
 
-			p.lastActivityAt.Store(time.Now().Unix())
+			p.lastActivityAt.Store(time.Now().UnixNano())
 		}(h)
 	}
 
@@ -360,21 +363,17 @@ func (p *Processor) processHandlers(event Event) error {
 
 // Stats returns current processor statistics for observability and monitoring.
 func (p *Processor) Stats() ProcessorStats {
-	p.mu.RLock()
-	isRunning := p.cancel != nil
-	p.mu.RUnlock()
-
 	lastActivity := p.lastActivityAt.Load()
 	var lastActivityTime time.Time
 	if lastActivity > 0 {
-		lastActivityTime = time.Unix(lastActivity, 0)
+		lastActivityTime = time.Unix(0, lastActivity)
 	}
 
 	return ProcessorStats{
 		EventsProcessed: p.eventsProcessed.Load(),
 		EventsFailed:    p.eventsFailed.Load(),
 		ActiveEvents:    p.activeEvents.Load(),
-		IsRunning:       isRunning,
+		IsRunning:       p.running.Load(),
 		LastActivityAt:  lastActivityTime,
 	}
 }
