@@ -7,9 +7,14 @@ import (
 )
 
 // getEventName extracts the type name from an event value, unwrapping any pointer types.
-// Note: Returns only the bare type name without package path (e.g., "UserCreated").
-// This means structs with identical names from different packages will have the same event name,
-// potentially causing handler collisions.
+//
+// DESIGN DECISION: Returns only the bare type name without package path (e.g., "UserCreated").
+// This is intentional for simplicity in micro-SaaS applications where package namespacing
+// is not typically needed. Users must ensure unique event type names across their codebase
+// to avoid handler collisions. This trade-off favors simplicity over package isolation.
+//
+// Example: Both users.UserCreated and billing.UserCreated would resolve to "UserCreated"
+// and trigger the same handlers. Use distinct type names if this is not desired.
 func getEventName(v any) string {
 	t := reflect.TypeOf(v)
 
