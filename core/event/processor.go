@@ -39,7 +39,7 @@ type Processor struct {
 
 	running    atomic.Bool
 	cancelFunc atomic.Pointer[context.CancelFunc]
-	done       chan struct{}
+	done       atomic.Pointer[chan struct{}]
 	wg         sync.WaitGroup
 
 	eventsProcessed atomic.Int64
@@ -112,9 +112,10 @@ func (p *Processor) Start(ctx context.Context) error {
 
 	procCtx, cancel := context.WithCancel(ctx)
 	p.cancelFunc.Store(&cancel)
-	p.done = make(chan struct{})
 
-	defer close(p.done)
+	done := make(chan struct{})
+	p.done.Store(&done)
+	defer close(done)
 
 	p.logger.InfoContext(procCtx, "event processor started",
 		slog.Int("handler_count", len(p.handlers)))
@@ -165,7 +166,10 @@ func (p *Processor) Stop() error {
 	p.logger.Info("event processor stopping, waiting for active handlers to complete",
 		slog.Duration("timeout", p.shutdownTimeout))
 
-	<-p.done
+	// Wait for Start() to exit completely
+	if done := p.done.Load(); done != nil {
+		<-*done
+	}
 
 	ctx, ctxCancel := context.WithTimeout(context.Background(), p.shutdownTimeout)
 	defer ctxCancel()
@@ -255,12 +259,6 @@ func (p *Processor) processHandlers(ctx context.Context, event Event) error {
 				}
 				defer p.releaseSemaphore()
 
-				select {
-				case <-handlerCtx.Done():
-					return
-				default:
-				}
-
 				defer func() {
 					if r := recover(); r != nil {
 						p.eventsFailed.Add(1)
@@ -310,12 +308,6 @@ func (p *Processor) processHandlers(ctx context.Context, event Event) error {
 				return
 			}
 			defer p.releaseSemaphore()
-
-			select {
-			case <-handlerCtx.Done():
-				return
-			default:
-			}
 
 			defer func() {
 				if r := recover(); r != nil {
