@@ -57,6 +57,45 @@ func WithShutdownTimeout(d time.Duration) ProcessorOption {
 	}
 }
 
+// WithMaxConcurrentHandlers limits the number of handlers that can execute concurrently.
+// This prevents unbounded goroutine spawning under high load. Set to 0 (default) for unlimited.
+// The limit applies across all event types - total concurrent handlers cannot exceed this value.
+//
+// Example:
+//
+//	processor := event.NewProcessor(
+//	    event.WithEventSource(bus),
+//	    event.WithHandler(handler1, handler2),
+//	    event.WithMaxConcurrentHandlers(100), // Max 100 concurrent handlers
+//	)
+func WithMaxConcurrentHandlers(max int) ProcessorOption {
+	return func(p *Processor) {
+		if max >= 0 {
+			p.maxConcurrentHandlers = max
+		}
+	}
+}
+
+// WithStaleThreshold configures the duration after which a processor with no activity
+// is considered stale in health checks. Default is 5 minutes.
+func WithStaleThreshold(d time.Duration) ProcessorOption {
+	return func(p *Processor) {
+		if d > 0 {
+			p.staleThreshold = d
+		}
+	}
+}
+
+// WithStuckThreshold configures the number of active events that triggers a stuck
+// processor warning in health checks. Default is 1000.
+func WithStuckThreshold(threshold int32) ProcessorOption {
+	return func(p *Processor) {
+		if threshold > 0 {
+			p.stuckThreshold = threshold
+		}
+	}
+}
+
 // WithProcessorLogger configures structured logging for processor operations.
 // Use slog.New(slog.NewTextHandler(io.Discard, nil)) to disable logging.
 func WithProcessorLogger(logger *slog.Logger) ProcessorOption {
