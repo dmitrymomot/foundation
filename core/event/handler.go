@@ -6,33 +6,33 @@ import (
 	"reflect"
 )
 
+// HandlerFunc is a type-safe function signature for processing events of type T.
+type HandlerFunc[T any] func(context.Context, T) error
+
 // Handler processes events.
 // Implementations are registered with a Processor to handle specific event types.
 type Handler interface {
-	// Name returns the event name this handler processes.
-	Name() string
+	// EventName returns the event name this handler processes.
+	EventName() string
 
 	// Handle executes the handler with the given event payload.
 	Handle(ctx context.Context, payload any) error
 }
 
-// HandlerFunc is a generic, type-safe event handler implementation.
-// It uses reflection to automatically derive the event name from the type parameter.
+// NewHandler creates a new handler with a manually specified event name.
+// Use this when you need explicit control over the event name.
 //
 // Example:
 //
-//	type UserCreated struct {
-//	    UserID string
-//	    Email  string
-//	}
-//
-//	handler := event.NewHandlerFunc(func(ctx context.Context, evt UserCreated) error {
-//	    return cache.Invalidate(ctx, evt.UserID)
+//	handler := event.NewHandler("user.created", func(ctx context.Context, payload any) error {
+//	    evt := payload.(UserCreated)
+//	    return processEvent(ctx, evt)
 //	})
-//	// handler.Name() returns "UserCreated"
-type HandlerFunc[T any] struct {
-	name string
-	fn   func(context.Context, T) error
+func NewHandler[T any](eventName string, fn HandlerFunc[T]) Handler {
+	return &handlerFuncWrapper[T]{
+		name: eventName,
+		fn:   fn,
+	}
 }
 
 // NewHandlerFunc creates a new type-safe handler from a function.
@@ -43,23 +43,30 @@ type HandlerFunc[T any] struct {
 //	handler := event.NewHandlerFunc(func(ctx context.Context, evt UserCreated) error {
 //	    return processEvent(ctx, evt)
 //	})
-func NewHandlerFunc[T any](fn func(context.Context, T) error) Handler {
+func NewHandlerFunc[T any](fn HandlerFunc[T]) Handler {
 	var zero T
 	name := getEventName(zero)
 
-	return &HandlerFunc[T]{
+	return &handlerFuncWrapper[T]{
 		name: name,
 		fn:   fn,
 	}
 }
 
-// Name returns the event name this handler processes.
-func (h *HandlerFunc[T]) Name() string {
+// handlerFuncWrapper is a generic, type-safe event handler implementation.
+type handlerFuncWrapper[T any] struct {
+	name string
+	fn   func(context.Context, T) error
+}
+
+// EventName returns the event name this handler processes.
+func (h *handlerFuncWrapper[T]) EventName() string {
 	return h.name
 }
 
-// Handle executes the handler function with type conversion.
-func (h *HandlerFunc[T]) Handle(ctx context.Context, payload any) error {
+// Handle executes the handler function with type-safe payload conversion.
+// Returns an error if the payload cannot be converted to type T.
+func (h *handlerFuncWrapper[T]) Handle(ctx context.Context, payload any) error {
 	typed, ok := payload.(T)
 	if !ok {
 		return fmt.Errorf("invalid payload type: expected %s, got %T", h.name, payload)
@@ -74,16 +81,9 @@ func (h *HandlerFunc[T]) Handle(ctx context.Context, payload any) error {
 func getEventName(v any) string {
 	t := reflect.TypeOf(v)
 
-	// Dereference pointer if needed
-	for t.Kind() == reflect.Ptr {
+	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
-	// Return type name
 	return t.Name()
-}
-
-// getEventNameFromInstance extracts event name from an event instance.
-func getEventNameFromInstance(event any) string {
-	return getEventName(event)
 }
