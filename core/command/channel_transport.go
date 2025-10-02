@@ -2,21 +2,18 @@ package command
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
-	"sync"
 )
 
 // channelTransport executes commands asynchronously using buffered channels.
-// Commands are dispatched to a channel and processed by worker goroutines.
-// Lifecycle is managed via the context passed to WithChannelTransport.
+// This is a passive wire - it just provides a channel for the Processor to consume.
+// The Processor manages workers that read from this channel.
+// It implements both DispatcherTransport and ProcessorTransport interfaces.
 //
 // Characteristics:
 // - Non-blocking dispatch
 // - Buffered channel (configurable size)
+// - Passive wire (no worker management)
 // - Local execution (same process)
-// - Context-based lifecycle management
-// - Error handling via callback
 //
 // Use cases:
 // - Fire-and-forget operations
@@ -24,83 +21,32 @@ import (
 // - Local background tasks
 // - Non-critical async work
 type channelTransport struct {
-	ch           chan envelope
-	getHandler   func(string) (Handler, bool)
-	errorHandler func(context.Context, string, error)
-	logger       *slog.Logger
-	workers      int
-	ctx          context.Context
-	wg           sync.WaitGroup
+	ch chan envelope
 }
 
-// ChannelOption configures the channel transport.
-type ChannelOption func(*channelTransport)
-
-// WithWorkers sets the number of worker goroutines.
-// Default is 1. More workers increase concurrency.
-func WithWorkers(n int) ChannelOption {
-	return func(t *channelTransport) {
-		if n > 0 {
-			t.workers = n
-		}
-	}
-}
-
-// newChannelTransport creates a new channel-based async transport.
-// Workers are started immediately and begin processing commands.
-// When ctx is cancelled, workers drain the channel and exit gracefully.
-func newChannelTransport(
-	ctx context.Context,
-	bufferSize int,
-	getHandler func(string) (Handler, bool),
-	errorHandler func(context.Context, string, error),
-	logger *slog.Logger,
-	opts ...ChannelOption,
-) Transport {
+// NewChannelTransport creates a new channel-based async transport.
+// The Processor manages workers that consume from this channel.
+//
+// Example:
+//
+//	transport := command.NewChannelTransport(100)
+//	processor := command.NewProcessor(transport, command.WithWorkers(5))
+func NewChannelTransport(bufferSize int) *channelTransport {
 	if bufferSize < 1 {
 		panic("command: bufferSize must be at least 1")
 	}
 
-	t := &channelTransport{
-		ch:           make(chan envelope, bufferSize),
-		getHandler:   getHandler,
-		errorHandler: errorHandler,
-		logger:       logger,
-		workers:      1, // default
-		ctx:          ctx,
+	return &channelTransport{
+		ch: make(chan envelope, bufferSize),
 	}
-
-	for _, opt := range opts {
-		opt(t)
-	}
-
-	for i := 0; i < t.workers; i++ {
-		t.wg.Add(1)
-		go t.worker()
-	}
-
-	// Monitor context and close channel when cancelled
-	go func() {
-		<-ctx.Done()
-		close(t.ch)
-		t.logger.Info("channel transport shutting down, draining commands")
-		t.wg.Wait()
-		t.logger.Info("channel transport shutdown complete")
-	}()
-
-	return t
 }
 
 // Dispatch sends a command to the channel for async execution.
-// Validates handler exists before enqueuing (fail fast).
 // Returns ErrBufferFull if the channel buffer is full.
-// Returns ErrHandlerNotFound if no handler is registered.
 // The dispatch context is preserved and passed to the handler.
+//
+// Implements DispatcherTransport interface.
 func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload any) error {
-	if _, exists := t.getHandler(cmdName); !exists {
-		return fmt.Errorf("%w: %s", ErrHandlerNotFound, cmdName)
-	}
-
 	env := envelope{
 		Context: ctx,
 		Name:    cmdName,
@@ -118,34 +64,19 @@ func (t *channelTransport) Dispatch(ctx context.Context, cmdName string, payload
 	}
 }
 
-// worker processes commands from the channel until it's closed.
-func (t *channelTransport) worker() {
-	defer t.wg.Done()
-
-	for env := range t.ch {
-		t.handleCommand(env)
-	}
+// Subscribe returns the command channel for the Processor to consume.
+// The Processor will manage workers that read from this channel.
+//
+// Implements ProcessorTransport interface.
+func (t *channelTransport) Subscribe(ctx context.Context) (<-chan envelope, error) {
+	return t.ch, nil
 }
 
-// handleCommand processes a single command.
-// Panics are caught and converted to errors by safeHandle.
-func (t *channelTransport) handleCommand(env envelope) {
-	handler, exists := t.getHandler(env.Name)
-	if !exists {
-		// Defensive: handler was validated in Dispatch but could be unregistered in a race
-		err := fmt.Errorf("%w: %s", ErrHandlerNotFound, env.Name)
-		t.logger.Error("handler not found",
-			slog.String("command", env.Name))
-
-		if t.errorHandler != nil {
-			t.errorHandler(env.Context, env.Name, err)
-		}
-		return
-	}
-
-	if err := safeHandle(handler, env.Context, env.Payload); err != nil {
-		if t.errorHandler != nil {
-			t.errorHandler(env.Context, env.Name, err)
-		}
-	}
+// Close closes the command channel, signaling workers to stop.
+// Workers managed by the Processor will drain remaining commands before exiting.
+//
+// Implements ProcessorTransport interface.
+func (t *channelTransport) Close() error {
+	close(t.ch)
+	return nil
 }

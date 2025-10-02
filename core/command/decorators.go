@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// Decorator wraps a Handler to add additional functionality.
+// Multiple decorators can be composed using the Decorate helper.
+type Decorator func(Handler) Handler
+
 // decoratorHandler wraps a Handler with additional functionality.
 type decoratorHandler struct {
 	name string
@@ -143,4 +147,68 @@ func WithTimeout(handler Handler, timeout time.Duration) Handler {
 			}
 		},
 	}
+}
+
+// Retry returns a Decorator that wraps a handler with retry logic.
+// This is a factory function for use with the Decorate helper.
+//
+// Example:
+//
+//	handler := command.Decorate(
+//	    command.NewHandlerFunc(apiCallHandler),
+//	    command.Retry(3),
+//	)
+func Retry(maxRetries int) Decorator {
+	return func(h Handler) Handler {
+		return WithRetry(h, maxRetries)
+	}
+}
+
+// Backoff returns a Decorator that wraps a handler with exponential backoff retry logic.
+// This is a factory function for use with the Decorate helper.
+//
+// Example:
+//
+//	handler := command.Decorate(
+//	    command.NewHandlerFunc(sendEmailHandler),
+//	    command.Backoff(5, 100*time.Millisecond, 10*time.Second),
+//	)
+func Backoff(maxRetries int, initialDelay, maxDelay time.Duration) Decorator {
+	return func(h Handler) Handler {
+		return WithBackoff(h, maxRetries, initialDelay, maxDelay)
+	}
+}
+
+// Timeout returns a Decorator that wraps a handler with timeout logic.
+// This is a factory function for use with the Decorate helper.
+//
+// Example:
+//
+//	handler := command.Decorate(
+//	    command.NewHandlerFunc(processImageHandler),
+//	    command.Timeout(30*time.Second),
+//	)
+func Timeout(timeout time.Duration) Decorator {
+	return func(h Handler) Handler {
+		return WithTimeout(h, timeout)
+	}
+}
+
+// Decorate applies multiple decorators to a handler in sequence.
+// Decorators are applied left-to-right (first decorator wraps innermost).
+//
+// Example:
+//
+//	handler := command.Decorate(
+//	    command.NewHandlerFunc(apiCallHandler),
+//	    command.Retry(3),
+//	    command.Backoff(5, 100*time.Millisecond, 10*time.Second),
+//	    command.Timeout(30*time.Second),
+//	)
+//	processor.Register(handler)
+func Decorate(handler Handler, decorators ...Decorator) Handler {
+	for _, decorator := range decorators {
+		handler = decorator(handler)
+	}
+	return handler
 }
