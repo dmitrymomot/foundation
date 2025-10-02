@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 )
@@ -67,11 +68,10 @@ func (h *handlerFuncWrapper[T]) EventName() string {
 // Handle executes the handler function with type-safe payload conversion.
 // Returns an error if the payload cannot be converted to type T.
 func (h *handlerFuncWrapper[T]) Handle(ctx context.Context, payload any) error {
-	typed, ok := payload.(T)
-	if !ok {
-		return fmt.Errorf("invalid payload type: expected %s, got %T", h.name, payload)
+	typed, err := unmarshalPayload[T](payload)
+	if err != nil {
+		return err
 	}
-
 	return h.fn(ctx, typed)
 }
 
@@ -86,4 +86,26 @@ func getEventName(v any) string {
 	}
 
 	return t.Name()
+}
+
+// unmarshalPayload attempts to convert payload to type T.
+// Handles both pre-typed payloads and []byte that needs unmarshaling.
+func unmarshalPayload[T any](payload any) (T, error) {
+	var zero T
+
+	// Already the correct type
+	if v, ok := payload.(T); ok {
+		return v, nil
+	}
+
+	// Unmarshal from bytes
+	if data, ok := payload.([]byte); ok {
+		var evt T
+		if err := json.Unmarshal(data, &evt); err != nil {
+			return zero, fmt.Errorf("failed to unmarshal event: %w", err)
+		}
+		return evt, nil
+	}
+
+	return zero, fmt.Errorf("unexpected payload type: %T", payload)
 }
