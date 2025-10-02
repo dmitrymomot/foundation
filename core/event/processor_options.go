@@ -37,7 +37,7 @@ func WithHandler(handlers ...Handler) ProcessorOption {
 //	)
 func WithEventSource(source eventSource) ProcessorOption {
 	return func(p *Processor) {
-		if p.eventBus != nil {
+		if source != nil {
 			p.eventBus = source
 		}
 	}

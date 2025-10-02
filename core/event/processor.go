@@ -27,7 +27,7 @@ const (
 type Processor struct {
 	handlers        map[string][]Handler
 	eventBus        eventSource
-	fallbackHandler fallbackHandlerFunc
+	fallbackHandler func(context.Context, Event) error
 	mu              sync.RWMutex
 
 	shutdownTimeout       time.Duration
@@ -38,7 +38,7 @@ type Processor struct {
 	logger                *slog.Logger
 
 	running    atomic.Bool
-	cancelFunc atomic.Value // stores context.CancelFunc
+	cancelFunc atomic.Pointer[context.CancelFunc]
 	done       chan struct{}
 	wg         sync.WaitGroup
 
@@ -112,7 +112,7 @@ func (p *Processor) Start(ctx context.Context) error {
 	}
 
 	procCtx, cancel := context.WithCancel(ctx)
-	p.cancelFunc.Store(cancel)
+	p.cancelFunc.Store(&cancel)
 	p.done = make(chan struct{})
 
 	defer close(p.done)
@@ -160,7 +160,7 @@ func (p *Processor) Stop() error {
 	}
 
 	if cancel := p.cancelFunc.Load(); cancel != nil {
-		cancel.(context.CancelFunc)()
+		(*cancel)()
 	}
 
 	p.logger.Info("event processor stopping, waiting for active handlers to complete",

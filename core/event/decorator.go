@@ -40,8 +40,8 @@ type Decorator[T any] func(HandlerFunc[T]) HandlerFunc[T]
 func ApplyDecorators[T any](fn HandlerFunc[T], decorators ...Decorator[T]) HandlerFunc[T] {
 	// Apply decorators from last to first to achieve proper nesting order
 	// This ensures the first decorator in the slice becomes the outermost wrapper
-	for i := len(decorators) - 1; i >= 0; i-- {
-		fn = decorators[i](fn)
+	for i := range len(decorators) {
+		fn = decorators[len(decorators)-1-i](fn)
 	}
 	return fn
 }

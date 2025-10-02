@@ -7,8 +7,6 @@ import (
 // HandlerFunc is a type-safe function signature for processing events of type T.
 type HandlerFunc[T any] func(context.Context, T) error
 
-type fallbackHandlerFunc func(context.Context, Event) error
-
 // Handler processes events.
 // Implementations are registered with a Processor to handle specific event types.
 type Handler interface {
