@@ -7,6 +7,11 @@ import (
 	"sync"
 )
 
+const (
+	// DefaultChannelBufferSize is the default buffer size for the in-memory channel bus.
+	DefaultChannelBufferSize = 100
+)
+
 // ChannelBus implements both eventBus and eventSource interfaces using Go channels.
 // It provides a simple in-memory event bus suitable for single-instance monolithic applications.
 //
@@ -68,7 +73,7 @@ func WithChannelLogger(logger *slog.Logger) ChannelBusOption {
 //	defer bus.Close()
 func NewChannelBus(opts ...ChannelBusOption) *ChannelBus {
 	b := &ChannelBus{
-		ch:     make(chan []byte, 100), // default buffer size
+		ch:     make(chan []byte, DefaultChannelBufferSize),
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		closed: false,
 	}

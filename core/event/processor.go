@@ -12,6 +12,11 @@ import (
 	"time"
 )
 
+const (
+	// DefaultShutdownTimeout is the default timeout for graceful processor shutdown.
+	DefaultShutdownTimeout = 30 * time.Second
+)
+
 // Processor manages event handlers and coordinates event processing.
 type Processor struct {
 	handlers        map[string][]Handler
@@ -56,7 +61,7 @@ type ProcessorStats struct {
 func NewProcessor(opts ...ProcessorOption) *Processor {
 	p := &Processor{
 		handlers:        make(map[string][]Handler),
-		shutdownTimeout: 30 * time.Second,
+		shutdownTimeout: DefaultShutdownTimeout,
 		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
@@ -87,19 +92,19 @@ func (p *Processor) Start(ctx context.Context) error {
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
-	ctx = p.ctx
+	procCtx := p.ctx
 	p.mu.Unlock()
 
-	p.logger.InfoContext(ctx, "event processor started",
+	p.logger.InfoContext(procCtx, "event processor started",
 		slog.Int("handler_count", len(p.handlers)))
 
 	events := p.eventBus.Events()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-procCtx.Done():
 			p.logger.Info("event processor stopping")
-			return ctx.Err()
+			return procCtx.Err()
 		case data, ok := <-events:
 			if !ok {
 				p.logger.Info("event source closed")
@@ -108,14 +113,14 @@ func (p *Processor) Start(ctx context.Context) error {
 
 			var event Event
 			if err := json.Unmarshal(data, &event); err != nil {
-				p.logger.ErrorContext(ctx, "failed to unmarshal event",
+				p.logger.ErrorContext(procCtx, "failed to unmarshal event",
 					slog.String("error", err.Error()))
 				continue
 			}
 
 			if err := p.processHandlers(event); err != nil {
 				if !errors.Is(err, ErrNoHandlers) {
-					p.logger.ErrorContext(ctx, "failed to process event",
+					p.logger.ErrorContext(procCtx, "failed to process event",
 						slog.String("event_id", event.ID),
 						slog.String("event_name", event.Name),
 						slog.String("error", err.Error()))
@@ -136,9 +141,8 @@ func (p *Processor) Stop() error {
 
 	cancel := p.cancel
 	p.cancel = nil
-	p.mu.Unlock()
-
 	cancel()
+	p.mu.Unlock()
 
 	p.logger.Info("event processor stopping, waiting for active handlers to complete",
 		slog.Duration("timeout", p.shutdownTimeout))
