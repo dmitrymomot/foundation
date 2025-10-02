@@ -87,18 +87,19 @@ func (p *Processor) Start(ctx context.Context) error {
 	}
 
 	p.ctx, p.cancel = context.WithCancel(ctx)
+	ctx = p.ctx
 	p.mu.Unlock()
 
-	p.logger.InfoContext(p.ctx, "event processor started",
+	p.logger.InfoContext(ctx, "event processor started",
 		slog.Int("handler_count", len(p.handlers)))
 
 	events := p.eventBus.Events()
 
 	for {
 		select {
-		case <-p.ctx.Done():
+		case <-ctx.Done():
 			p.logger.Info("event processor stopping")
-			return p.ctx.Err()
+			return ctx.Err()
 		case data, ok := <-events:
 			if !ok {
 				p.logger.Info("event source closed")
@@ -107,14 +108,14 @@ func (p *Processor) Start(ctx context.Context) error {
 
 			var event Event
 			if err := json.Unmarshal(data, &event); err != nil {
-				p.logger.ErrorContext(p.ctx, "failed to unmarshal event",
+				p.logger.ErrorContext(ctx, "failed to unmarshal event",
 					slog.String("error", err.Error()))
 				continue
 			}
 
 			if err := p.processHandlers(event); err != nil {
 				if !errors.Is(err, ErrNoHandlers) {
-					p.logger.ErrorContext(p.ctx, "failed to process event",
+					p.logger.ErrorContext(ctx, "failed to process event",
 						slog.String("event_id", event.ID),
 						slog.String("event_name", event.Name),
 						slog.String("error", err.Error()))
@@ -196,14 +197,24 @@ func (p *Processor) processHandlers(event Event) error {
 
 	if !exists || len(handlers) == 0 {
 		if fallback != nil {
-			ctx := WithStartProcessingTime(WithEventMeta(context.Background(), event), time.Now())
-
 			p.wg.Add(1)
 			p.activeEvents.Add(1)
 
 			go func() {
 				defer p.wg.Done()
 				defer p.activeEvents.Add(-1)
+
+				ctx := WithStartProcessingTime(WithEventMeta(p.ctx, event), time.Now())
+
+				defer func() {
+					if r := recover(); r != nil {
+						p.eventsFailed.Add(1)
+						p.logger.ErrorContext(ctx, "fallback handler panicked",
+							slog.String("event_id", event.ID),
+							slog.String("event_name", event.Name),
+							slog.Any("panic", r))
+					}
+				}()
 
 				start := time.Now()
 
@@ -230,8 +241,6 @@ func (p *Processor) processHandlers(event Event) error {
 		return ErrNoHandlers
 	}
 
-	ctx := WithStartProcessingTime(WithEventMeta(context.Background(), event), time.Now())
-
 	for _, h := range handlers {
 		p.wg.Add(1)
 		p.activeEvents.Add(1)
@@ -239,6 +248,19 @@ func (p *Processor) processHandlers(event Event) error {
 		go func(handler Handler) {
 			defer p.wg.Done()
 			defer p.activeEvents.Add(-1)
+
+			ctx := WithStartProcessingTime(WithEventMeta(p.ctx, event), time.Now())
+
+			defer func() {
+				if r := recover(); r != nil {
+					p.eventsFailed.Add(1)
+					p.logger.ErrorContext(ctx, "event handler panicked",
+						slog.String("event_id", event.ID),
+						slog.String("event_name", event.Name),
+						slog.String("handler", handler.EventName()),
+						slog.Any("panic", r))
+				}
+			}()
 
 			start := time.Now()
 
