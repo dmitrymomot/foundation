@@ -20,4 +20,7 @@ var (
 
 	// ErrProcessorNotRunning is returned when the processor is not running during health checks.
 	ErrProcessorNotRunning = errors.New("processor not running")
+
+	// ErrChannelBusClosed is returned when attempting to publish to a closed channel bus.
+	ErrChannelBusClosed = errors.New("channel bus is closed")
 )
