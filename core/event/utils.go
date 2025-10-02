@@ -42,10 +42,10 @@ func unmarshalPayload[T any](payload any) (T, error) {
 		return evt, nil
 	}
 
-	// Handle map[string]interface{} from JSON unmarshaling
+	// Handle map[string]any from JSON unmarshaling
 	// This occurs when Event.Payload (typed as 'any') is unmarshaled from JSON.
 	// The JSON decoder converts the payload into a map since it doesn't know the concrete type.
-	if m, ok := payload.(map[string]interface{}); ok {
+	if m, ok := payload.(map[string]any); ok {
 		data, err := json.Marshal(m)
 		if err != nil {
 			return zero, fmt.Errorf("failed to marshal map payload: %w", err)

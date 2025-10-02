@@ -12,9 +12,9 @@ import (
 
 // TestData represents custom session data for testing
 type TestData struct {
-	Username string                 `json:"username"`
-	Settings map[string]interface{} `json:"settings"`
-	Counter  int                    `json:"counter"`
+	Username string         `json:"username"`
+	Settings map[string]any `json:"settings"`
+	Counter  int            `json:"counter"`
 }
 
 func TestSessionIsAuthenticated(t *testing.T) {

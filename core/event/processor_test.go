@@ -1324,11 +1324,11 @@ func TestProcessor_PayloadUnmarshalError(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	// Create event with payload that can't unmarshal to UserCreated
-	// Use map[string]interface{} with incompatible types
+	// Use map[string]any with incompatible types
 	evt := event.Event{
 		ID:        "123",
 		Name:      "UserCreated",
-		Payload:   map[string]interface{}{"user_id": 12345, "email": []string{"invalid"}}, // Wrong types
+		Payload:   map[string]any{"user_id": 12345, "email": []string{"invalid"}}, // Wrong types
 		CreatedAt: time.Now(),
 	}
 

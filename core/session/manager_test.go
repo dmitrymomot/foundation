@@ -689,7 +689,7 @@ func TestManagerLogout(t *testing.T) {
 			Data: TestData{
 				Username: "testuser",
 				Counter:  10,
-				Settings: map[string]interface{}{
+				Settings: map[string]any{
 					"theme": "dark",
 					"lang":  "en",
 				},
@@ -1570,7 +1570,7 @@ func TestManagerPreserveData(t *testing.T) {
 		originalData := TestData{
 			Username: "user123",
 			Counter:  42,
-			Settings: map[string]interface{}{
+			Settings: map[string]any{
 				"theme":    "dark",
 				"language": "en",
 				"notifs":   true,
@@ -1580,7 +1580,7 @@ func TestManagerPreserveData(t *testing.T) {
 		// Test that we can create a preservation function that works correctly
 		preservationFunc := func(old TestData) TestData {
 			return TestData{
-				Settings: map[string]interface{}{
+				Settings: map[string]any{
 					"theme":    old.Settings["theme"],
 					"language": old.Settings["language"],
 					// notifs intentionally omitted
