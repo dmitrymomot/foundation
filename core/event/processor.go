@@ -58,16 +58,13 @@ func WithHandler(handlers ...Handler) ProcessorOption {
 func (p *Processor) processHandlers(ctx context.Context, eventName string, payload any) error {
 	handlers, exists := p.handlers[eventName]
 	if !exists || len(handlers) == 0 {
-		// No handlers registered for this event
-		return nil
+		return ErrNoHandlers
 	}
 
-	// Create futures for each handler
 	futures := make([]*async.ExecFuture, 0, len(handlers))
 	for _, h := range handlers {
 		futures = append(futures, async.Exec(ctx, payload, h.Handle))
 	}
 
-	// Wait for all handlers to complete
 	return async.ExecAll(futures...)
 }
