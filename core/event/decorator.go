@@ -1,5 +1,10 @@
 package event
 
+import (
+	"context"
+	"time"
+)
+
 // Decorator wraps an event handler function to add cross-cutting functionality.
 // It follows the same pattern as HTTP middleware, allowing decorators to be
 // composed and applied in order.
@@ -39,4 +44,26 @@ func ApplyDecorators[T any](fn HandlerFunc[T], decorators ...Decorator[T]) Handl
 		fn = decorators[i](fn)
 	}
 	return fn
+}
+
+// WithTimeout creates a decorator that enforces a timeout for handler execution.
+// The handler must respect context cancellation for the timeout to work.
+// This decorator can be used to override the processor-level default timeout.
+//
+// Example:
+//
+//	handler := event.NewHandlerFunc(
+//	    event.ApplyDecorators(
+//	        mySlowHandler,
+//	        event.WithTimeout[MyEvent](5*time.Minute),
+//	    ),
+//	)
+func WithTimeout[T any](timeout time.Duration) Decorator[T] {
+	return func(next HandlerFunc[T]) HandlerFunc[T] {
+		return func(ctx context.Context, payload T) error {
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			return next(ctx, payload)
+		}
+	}
 }
