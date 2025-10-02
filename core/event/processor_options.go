@@ -19,9 +19,6 @@ type ProcessorOption func(*Processor)
 //	    event.WithHandler(handler2, handler3),
 //	)
 func WithHandler(handlers ...Handler) ProcessorOption {
-	if len(handlers) == 0 {
-		panic("event: no handlers provided")
-	}
 	return func(p *Processor) {
 		for _, h := range handlers {
 			eventName := h.EventName()
@@ -39,11 +36,10 @@ func WithHandler(handlers ...Handler) ProcessorOption {
 //	    event.WithHandler(handler1),
 //	)
 func WithEventSource(source eventSource) ProcessorOption {
-	if source == nil {
-		panic("event: event source cannot be nil")
-	}
 	return func(p *Processor) {
-		p.eventBus = source
+		if p.eventBus != nil {
+			p.eventBus = source
+		}
 	}
 }
 
