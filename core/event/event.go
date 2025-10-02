@@ -8,10 +8,10 @@ import (
 
 // Event represents a domain event with metadata and payload.
 type Event struct {
-	ID        string    `json:"id"`         // Unique identifier for the event
-	Name      string    `json:"name"`       // Event type name (e.g., "UserCreated")
-	Payload   any       `json:"payload"`    // Event data (can be struct or []byte)
-	CreatedAt time.Time `json:"created_at"` // When the event was created
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	Payload   any       `json:"payload"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // NewEvent creates a new Event with auto-generated ID and timestamp.

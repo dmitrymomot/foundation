@@ -83,7 +83,6 @@ func NewProcessor(opts ...ProcessorOption) *Processor {
 		opt(p)
 	}
 
-	// Initialize semaphore if max concurrent handlers is set
 	if p.maxConcurrentHandlers > 0 {
 		p.handlerSemaphore = make(chan struct{}, p.maxConcurrentHandlers)
 	}
@@ -198,16 +197,16 @@ func (p *Processor) Run(ctx context.Context) func() error {
 			errCh <- p.Start(ctx)
 		}()
 
+		// Wait for either context cancellation (external shutdown signal)
+		// or Start() completion (internal error or event source closed).
 		select {
 		case <-ctx.Done():
-			// Context cancelled - perform graceful shutdown
 			if stopErr := p.Stop(); stopErr != nil {
 				p.logger.Error("graceful shutdown failed", slog.String("error", stopErr.Error()))
 			}
-			<-errCh // Wait for Start() to exit
+			<-errCh
 			return nil
 		case err := <-errCh:
-			// Start() returned - check if it's a normal shutdown
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return nil
 			}
@@ -216,10 +215,9 @@ func (p *Processor) Run(ctx context.Context) func() error {
 	}
 }
 
-// acquireSemaphore blocks until a handler slot is available (if limiting is enabled)
 func (p *Processor) acquireSemaphore(ctx context.Context) bool {
 	if p.handlerSemaphore == nil {
-		return true // No limiting enabled
+		return true
 	}
 	select {
 	case p.handlerSemaphore <- struct{}{}:
@@ -229,7 +227,6 @@ func (p *Processor) acquireSemaphore(ctx context.Context) bool {
 	}
 }
 
-// releaseSemaphore releases a handler slot (if limiting is enabled)
 func (p *Processor) releaseSemaphore() {
 	if p.handlerSemaphore != nil {
 		<-p.handlerSemaphore
@@ -253,13 +250,11 @@ func (p *Processor) processHandlers(ctx context.Context, event Event) error {
 
 				handlerCtx := WithStartProcessingTime(WithEventMeta(ctx, event), time.Now())
 
-				// Acquire semaphore slot if limiting is enabled
 				if !p.acquireSemaphore(handlerCtx) {
-					return // Context cancelled while waiting
+					return
 				}
 				defer p.releaseSemaphore()
 
-				// Check if processor is shutting down before starting work
 				select {
 				case <-handlerCtx.Done():
 					return
@@ -311,13 +306,11 @@ func (p *Processor) processHandlers(ctx context.Context, event Event) error {
 
 			handlerCtx := WithStartProcessingTime(WithEventMeta(ctx, event), time.Now())
 
-			// Acquire semaphore slot if limiting is enabled
 			if !p.acquireSemaphore(handlerCtx) {
-				return // Context cancelled while waiting
+				return
 			}
 			defer p.releaseSemaphore()
 
-			// Check if processor is shutting down before starting work
 			select {
 			case <-handlerCtx.Done():
 				return
@@ -393,7 +386,6 @@ func (p *Processor) Healthcheck(ctx context.Context) error {
 
 	var healthErrors []error
 
-	// Check if processor is stale (no recent activity)
 	if !stats.LastActivityAt.IsZero() {
 		timeSinceActivity := time.Since(stats.LastActivityAt)
 		if timeSinceActivity > p.staleThreshold {
@@ -402,7 +394,6 @@ func (p *Processor) Healthcheck(ctx context.Context) error {
 		}
 	}
 
-	// Check if processor is stuck (too many active events)
 	if stats.ActiveEvents > p.stuckThreshold {
 		healthErrors = append(healthErrors, fmt.Errorf("%w: %d active events (threshold: %d)",
 			ErrProcessorStuck, stats.ActiveEvents, p.stuckThreshold))
