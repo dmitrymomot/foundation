@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,7 +33,7 @@ type Processor struct {
 }
 
 type eventSource interface {
-	Events() <-chan Event
+	Events() <-chan []byte
 }
 
 // ProcessorStats provides observability metrics for monitoring and debugging.
@@ -98,10 +99,17 @@ func (p *Processor) Start(ctx context.Context) error {
 		case <-p.ctx.Done():
 			p.logger.Info("event processor stopping")
 			return p.ctx.Err()
-		case event, ok := <-events:
+		case data, ok := <-events:
 			if !ok {
 				p.logger.Info("event source closed")
 				return nil
+			}
+
+			var event Event
+			if err := json.Unmarshal(data, &event); err != nil {
+				p.logger.ErrorContext(p.ctx, "failed to unmarshal event",
+					slog.String("error", err.Error()))
+				continue
 			}
 
 			if err := p.processHandlers(event); err != nil {
