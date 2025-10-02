@@ -15,6 +15,12 @@ import (
 const (
 	// DefaultShutdownTimeout is the default timeout for graceful processor shutdown.
 	DefaultShutdownTimeout = 30 * time.Second
+
+	// DefaultStaleThreshold is the default time after which a processor is considered stale.
+	DefaultStaleThreshold = 5 * time.Minute
+
+	// DefaultStuckThreshold is the default number of active events that indicates a stuck processor.
+	DefaultStuckThreshold = 1000
 )
 
 // Processor manages event handlers and coordinates event processing.
@@ -24,8 +30,12 @@ type Processor struct {
 	fallbackHandler fallbackHandlerFunc
 	mu              sync.RWMutex
 
-	shutdownTimeout time.Duration
-	logger          *slog.Logger
+	shutdownTimeout       time.Duration
+	maxConcurrentHandlers int
+	handlerSemaphore      chan struct{}
+	staleThreshold        time.Duration
+	stuckThreshold        int32
+	logger                *slog.Logger
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -60,13 +70,21 @@ type ProcessorStats struct {
 //	)
 func NewProcessor(opts ...ProcessorOption) *Processor {
 	p := &Processor{
-		handlers:        make(map[string][]Handler),
-		shutdownTimeout: DefaultShutdownTimeout,
-		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
+		handlers:              make(map[string][]Handler),
+		shutdownTimeout:       DefaultShutdownTimeout,
+		maxConcurrentHandlers: 0, // 0 means unlimited
+		staleThreshold:        DefaultStaleThreshold,
+		stuckThreshold:        DefaultStuckThreshold,
+		logger:                slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	for _, opt := range opts {
 		opt(p)
+	}
+
+	// Initialize semaphore if max concurrent handlers is set
+	if p.maxConcurrentHandlers > 0 {
+		p.handlerSemaphore = make(chan struct{}, p.maxConcurrentHandlers)
 	}
 
 	return p
@@ -141,8 +159,8 @@ func (p *Processor) Stop() error {
 
 	cancel := p.cancel
 	p.cancel = nil
-	cancel()
 	p.mu.Unlock()
+	cancel() // Call after releasing lock to avoid holding lock unnecessarily
 
 	p.logger.Info("event processor stopping, waiting for active handlers to complete",
 		slog.Duration("timeout", p.shutdownTimeout))
@@ -180,8 +198,10 @@ func (p *Processor) Run(ctx context.Context) func() error {
 		select {
 		case <-ctx.Done():
 			// Context cancelled - perform graceful shutdown
-			_ = p.Stop() // Ignore stop error in normal shutdown
-			<-errCh      // Wait for Start() to exit
+			if stopErr := p.Stop(); stopErr != nil {
+				p.logger.Error("graceful shutdown failed", slog.String("error", stopErr.Error()))
+			}
+			<-errCh // Wait for Start() to exit
 			return nil
 		case err := <-errCh:
 			// Start() returned - check if it's a normal shutdown
@@ -190,6 +210,26 @@ func (p *Processor) Run(ctx context.Context) func() error {
 			}
 			return err
 		}
+	}
+}
+
+// acquireSemaphore blocks until a handler slot is available (if limiting is enabled)
+func (p *Processor) acquireSemaphore(ctx context.Context) bool {
+	if p.handlerSemaphore == nil {
+		return true // No limiting enabled
+	}
+	select {
+	case p.handlerSemaphore <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// releaseSemaphore releases a handler slot (if limiting is enabled)
+func (p *Processor) releaseSemaphore() {
+	if p.handlerSemaphore != nil {
+		<-p.handlerSemaphore
 	}
 }
 
@@ -209,6 +249,19 @@ func (p *Processor) processHandlers(event Event) error {
 				defer p.activeEvents.Add(-1)
 
 				ctx := WithStartProcessingTime(WithEventMeta(p.ctx, event), time.Now())
+
+				// Acquire semaphore slot if limiting is enabled
+				if !p.acquireSemaphore(ctx) {
+					return // Context cancelled while waiting
+				}
+				defer p.releaseSemaphore()
+
+				// Check if processor is shutting down before starting work
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 
 				defer func() {
 					if r := recover(); r != nil {
@@ -254,6 +307,19 @@ func (p *Processor) processHandlers(event Event) error {
 			defer p.activeEvents.Add(-1)
 
 			ctx := WithStartProcessingTime(WithEventMeta(p.ctx, event), time.Now())
+
+			// Acquire semaphore slot if limiting is enabled
+			if !p.acquireSemaphore(ctx) {
+				return // Context cancelled while waiting
+			}
+			defer p.releaseSemaphore()
+
+			// Check if processor is shutting down before starting work
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 
 			defer func() {
 				if r := recover(); r != nil {
@@ -315,11 +381,36 @@ func (p *Processor) Stats() ProcessorStats {
 
 // Healthcheck validates that the processor is operational.
 // Returns nil if healthy, or an error describing the health issue.
+// Checks for:
+// - Processor running status
+// - Stale processor (no recent activity)
+// - Stuck processor (too many active events)
 func (p *Processor) Healthcheck(ctx context.Context) error {
 	stats := p.Stats()
 
 	if !stats.IsRunning {
 		return errors.Join(ErrHealthcheckFailed, ErrProcessorNotRunning)
+	}
+
+	var healthErrors []error
+
+	// Check if processor is stale (no recent activity)
+	if !stats.LastActivityAt.IsZero() {
+		timeSinceActivity := time.Since(stats.LastActivityAt)
+		if timeSinceActivity > p.staleThreshold {
+			healthErrors = append(healthErrors, fmt.Errorf("%w: last activity %s ago (threshold: %s)",
+				ErrProcessorStale, timeSinceActivity.Round(time.Second), p.staleThreshold))
+		}
+	}
+
+	// Check if processor is stuck (too many active events)
+	if stats.ActiveEvents > p.stuckThreshold {
+		healthErrors = append(healthErrors, fmt.Errorf("%w: %d active events (threshold: %d)",
+			ErrProcessorStuck, stats.ActiveEvents, p.stuckThreshold))
+	}
+
+	if len(healthErrors) > 0 {
+		return errors.Join(append([]error{ErrHealthcheckFailed}, healthErrors...)...)
 	}
 
 	return nil
