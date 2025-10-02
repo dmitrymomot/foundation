@@ -53,11 +53,11 @@ func EventTime(ctx context.Context) time.Time {
 	return time.Time{}
 }
 
-// WithEventMeta attaches all event metadata (ID, Name, CreateAt) to the context.
+// WithEventMeta attaches all event metadata (ID, Name, CreatedAt) to the context.
 func WithEventMeta(ctx context.Context, event Event) context.Context {
 	ctx = WithEventID(ctx, event.ID)
 	ctx = WithEventName(ctx, event.Name)
-	ctx = WithEventTime(ctx, event.CreateAt)
+	ctx = WithEventTime(ctx, event.CreatedAt)
 	return ctx
 }
 

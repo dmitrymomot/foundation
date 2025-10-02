@@ -68,7 +68,7 @@ func WithProcessorLogger(logger *slog.Logger) ProcessorOption {
 }
 
 // WithFallbackHandler sets a fallback handler for events with no registered handlers.
-// The fallback handler receives the full Event with all metadata (ID, Name, Payload, CreateAt).
+// The fallback handler receives the full Event with all metadata (ID, Name, Payload, CreatedAt).
 // Useful for logging unhandled events, metrics, or forwarding to a dead letter queue.
 //
 // Example:
