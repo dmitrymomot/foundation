@@ -23,4 +23,10 @@ var (
 
 	// ErrChannelBusClosed is returned when attempting to publish to a closed channel bus.
 	ErrChannelBusClosed = errors.New("channel bus is closed")
+
+	// ErrProcessorStale is returned when the processor has not processed events recently.
+	ErrProcessorStale = errors.New("processor is stale - no recent activity")
+
+	// ErrProcessorStuck is returned when the processor has too many active events.
+	ErrProcessorStuck = errors.New("processor may be stuck - too many active events")
 )
