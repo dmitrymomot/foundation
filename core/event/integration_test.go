@@ -77,8 +77,11 @@ func TestUserRegistrationFlow(t *testing.T) {
 		_ = processor.Start(procCtx)
 	}()
 
-	// Give processor time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish user created event
 	err := publisher.Publish(ctx, UserCreated{
@@ -167,7 +170,11 @@ func TestOrderProcessingFlow(t *testing.T) {
 		_ = processor.Start(procCtx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish order
 	err := publisher.Publish(ctx, OrderPlaced{
@@ -182,7 +189,7 @@ func TestOrderProcessingFlow(t *testing.T) {
 	require.Eventually(t, func() bool {
 		stats := processor.Stats()
 		return stats.EventsProcessed == 3
-	}, 2*time.Second, 10*time.Millisecond)
+	}, 2*time.Second, 10*time.Millisecond, "all events should be processed")
 
 	assert.True(t, inventoryValidated.Load())
 	assert.True(t, paymentCharged.Load())
@@ -231,7 +238,11 @@ func TestNotificationSystem(t *testing.T) {
 		_ = processor.Start(procCtx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish different event types
 	require.NoError(t, publisher.Publish(ctx, EmailSent{To: "user1@example.com", Subject: "Welcome"}))
@@ -243,7 +254,7 @@ func TestNotificationSystem(t *testing.T) {
 	require.Eventually(t, func() bool {
 		stats := processor.Stats()
 		return stats.EventsProcessed == 4
-	}, 1*time.Second, 10*time.Millisecond)
+	}, time.Second, 10*time.Millisecond, "all events should be processed")
 
 	assert.Equal(t, int32(2), emailCount.Load())
 	assert.Equal(t, int32(2), smsCount.Load())
@@ -283,7 +294,11 @@ func TestConcurrentPublishing(t *testing.T) {
 		_ = processor.Start(procCtx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish from multiple goroutines
 	const numGoroutines = 10
@@ -307,13 +322,11 @@ func TestConcurrentPublishing(t *testing.T) {
 
 	wg.Wait()
 
-	// Wait for all events to be processed
+	// Wait for all events to be processed completely
 	require.Eventually(t, func() bool {
-		return processedCount.Load() == numGoroutines*eventsPerGoroutine
-	}, 5*time.Second, 50*time.Millisecond)
-
-	// Wait for all handler goroutines to complete
-	time.Sleep(100 * time.Millisecond)
+		stats := processor.Stats()
+		return processedCount.Load() == numGoroutines*eventsPerGoroutine && stats.ActiveEvents == 0
+	}, 5*time.Second, 50*time.Millisecond, "all events should be processed")
 
 	stats := processor.Stats()
 	assert.Equal(t, int64(numGoroutines*eventsPerGoroutine), stats.EventsProcessed, "all events should be processed successfully")
@@ -360,7 +373,11 @@ func TestGracefulShutdown(t *testing.T) {
 		_ = processor.Start(procCtx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish 3 events
 	for i := 0; i < 3; i++ {
@@ -370,8 +387,10 @@ func TestGracefulShutdown(t *testing.T) {
 		}))
 	}
 
-	// Wait for handlers to start
-	time.Sleep(100 * time.Millisecond)
+	// Wait for handlers to start processing
+	require.Eventually(t, func() bool {
+		return handlerStarted.Load() > 0
+	}, time.Second, 10*time.Millisecond, "handlers should start")
 
 	// Stop processor - should wait for handlers to complete
 	err := processor.Stop()

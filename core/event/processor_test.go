@@ -43,8 +43,11 @@ func TestProcessor_StartStop_Lifecycle(t *testing.T) {
 			errCh <- processor.Start(ctx)
 		}()
 
-		// Give processor time to start
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Verify processor is running
 		stats := processor.Stats()
@@ -74,7 +77,7 @@ func TestProcessor_StartStop_Lifecycle(t *testing.T) {
 
 		// Start() should return context.Canceled
 		err := <-errCh
-		assert.True(t, errors.Is(err, context.Canceled))
+		assert.ErrorIs(t, err, context.Canceled)
 	})
 }
 
@@ -100,13 +103,16 @@ func TestProcessor_DoubleStart(t *testing.T) {
 		_ = processor.Start(ctx)
 	}()
 
-	// Give processor time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Attempt to start again
 	err := processor.Start(ctx)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, event.ErrProcessorAlreadyStarted))
+	assert.ErrorIs(t, err, event.ErrProcessorAlreadyStarted)
 
 	// Cleanup
 	require.NoError(t, processor.Stop())
@@ -130,7 +136,7 @@ func TestProcessor_StopBeforeStart(t *testing.T) {
 	// Attempt to stop without starting
 	err := processor.Stop()
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, event.ErrProcessorNotStarted))
+	assert.ErrorIs(t, err, event.ErrProcessorNotStarted)
 }
 
 func TestProcessor_NoEventSource(t *testing.T) {
@@ -148,7 +154,7 @@ func TestProcessor_NoEventSource(t *testing.T) {
 	ctx := context.Background()
 	err := processor.Start(ctx)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, event.ErrEventSourceNil))
+	assert.ErrorIs(t, err, event.ErrEventSourceNil)
 }
 
 func TestProcessor_NoHandlers(t *testing.T) {
@@ -165,7 +171,7 @@ func TestProcessor_NoHandlers(t *testing.T) {
 	ctx := context.Background()
 	err := processor.Start(ctx)
 	require.Error(t, err)
-	assert.True(t, errors.Is(err, event.ErrNoHandlers))
+	assert.ErrorIs(t, err, event.ErrNoHandlers)
 }
 
 func TestProcessor_NoHandlers_WithFallback(t *testing.T) {
@@ -193,7 +199,11 @@ func TestProcessor_NoHandlers_WithFallback(t *testing.T) {
 		_ = processor.Start(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish event
 	publisher := event.NewPublisher(bus)
@@ -202,8 +212,10 @@ func TestProcessor_NoHandlers_WithFallback(t *testing.T) {
 		Email:  "test@example.com",
 	}))
 
-	// Wait for processing
-	time.Sleep(50 * time.Millisecond)
+	// Wait for fallback to be called
+	require.Eventually(t, func() bool {
+		return fallbackCalled.Load()
+	}, time.Second, 10*time.Millisecond, "fallback should be called")
 
 	// Verify fallback was called
 	assert.True(t, fallbackCalled.Load())
@@ -253,7 +265,11 @@ func TestProcessor_ConcurrencyControl(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish many events
 		publisher := event.NewPublisher(bus)
@@ -264,8 +280,11 @@ func TestProcessor_ConcurrencyControl(t *testing.T) {
 			}))
 		}
 
-		// Wait for processing
-		time.Sleep(500 * time.Millisecond)
+		// Wait for all events to be processed
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.EventsProcessed == 10
+		}, 2*time.Second, 50*time.Millisecond, "all events should be processed")
 
 		// Verify concurrency limit was respected
 		assert.LessOrEqual(t, maxObserved.Load(), int32(maxConcurrent),
@@ -309,7 +328,11 @@ func TestProcessor_ConcurrencyControl(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish many events
 		publisher := event.NewPublisher(bus)
@@ -321,8 +344,10 @@ func TestProcessor_ConcurrencyControl(t *testing.T) {
 			}))
 		}
 
-		// Wait for processing to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for processing to achieve high concurrency
+		require.Eventually(t, func() bool {
+			return maxObserved.Load() > int32(5)
+		}, 2*time.Second, 10*time.Millisecond, "should achieve high concurrency")
 
 		// With unlimited concurrency, we should see many concurrent handlers
 		assert.Greater(t, maxObserved.Load(), int32(5),
@@ -358,7 +383,11 @@ func TestProcessor_ShutdownTimeout(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish event
 		publisher := event.NewPublisher(bus)
@@ -367,8 +396,11 @@ func TestProcessor_ShutdownTimeout(t *testing.T) {
 			Email:  "test@example.com",
 		}))
 
-		// Give handler time to start
-		time.Sleep(50 * time.Millisecond)
+		// Wait for handler to start processing
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.ActiveEvents > 0
+		}, time.Second, 10*time.Millisecond, "handler should start processing")
 
 		// Stop should timeout
 		err := processor.Stop()
@@ -399,7 +431,11 @@ func TestProcessor_ShutdownTimeout(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish event
 		publisher := event.NewPublisher(bus)
@@ -408,8 +444,11 @@ func TestProcessor_ShutdownTimeout(t *testing.T) {
 			Email:  "test@example.com",
 		}))
 
-		// Give handler time to start
-		time.Sleep(50 * time.Millisecond)
+		// Wait for handler to start processing
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.ActiveEvents > 0
+		}, time.Second, 10*time.Millisecond, "handler should start processing")
 
 		// Stop should succeed
 		err := processor.Stop()
@@ -442,7 +481,11 @@ func TestProcessor_Run_ErrgroupPattern(t *testing.T) {
 		errCh <- processor.Run(ctx)()
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish event
 	publisher := event.NewPublisher(bus)
@@ -451,7 +494,10 @@ func TestProcessor_Run_ErrgroupPattern(t *testing.T) {
 		Email:  "test@example.com",
 	}))
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for event to be processed
+	require.Eventually(t, func() bool {
+		return handledCount.Load() == 1
+	}, time.Second, 10*time.Millisecond, "event should be processed")
 
 	// Cancel context to trigger shutdown
 	cancel()
@@ -487,7 +533,11 @@ func TestProcessor_Stats(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Initial stats
 		stats := processor.Stats()
@@ -504,7 +554,11 @@ func TestProcessor_Stats(t *testing.T) {
 			}))
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		// Wait for all events to be processed
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.EventsProcessed == 5
+		}, 2*time.Second, 10*time.Millisecond, "all events should be processed")
 
 		// Verify stats
 		stats = processor.Stats()
@@ -536,7 +590,11 @@ func TestProcessor_Stats(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish events
 		publisher := event.NewPublisher(bus)
@@ -547,7 +605,11 @@ func TestProcessor_Stats(t *testing.T) {
 			}))
 		}
 
-		time.Sleep(100 * time.Millisecond)
+		// Wait for all events to fail
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.EventsFailed == 3
+		}, 2*time.Second, 10*time.Millisecond, "all events should fail")
 
 		// Verify stats
 		stats := processor.Stats()
@@ -582,7 +644,11 @@ func TestProcessor_Stats(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish event
 		publisher := event.NewPublisher(bus)
@@ -602,7 +668,10 @@ func TestProcessor_Stats(t *testing.T) {
 		close(block)
 
 		// Wait for completion
-		time.Sleep(50 * time.Millisecond)
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.ActiveEvents == 0
+		}, time.Second, 10*time.Millisecond, "active events should return to zero")
 
 		// Active events should be back to zero
 		stats = processor.Stats()
@@ -635,7 +704,11 @@ func TestProcessor_Healthcheck(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish event to create activity
 		publisher := event.NewPublisher(bus)
@@ -644,7 +717,11 @@ func TestProcessor_Healthcheck(t *testing.T) {
 			Email:  "test@example.com",
 		}))
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for event to be processed
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.EventsProcessed == 1
+		}, time.Second, 10*time.Millisecond, "event should be processed")
 
 		// Health check should pass
 		err := processor.Healthcheck(ctx)
@@ -673,8 +750,8 @@ func TestProcessor_Healthcheck(t *testing.T) {
 		// Don't start processor
 		err := processor.Healthcheck(ctx)
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, event.ErrHealthcheckFailed))
-		assert.True(t, errors.Is(err, event.ErrProcessorNotRunning))
+		assert.ErrorIs(t, err, event.ErrHealthcheckFailed)
+		assert.ErrorIs(t, err, event.ErrProcessorNotRunning)
 	})
 
 	t.Run("stale processor", func(t *testing.T) {
@@ -687,12 +764,12 @@ func TestProcessor_Healthcheck(t *testing.T) {
 			return nil
 		})
 
-		// Note: lastActivityAt uses Unix() which only has second precision
-		// so we need a threshold > 1 second to avoid flaky tests
+		// Use a short stale threshold for faster testing
+		staleThreshold := 200 * time.Millisecond
 		processor := event.NewProcessor(
 			event.WithEventSource(bus),
 			event.WithHandler(handler),
-			event.WithStaleThreshold(2*time.Second),
+			event.WithStaleThreshold(staleThreshold),
 		)
 
 		ctx := context.Background()
@@ -709,25 +786,24 @@ func TestProcessor_Healthcheck(t *testing.T) {
 			Email:  "test@example.com",
 		}))
 
-		// Wait a short time for processing
-		time.Sleep(50 * time.Millisecond)
-
-		// Verify event was processed
-		stats := processor.Stats()
-		require.Equal(t, int64(1), stats.EventsProcessed, "event should be processed")
+		// Wait for processing to complete
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.EventsProcessed == 1
+		}, time.Second, 10*time.Millisecond, "event should be processed")
 
 		// Should be healthy right after processing
 		err := processor.Healthcheck(ctx)
 		require.NoError(t, err, "processor should be healthy after recent activity")
 
-		// Now wait past the stale threshold (2 seconds)
-		time.Sleep(3 * time.Second)
+		// Wait past the stale threshold
+		time.Sleep(staleThreshold + 100*time.Millisecond)
 
 		// Should now be stale
 		err = processor.Healthcheck(ctx)
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, event.ErrHealthcheckFailed))
-		assert.True(t, errors.Is(err, event.ErrProcessorStale))
+		assert.ErrorIs(t, err, event.ErrHealthcheckFailed)
+		assert.ErrorIs(t, err, event.ErrProcessorStale)
 
 		require.NoError(t, processor.Stop())
 	})
@@ -756,7 +832,11 @@ func TestProcessor_Healthcheck(t *testing.T) {
 			_ = processor.Start(ctx)
 		}()
 
-		time.Sleep(50 * time.Millisecond)
+		// Wait for processor to start
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.IsRunning
+		}, time.Second, 10*time.Millisecond, "processor should start")
 
 		// Publish multiple events that will block
 		publisher := event.NewPublisher(bus)
@@ -767,14 +847,17 @@ func TestProcessor_Healthcheck(t *testing.T) {
 			}))
 		}
 
-		// Wait for handlers to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for handlers to start processing (stuck)
+		require.Eventually(t, func() bool {
+			stats := processor.Stats()
+			return stats.ActiveEvents >= 3
+		}, 2*time.Second, 10*time.Millisecond, "handlers should start processing")
 
 		// Should be stuck
 		err := processor.Healthcheck(ctx)
 		require.Error(t, err)
-		assert.True(t, errors.Is(err, event.ErrHealthcheckFailed))
-		assert.True(t, errors.Is(err, event.ErrProcessorStuck))
+		assert.ErrorIs(t, err, event.ErrHealthcheckFailed)
+		assert.ErrorIs(t, err, event.ErrProcessorStuck)
 
 		// Unblock
 		close(block)
@@ -818,7 +901,11 @@ func TestProcessor_MultipleHandlersPerEvent(t *testing.T) {
 		_ = processor.Start(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish single event
 	publisher := event.NewPublisher(bus)
@@ -827,7 +914,10 @@ func TestProcessor_MultipleHandlersPerEvent(t *testing.T) {
 		Email:  "test@example.com",
 	}))
 
-	time.Sleep(100 * time.Millisecond)
+	// Wait for all handlers to be called
+	require.Eventually(t, func() bool {
+		return handler1Count.Load() == 1 && handler2Count.Load() == 1 && handler3Count.Load() == 1
+	}, 2*time.Second, 10*time.Millisecond, "all handlers should be called")
 
 	// All handlers should have been called
 	assert.Equal(t, int32(1), handler1Count.Load())
@@ -873,7 +963,11 @@ func TestProcessor_HandlerContext(t *testing.T) {
 		_ = processor.Start(ctx)
 	}()
 
-	time.Sleep(50 * time.Millisecond)
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
 
 	// Publish event
 	publisher := event.NewPublisher(bus)
@@ -887,7 +981,7 @@ func TestProcessor_HandlerContext(t *testing.T) {
 	require.Eventually(t, func() bool {
 		stats := processor.Stats()
 		return stats.EventsProcessed == 1
-	}, time.Second, 10*time.Millisecond)
+	}, time.Second, 10*time.Millisecond, "event should be processed")
 
 	// Verify context values
 	mu.Lock()
@@ -1344,6 +1438,272 @@ func TestProcessor_PayloadUnmarshalError(t *testing.T) {
 	stats := processor.Stats()
 	assert.Equal(t, int64(0), stats.EventsProcessed, "should not process events with unmarshal errors")
 	assert.Equal(t, int64(1), stats.EventsFailed, "should track failed events")
+
+	require.NoError(t, processor.Stop())
+}
+
+// TestProcessor_StatsRaceCondition tests concurrent Stats() calls during heavy processing
+// This test verifies that atomic counters are properly synchronized
+func TestProcessor_StatsRaceCondition(t *testing.T) {
+	t.Parallel()
+
+	bus := event.NewChannelBus()
+	defer bus.Close()
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt UserCreated) error {
+		time.Sleep(10 * time.Millisecond)
+		return nil
+	})
+
+	processor := event.NewProcessor(
+		event.WithEventSource(bus),
+		event.WithHandler(handler),
+		event.WithMaxConcurrentHandlers(10),
+	)
+
+	ctx := context.Background()
+	go func() {
+		_ = processor.Start(ctx)
+	}()
+
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
+
+	publisher := event.NewPublisher(bus)
+
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Stats reader goroutine 1
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			stats := processor.Stats()
+			// Verify stats are consistent
+			assert.GreaterOrEqual(t, stats.EventsProcessed+stats.EventsFailed, int64(0))
+		}
+	}()
+
+	// Stats reader goroutine 2
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 1000; i++ {
+			_ = processor.Stats()
+		}
+	}()
+
+	// Event publisher goroutine
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 100; i++ {
+			_ = publisher.Publish(ctx, UserCreated{
+				UserID: fmt.Sprintf("user-%d", i),
+				Email:  "test@example.com",
+			})
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	wg.Wait()
+
+	// Wait for all events to complete
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.EventsProcessed == 100 && stats.ActiveEvents == 0
+	}, 5*time.Second, 50*time.Millisecond, "all events should complete")
+
+	require.NoError(t, processor.Stop())
+}
+
+// TestProcessor_SemaphoreCleanupOnShutdown tests that handler goroutines blocked on
+// semaphore are properly cleaned up during shutdown
+func TestProcessor_SemaphoreCleanupOnShutdown(t *testing.T) {
+	t.Parallel()
+
+	bus := event.NewChannelBus(event.WithBufferSize(100))
+	defer bus.Close()
+
+	started := make(chan struct{}, 50)
+	block := make(chan struct{})
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt UserCreated) error {
+		started <- struct{}{}
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return nil
+	})
+
+	processor := event.NewProcessor(
+		event.WithEventSource(bus),
+		event.WithHandler(handler),
+		event.WithMaxConcurrentHandlers(2),
+		event.WithShutdownTimeout(1*time.Second),
+	)
+
+	ctx := context.Background()
+	go func() {
+		_ = processor.Start(ctx)
+	}()
+
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
+
+	// Publish many events (more than semaphore allows)
+	publisher := event.NewPublisher(bus)
+	for i := 0; i < 10; i++ {
+		require.NoError(t, publisher.Publish(ctx, UserCreated{
+			UserID: fmt.Sprintf("user-%d", i),
+			Email:  "test@example.com",
+		}))
+	}
+
+	// Wait for some handlers to start
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("handlers should start")
+		}
+	}
+
+	// Stop while others are waiting on semaphore
+	// This should not hang - handlers should be cancelled
+	err := processor.Stop()
+	require.NoError(t, err)
+
+	// All goroutines should have cleaned up
+	stats := processor.Stats()
+	assert.Equal(t, int32(0), stats.ActiveEvents, "all goroutines should be cleaned up")
+}
+
+// TestProcessor_ConcurrentStop tests that concurrent Stop() calls are safe
+func TestProcessor_ConcurrentStop(t *testing.T) {
+	t.Parallel()
+
+	bus := event.NewChannelBus()
+	defer bus.Close()
+
+	handler := event.NewHandlerFunc(func(ctx context.Context, evt UserCreated) error {
+		time.Sleep(100 * time.Millisecond)
+		return nil
+	})
+
+	processor := event.NewProcessor(
+		event.WithEventSource(bus),
+		event.WithHandler(handler),
+	)
+
+	ctx := context.Background()
+	go func() {
+		_ = processor.Start(ctx)
+	}()
+
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
+
+	// Publish an event to keep processor busy
+	publisher := event.NewPublisher(bus)
+	require.NoError(t, publisher.Publish(ctx, UserCreated{
+		UserID: "test",
+		Email:  "test@example.com",
+	}))
+
+	// Call Stop() concurrently from multiple goroutines
+	var wg sync.WaitGroup
+	errors := make([]error, 5)
+
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errors[idx] = processor.Stop()
+		}(i)
+	}
+
+	wg.Wait()
+
+	// At least one Stop() should succeed, others may get "not started" error
+	successCount := 0
+	for _, err := range errors {
+		if err == nil {
+			successCount++
+		} else {
+			// Should be "not started" error for subsequent calls
+			assert.ErrorIs(t, err, event.ErrProcessorNotStarted)
+		}
+	}
+
+	assert.GreaterOrEqual(t, successCount, 1, "at least one Stop() should succeed")
+
+	// Processor should be stopped
+	stats := processor.Stats()
+	assert.False(t, stats.IsRunning)
+}
+
+// TestProcessor_FallbackHandlerPanic tests that panics in fallback handler are recovered
+func TestProcessor_FallbackHandlerPanic(t *testing.T) {
+	t.Parallel()
+
+	bus := event.NewChannelBus()
+	defer bus.Close()
+
+	var fallbackCalled atomic.Bool
+
+	// Fallback handler that panics
+	fallback := func(ctx context.Context, evt event.Event) error {
+		fallbackCalled.Store(true)
+		panic("fallback panic")
+	}
+
+	processor := event.NewProcessor(
+		event.WithEventSource(bus),
+		event.WithFallbackHandler(fallback),
+		// No regular handlers, so all events go to fallback
+	)
+
+	ctx := context.Background()
+	go func() {
+		_ = processor.Start(ctx)
+	}()
+
+	// Wait for processor to start
+	require.Eventually(t, func() bool {
+		stats := processor.Stats()
+		return stats.IsRunning
+	}, time.Second, 10*time.Millisecond, "processor should start")
+
+	// Publish event
+	publisher := event.NewPublisher(bus)
+	require.NoError(t, publisher.Publish(ctx, UserCreated{
+		UserID: "test",
+		Email:  "test@example.com",
+	}))
+
+	// Wait for fallback to be called
+	require.Eventually(t, func() bool {
+		return fallbackCalled.Load()
+	}, time.Second, 10*time.Millisecond, "fallback should be called")
+
+	// Give time for panic recovery
+	time.Sleep(100 * time.Millisecond)
+
+	// Processor should still be running after panic recovery
+	stats := processor.Stats()
+	assert.True(t, stats.IsRunning, "processor should still be running after fallback panic")
+	assert.Equal(t, int64(0), stats.EventsProcessed, "panic should not count as processed")
+	assert.Equal(t, int64(1), stats.EventsFailed, "panic should count as failed")
 
 	require.NoError(t, processor.Stop())
 }

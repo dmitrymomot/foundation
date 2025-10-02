@@ -696,6 +696,7 @@ func TestChannelBus_Integration(t *testing.T) {
 		t.Parallel()
 
 		bus := event.NewChannelBus(event.WithBufferSize(100))
+		defer bus.Close()
 
 		ctx := context.Background()
 		numEvents := 50
