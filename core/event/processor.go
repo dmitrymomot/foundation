@@ -2,28 +2,61 @@ package event
 
 import (
 	"context"
-
-	"github.com/dmitrymomot/foundation/pkg/async"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
-// Processor holds registered event handlers grouped by event name.
+// Processor manages event handlers and coordinates event processing.
 type Processor struct {
-	handlers map[string][]Handler
+	handlers        map[string][]Handler
+	eventBus        eventSource
+	fallbackHandler fallbackHandlerFunc
+	mu              sync.RWMutex
+
+	shutdownTimeout time.Duration
+	logger          *slog.Logger
+
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	eventsProcessed atomic.Int64
+	eventsFailed    atomic.Int64
+	activeEvents    atomic.Int32
+	lastActivityAt  atomic.Int64
 }
 
-// ProcessorOption configures a Processor.
-type ProcessorOption func(*Processor)
+type eventSource interface {
+	Events() <-chan Event
+}
+
+// ProcessorStats provides observability metrics for monitoring and debugging.
+type ProcessorStats struct {
+	EventsProcessed int64
+	EventsFailed    int64
+	ActiveEvents    int32
+	IsRunning       bool
+	LastActivityAt  time.Time
+}
 
 // NewProcessor creates a new event processor with the given options.
 //
 // Example:
 //
 //	processor := event.NewProcessor(
+//	    event.WithEventSource(bus),
 //	    event.WithHandler(handler1, handler2),
 //	)
 func NewProcessor(opts ...ProcessorOption) *Processor {
 	p := &Processor{
-		handlers: make(map[string][]Handler),
+		handlers:        make(map[string][]Handler),
+		shutdownTimeout: 30 * time.Second,
+		logger:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 
 	for _, opt := range opts {
@@ -33,38 +66,227 @@ func NewProcessor(opts ...ProcessorOption) *Processor {
 	return p
 }
 
-// WithHandler registers one or more handlers with the processor.
-// Multiple handlers can be registered for the same event type.
-// Handlers are automatically wrapped with all registered middlewares.
-//
-// Example:
-//
-//	processor := event.NewProcessor(
-//	    event.WithHandler(handler1),
-//	    event.WithHandler(handler2, handler3),
-//	)
-func WithHandler(handlers ...Handler) ProcessorOption {
-	return func(p *Processor) {
-		for _, h := range handlers {
-			eventName := h.EventName()
-			p.handlers[eventName] = append(p.handlers[eventName], h)
+// Start begins processing events from the event source. This is a blocking operation
+// that runs until the context is cancelled. Use Run() for errgroup pattern or call this in a goroutine.
+func (p *Processor) Start(ctx context.Context) error {
+	p.mu.Lock()
+	if p.cancel != nil {
+		p.mu.Unlock()
+		return ErrProcessorAlreadyStarted
+	}
+
+	if p.eventBus == nil {
+		p.mu.Unlock()
+		return ErrEventSourceNil
+	}
+
+	if len(p.handlers) == 0 && p.fallbackHandler == nil {
+		p.mu.Unlock()
+		return ErrNoHandlers
+	}
+
+	p.ctx, p.cancel = context.WithCancel(ctx)
+	p.mu.Unlock()
+
+	p.logger.InfoContext(p.ctx, "event processor started",
+		slog.Int("handler_count", len(p.handlers)))
+
+	events := p.eventBus.Events()
+
+	for {
+		select {
+		case <-p.ctx.Done():
+			p.logger.Info("event processor stopping")
+			return p.ctx.Err()
+		case event, ok := <-events:
+			if !ok {
+				p.logger.Info("event source closed")
+				return nil
+			}
+
+			if err := p.processHandlers(event); err != nil {
+				if !errors.Is(err, ErrNoHandlers) {
+					p.logger.ErrorContext(p.ctx, "failed to process event",
+						slog.String("event_id", event.ID),
+						slog.String("event_name", event.Name),
+						slog.String("error", err.Error()))
+				}
+			}
 		}
 	}
 }
 
-// processHandlers processes all registered handlers for the given event name and payload.
-// It executes all handlers concurrently using the async package and waits for all to complete.
-// Returns an error if any handler fails.
-func (p *Processor) processHandlers(ctx context.Context, eventName string, payload any) error {
-	handlers, exists := p.handlers[eventName]
+// Stop gracefully shuts down the processor with a timeout.
+// Returns an error if the shutdown timeout is exceeded.
+func (p *Processor) Stop() error {
+	p.mu.Lock()
+	if p.cancel == nil {
+		p.mu.Unlock()
+		return ErrProcessorNotStarted
+	}
+
+	cancel := p.cancel
+	p.cancel = nil
+	p.mu.Unlock()
+
+	cancel()
+
+	p.logger.Info("event processor stopping, waiting for active handlers to complete",
+		slog.Duration("timeout", p.shutdownTimeout))
+
+	ctx, ctxCancel := context.WithTimeout(context.Background(), p.shutdownTimeout)
+	defer ctxCancel()
+
+	done := make(chan struct{})
+	go func() {
+		p.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		p.logger.Info("event processor stopped cleanly")
+		return nil
+	case <-ctx.Done():
+		p.logger.Warn("event processor shutdown timeout exceeded - some handlers may be abandoned",
+			slog.Duration("timeout", p.shutdownTimeout))
+		return fmt.Errorf("shutdown timeout exceeded after %s", p.shutdownTimeout)
+	}
+}
+
+// Run provides errgroup compatibility for coordinated lifecycle management.
+// Returns a function that starts the processor, monitors context cancellation,
+// and performs graceful shutdown when the context is cancelled.
+func (p *Processor) Run(ctx context.Context) func() error {
+	return func() error {
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- p.Start(ctx)
+		}()
+
+		select {
+		case <-ctx.Done():
+			// Context cancelled - perform graceful shutdown
+			_ = p.Stop() // Ignore stop error in normal shutdown
+			<-errCh      // Wait for Start() to exit
+			return nil
+		case err := <-errCh:
+			// Start() returned - check if it's a normal shutdown
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+func (p *Processor) processHandlers(event Event) error {
+	p.mu.RLock()
+	handlers, exists := p.handlers[event.Name]
+	fallback := p.fallbackHandler
+	p.mu.RUnlock()
+
 	if !exists || len(handlers) == 0 {
+		if fallback != nil {
+			ctx := WithStartProcessingTime(WithEventMeta(context.Background(), event), time.Now())
+
+			p.wg.Add(1)
+			p.activeEvents.Add(1)
+
+			go func() {
+				defer p.wg.Done()
+				defer p.activeEvents.Add(-1)
+
+				start := time.Now()
+
+				if err := fallback(ctx, event); err != nil {
+					p.eventsFailed.Add(1)
+					p.logger.ErrorContext(ctx, "fallback handler failed",
+						slog.String("event_id", event.ID),
+						slog.String("event_name", event.Name),
+						slog.Duration("duration", time.Since(start)),
+						slog.String("error", err.Error()))
+				} else {
+					p.eventsProcessed.Add(1)
+					p.logger.DebugContext(ctx, "fallback handler completed",
+						slog.String("event_id", event.ID),
+						slog.String("event_name", event.Name),
+						slog.Duration("duration", time.Since(start)))
+				}
+
+				p.lastActivityAt.Store(time.Now().Unix())
+			}()
+
+			return nil
+		}
 		return ErrNoHandlers
 	}
 
-	futures := make([]*async.ExecFuture, 0, len(handlers))
+	ctx := WithStartProcessingTime(WithEventMeta(context.Background(), event), time.Now())
+
 	for _, h := range handlers {
-		futures = append(futures, async.Exec(ctx, payload, h.Handle))
+		p.wg.Add(1)
+		p.activeEvents.Add(1)
+
+		go func(handler Handler) {
+			defer p.wg.Done()
+			defer p.activeEvents.Add(-1)
+
+			start := time.Now()
+
+			if err := handler.Handle(ctx, event.Payload); err != nil {
+				p.eventsFailed.Add(1)
+				p.logger.ErrorContext(ctx, "event handler failed",
+					slog.String("event_id", event.ID),
+					slog.String("event_name", event.Name),
+					slog.String("handler", handler.EventName()),
+					slog.Duration("duration", time.Since(start)),
+					slog.String("error", err.Error()))
+			} else {
+				p.eventsProcessed.Add(1)
+				p.logger.DebugContext(ctx, "event handler completed",
+					slog.String("event_id", event.ID),
+					slog.String("event_name", event.Name),
+					slog.String("handler", handler.EventName()),
+					slog.Duration("duration", time.Since(start)))
+			}
+
+			p.lastActivityAt.Store(time.Now().Unix())
+		}(h)
 	}
 
-	return async.ExecAll(futures...)
+	return nil
+}
+
+// Stats returns current processor statistics for observability and monitoring.
+func (p *Processor) Stats() ProcessorStats {
+	p.mu.RLock()
+	isRunning := p.cancel != nil
+	p.mu.RUnlock()
+
+	lastActivity := p.lastActivityAt.Load()
+	var lastActivityTime time.Time
+	if lastActivity > 0 {
+		lastActivityTime = time.Unix(lastActivity, 0)
+	}
+
+	return ProcessorStats{
+		EventsProcessed: p.eventsProcessed.Load(),
+		EventsFailed:    p.eventsFailed.Load(),
+		ActiveEvents:    p.activeEvents.Load(),
+		IsRunning:       isRunning,
+		LastActivityAt:  lastActivityTime,
+	}
+}
+
+// Healthcheck validates that the processor is operational.
+// Returns nil if healthy, or an error describing the health issue.
+func (p *Processor) Healthcheck(ctx context.Context) error {
+	stats := p.Stats()
+
+	if !stats.IsRunning {
+		return errors.Join(ErrHealthcheckFailed, ErrProcessorNotRunning)
+	}
+
+	return nil
 }
