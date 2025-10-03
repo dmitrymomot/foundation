@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"foundation-basic-example/db/repository"
 
+	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
 	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/google/uuid"
 )
