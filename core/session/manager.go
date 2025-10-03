@@ -30,7 +30,7 @@ func NewManager[Data any](store Store[Data], ttl, touchInterval time.Duration) *
 
 // New creates and persists a new anonymous session with empty data.
 func (m *Manager[Data]) New(ctx context.Context) (Session[Data], error) {
-	token, err := generateToken()
+	token, err := GenerateToken()
 	if err != nil {
 		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -106,7 +106,7 @@ func (m *Manager[Data]) Save(ctx context.Context, sess Session[Data]) error {
 // Authenticate converts an anonymous session to an authenticated session.
 // Rotates the session token for security, preserves session data, and extends expiration.
 func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], userID uuid.UUID) (Session[Data], error) {
-	newToken, err := generateToken()
+	newToken, err := GenerateToken()
 	if err != nil {
 		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -136,7 +136,7 @@ func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], us
 // Logout converts an authenticated session to an anonymous session.
 // Rotates the session token for security, clears user ID and data, and extends expiration.
 func (m *Manager[Data]) Logout(ctx context.Context, sess Session[Data]) (Session[Data], error) {
-	newToken, err := generateToken()
+	newToken, err := GenerateToken()
 	if err != nil {
 		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
 	}
@@ -191,4 +191,32 @@ func (m *Manager[Data]) touch(ctx context.Context, sess Session[Data]) (Session[
 func (m *Manager[Data]) CleanupExpired(ctx context.Context) error {
 	_, err := m.store.DeleteExpired(ctx)
 	return err
+}
+
+// GetTTL returns the session time-to-live duration.
+func (m *Manager[Data]) GetTTL() time.Duration {
+	return m.ttl
+}
+
+// Refresh rotates the session token and extends expiration.
+// Unlike Authenticate/Logout, this keeps the same session ID (critical for audit logs).
+func (m *Manager[Data]) Refresh(ctx context.Context, sess Session[Data]) (Session[Data], error) {
+	if sess.UserID == uuid.Nil {
+		return Session[Data]{}, ErrNotAuthenticated
+	}
+
+	newToken, err := GenerateToken()
+	if err != nil {
+		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
+	}
+
+	sess.Token = newToken
+	sess.ExpiresAt = time.Now().Add(m.ttl)
+	sess.UpdatedAt = time.Now()
+
+	if err := m.store.Save(ctx, &sess); err != nil {
+		return Session[Data]{}, fmt.Errorf("failed to save refreshed session: %w", err)
+	}
+
+	return sess, nil
 }
