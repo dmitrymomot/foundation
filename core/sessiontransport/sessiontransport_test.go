@@ -1254,7 +1254,7 @@ func TestJWT_Refresh(t *testing.T) {
 		ctx := context.Background()
 		userID := uuid.New()
 		oldSessionToken := "old-session-token"
-		oldID := uuid.New()
+		sessionID := uuid.New()
 
 		// Create old refresh token
 		oldClaims := jwt.StandardClaims{
@@ -1268,7 +1268,7 @@ func TestJWT_Refresh(t *testing.T) {
 		require.NoError(t, err)
 
 		oldSess := session.Session[string]{
-			ID:        oldID,
+			ID:        sessionID,
 			Token:     oldSessionToken,
 			UserID:    userID,
 			Data:      "user-data",
@@ -1277,23 +1277,25 @@ func TestJWT_Refresh(t *testing.T) {
 			UpdatedAt: time.Now().Add(-1 * time.Hour),
 		}
 
+		// New implementation: GetByToken (triggers touch/save) + Save (refresh)
 		store.On("GetByToken", ctx, oldSessionToken).Return(oldSess, nil)
-		// GetByToken triggers a touch/save of the old session first
+		// First Save is from touch (extends expiration, keeps same token)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
-			return s.ID == oldID && s.Token == oldSessionToken && s.UserID == userID
+			return s.ID == sessionID && s.Token == oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
+		// Second Save is from refresh (rotates token, extends expiration)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
-			return s.UserID == uuid.Nil
-		})).Return(nil).Once()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
-			return s.UserID == userID && s.Token != oldSessionToken
+			return s.ID == sessionID && s.Token != oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
 
 		sess, tokens, err := transport.Refresh(ctx, oldRefreshToken)
 
 		require.NoError(t, err)
+
+		// Verify session ID stays the same (critical for audit logs)
+		assert.Equal(t, sessionID, sess.ID)
+
+		// Verify token is rotated
 		assert.NotEqual(t, oldSessionToken, sess.Token)
 		assert.Equal(t, userID, sess.UserID)
 
@@ -1364,7 +1366,7 @@ func TestJWT_Refresh(t *testing.T) {
 		store.AssertExpectations(t)
 	})
 
-	t.Run("returns error when logout fails", func(t *testing.T) {
+	t.Run("returns error when refresh fails", func(t *testing.T) {
 		t.Parallel()
 
 		store := &MockStore[string]{}
@@ -1398,9 +1400,9 @@ func TestJWT_Refresh(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		expectedErr := errors.New("logout failed")
+		expectedErr := errors.New("save failed")
 		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
-		store.On("Delete", ctx, sessionID).Return(expectedErr)
+		store.On("Save", ctx, mock.Anything).Return(expectedErr)
 
 		_, _, err = transport.Refresh(ctx, refreshToken)
 
@@ -1408,6 +1410,50 @@ func TestJWT_Refresh(t *testing.T) {
 		assert.ErrorIs(t, err, expectedErr)
 
 		store.AssertExpectations(t)
+	})
+
+	t.Run("returns ErrNotAuthenticated for anonymous session", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 24*time.Hour, 5*time.Minute)
+		jwtSvc := newTestJWTService(t)
+		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		sessionToken := "anonymous-session-token"
+
+		claims := jwt.StandardClaims{
+			ID:        sessionToken,
+			Subject:   uuid.Nil.String(), // Anonymous
+			Issuer:    "test-app",
+			IssuedAt:  time.Now().Unix(),
+			ExpiresAt: time.Now().Add(24 * time.Hour).Unix(),
+		}
+		refreshToken, err := jwtSvc.Generate(claims)
+		require.NoError(t, err)
+
+		anonymousSess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     sessionToken,
+			UserID:    uuid.Nil, // Anonymous session
+			Data:      "cart-data",
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		store.On("GetByToken", ctx, sessionToken).Return(anonymousSess, nil)
+
+		_, _, err = transport.Refresh(ctx, refreshToken)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, session.ErrNotAuthenticated)
+
+		store.AssertExpectations(t)
+		// Save should not be called for anonymous sessions
+		store.AssertNotCalled(t, "Save", mock.Anything, mock.Anything)
 	})
 }
 
@@ -2119,7 +2165,7 @@ func TestJWTTransport_Integration_TokenRotation(t *testing.T) {
 
 		ctx := context.Background()
 		userID := uuid.New()
-		oldSessionID := uuid.New()
+		sessionID := uuid.New()
 		oldSessionToken := "old-session-token-12345"
 
 		// Create old refresh token
@@ -2134,7 +2180,7 @@ func TestJWTTransport_Integration_TokenRotation(t *testing.T) {
 		require.NoError(t, err)
 
 		oldSess := session.Session[string]{
-			ID:        oldSessionID,
+			ID:        sessionID,
 			Token:     oldSessionToken,
 			UserID:    userID,
 			Data:      "user-data",
@@ -2143,26 +2189,23 @@ func TestJWTTransport_Integration_TokenRotation(t *testing.T) {
 			UpdatedAt: time.Now().Add(-1 * time.Hour),
 		}
 
+		// New implementation: GetByToken (triggers touch/save) + Save (refresh)
 		store.On("GetByToken", ctx, oldSessionToken).Return(oldSess, nil)
-		// GetByToken triggers a touch/save of the old session first
+		// First Save is from touch (extends expiration, keeps same token)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
-			return s.ID == oldSessionID && s.Token == oldSessionToken && s.UserID == userID
+			return s.ID == sessionID && s.Token == oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
+		// Second Save is from refresh (rotates token, extends expiration)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
-			// First save is for anonymous session after logout
-			return s.UserID == uuid.Nil
-		})).Return(nil).Once()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
-			// Second save is for new authenticated session
-			return s.UserID == userID && s.Token != oldSessionToken && s.ID != oldSessionID
+			return s.ID == sessionID && s.Token != oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
 
 		newSess, newTokens, err := transport.Refresh(ctx, oldRefreshToken)
 
 		require.NoError(t, err)
-		assert.NotEqual(t, oldSessionID, newSess.ID)
+
+		// Session ID should stay the same (critical for audit logs)
+		assert.Equal(t, sessionID, newSess.ID)
 		assert.NotEqual(t, oldSessionToken, newSess.Token)
 		assert.Equal(t, userID, newSess.UserID)
 

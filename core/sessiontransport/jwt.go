@@ -121,25 +121,18 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.S
 		return empty, emptyPair, err
 	}
 
-	// Rotate session (create new session with new token, delete old)
-	// This is similar to logout->authenticate but preserves user
-	userID := sess.UserID
-	newSess, err := j.manager.Logout(ctx, sess)
+	// Refresh rotates token while keeping same session ID (critical for audit logs)
+	refreshedSess, err := j.manager.Refresh(ctx, sess)
 	if err != nil {
 		return empty, emptyPair, err
 	}
 
-	newSess, err = j.manager.Authenticate(ctx, newSess, userID)
+	pair, err := j.generateTokenPair(refreshedSess)
 	if err != nil {
 		return empty, emptyPair, err
 	}
 
-	pair, err := j.generateTokenPair(newSess)
-	if err != nil {
-		return empty, emptyPair, err
-	}
-
-	return newSess, pair, nil
+	return refreshedSess, pair, nil
 }
 
 // Logout user and delete session.
