@@ -1,0 +1,181 @@
+// Package session provides pure business logic for managing user sessions with generic data storage.
+//
+// This package handles session lifecycle without any HTTP knowledge - HTTP integration
+// is handled separately by the sessiontransport package. Sessions can be anonymous
+// (guest users) or authenticated (logged-in users), with seamless conversion between states.
+//
+// # Key Features
+//
+// - Generic Data type for custom session data structures
+// - Anonymous sessions with UserID = uuid.Nil
+// - Seamless conversion from anonymous to authenticated sessions
+// - Token rotation on authentication/logout (prevents session fixation attacks)
+// - Touch mechanism to extend active sessions without forcing updates on every request
+// - Separate ID and Token: ID is stable (for foreign keys), Token rotates (security)
+// - Clean separation of concerns following session system design principles
+//
+// # Session Structure
+//
+// A Session contains:
+//   - ID: Stable identifier for database foreign keys, rotates on auth/logout
+//   - Token: Cryptographically secure token for authentication, rotates on auth/logout
+//   - UserID: uuid.Nil for anonymous, actual UUID for authenticated sessions
+//   - Data: Generic type parameter for custom session data
+//   - ExpiresAt: Session expiration timestamp
+//   - CreatedAt: Session creation timestamp
+//   - UpdatedAt: Last modification timestamp
+//
+// # Manager Operations
+//
+// The Manager handles session lifecycle:
+//   - New: Create anonymous session
+//   - GetByID: Retrieve session by stable ID
+//   - GetByToken: Retrieve session by authentication token
+//   - Save: Update session data
+//   - Authenticate: Convert anonymous session to authenticated (rotates token)
+//   - Logout: Convert authenticated session to anonymous (rotates token)
+//   - Delete: Remove session by ID
+//   - CleanupExpired: Remove expired sessions (run periodically)
+//
+// # Store Interface
+//
+// The Store interface defines persistence requirements:
+//   - GetByID: Retrieve by session ID
+//   - GetByToken: Retrieve by authentication token
+//   - Save: Persist session (upsert)
+//   - Delete: Remove session by ID
+//   - DeleteExpired: Cleanup expired sessions
+//
+// Implementations must handle concurrent access safely.
+//
+// # Security Considerations
+//
+// Token Rotation: Both Authenticate and Logout rotate the session token by:
+//  1. Generating a new cryptographically secure token
+//  2. Deleting the old session
+//  3. Creating a new session with new ID and token
+//
+// This prevents session fixation attacks where an attacker sets a known session
+// identifier before authentication.
+//
+// Touch Mechanism: Sessions are extended only when touchInterval has elapsed since
+// the last update, reducing write operations while maintaining session activity.
+//
+// # Basic Usage
+//
+//	import (
+//		"context"
+//		"time"
+//
+//		"github.com/dmitrymomot/foundation/core/session"
+//		"github.com/google/uuid"
+//	)
+//
+//	// Define custom session data
+//	type SessionData struct {
+//		Theme      string
+//		Language   string
+//		ShoppingCart []string
+//	}
+//
+//	// Create manager with a store implementation
+//	store := NewYourStoreImplementation()
+//	mgr := session.NewManager[SessionData](
+//		store,
+//		24*time.Hour,     // TTL: 24 hours
+//		5*time.Minute,    // Touch interval: extend only if >5min since last update
+//	)
+//
+//	ctx := context.Background()
+//
+//	// Create anonymous session (for guest users)
+//	sess, err := mgr.New(ctx)
+//	if err != nil {
+//		// handle error
+//	}
+//
+//	// Update session data
+//	sess.Data.Theme = "dark"
+//	sess.Data.Language = "en"
+//	if err := mgr.Save(ctx, sess); err != nil {
+//		// handle error
+//	}
+//
+//	// Retrieve session by token (e.g., from cookie)
+//	retrieved, err := mgr.GetByToken(ctx, sess.Token)
+//	if err != nil {
+//		// handle error
+//	}
+//
+//	// Authenticate session (user logs in)
+//	userID := uuid.New()
+//	authenticated, err := mgr.Authenticate(ctx, sess, userID)
+//	if err != nil {
+//		// handle error
+//	}
+//	// authenticated.Token is different (rotated for security)
+//	// authenticated.ID is different (new session)
+//	// authenticated.UserID == userID
+//	// authenticated.Data preserved from anonymous session
+//
+//	// Logout session (user logs out)
+//	anonymous, err := mgr.Logout(ctx, authenticated)
+//	if err != nil {
+//		// handle error
+//	}
+//	// anonymous.Token is different (rotated for security)
+//	// anonymous.ID is different (new session)
+//	// anonymous.UserID == uuid.Nil
+//	// anonymous.Data is cleared
+//
+//	// Delete session
+//	if err := mgr.Delete(ctx, sess.ID); err != nil {
+//		// handle error
+//	}
+//
+// # Periodic Cleanup
+//
+// Run periodic cleanup to prevent session table growth:
+//
+//	import "time"
+//
+//	// Run cleanup every hour
+//	ticker := time.NewTicker(1 * time.Hour)
+//	defer ticker.Stop()
+//
+//	for range ticker.C {
+//		if err := mgr.CleanupExpired(ctx); err != nil {
+//			// handle error
+//		}
+//	}
+//
+// # Error Handling
+//
+// The package defines standard errors:
+//   - ErrExpired: Session has expired
+//   - ErrNotFound: Session not found in store
+//   - ErrNotAuthenticated: Authentication failed
+//
+// Example error handling:
+//
+//	sess, err := mgr.GetByToken(ctx, token)
+//	if err != nil {
+//		switch {
+//		case errors.Is(err, session.ErrExpired):
+//			// Session expired, create new anonymous session
+//		case errors.Is(err, session.ErrNotFound):
+//			// Session not found, create new anonymous session
+//		default:
+//			// Handle other errors
+//		}
+//	}
+//
+// # Design Principles
+//
+// This package follows clean separation principles:
+//   - No HTTP knowledge (use sessiontransport for HTTP integration)
+//   - Simple, straightforward code without tricks
+//   - Clear responsibilities: business logic only
+//   - Type-safe generic data storage
+//   - Security-first approach with token rotation
+package session
