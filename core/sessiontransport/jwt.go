@@ -135,7 +135,7 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.S
 	return refreshedSess, pair, nil
 }
 
-// Logout user and delete session.
+// Logout converts authenticated session to anonymous (preserves cart/preferences).
 func (j *JWT[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	sess, err := j.Load(ctx, r)
 	if err != nil {
@@ -145,7 +145,8 @@ func (j *JWT[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *http.R
 		return err
 	}
 
-	return j.manager.Delete(ctx, sess.ID)
+	_, err = j.manager.Logout(ctx, sess)
+	return err
 }
 
 // Delete session from store.

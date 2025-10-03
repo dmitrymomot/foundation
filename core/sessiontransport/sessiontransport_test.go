@@ -1460,7 +1460,7 @@ func TestJWT_Refresh(t *testing.T) {
 func TestJWT_Logout(t *testing.T) {
 	t.Parallel()
 
-	t.Run("deletes session from store", func(t *testing.T) {
+	t.Run("converts to anonymous session", func(t *testing.T) {
 		t.Parallel()
 
 		store := &MockStore[string]{}
@@ -1501,6 +1501,7 @@ func TestJWT_Logout(t *testing.T) {
 
 		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
 		store.On("Delete", ctx, sessionID).Return(nil)
+		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
 		err = transport.Logout(ctx, w, r)
 
@@ -1566,6 +1567,56 @@ func TestJWT_Logout(t *testing.T) {
 		expectedErr := errors.New("database error")
 		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
 		store.On("Delete", ctx, sessionID).Return(expectedErr)
+
+		err = transport.Logout(ctx, w, r)
+
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("returns error when save fails", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 24*time.Hour, 5*time.Minute)
+		jwtSvc := newTestJWTService(t)
+		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
+		require.NoError(t, err)
+
+		ctx := context.Background()
+		w := httptest.NewRecorder()
+		sessionID := uuid.New()
+		sessionToken := "session-token"
+
+		claims := jwt.StandardClaims{
+			ID:        sessionToken,
+			Subject:   uuid.New().String(),
+			Issuer:    "test-app",
+			IssuedAt:  time.Now().Unix(),
+			ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
+		}
+		jwtToken, err := jwtSvc.Generate(claims)
+		require.NoError(t, err)
+
+		r := httptest.NewRequest("POST", "/logout", nil)
+		r.Header.Set("Authorization", "Bearer "+jwtToken)
+
+		sess := session.Session[string]{
+			ID:        sessionID,
+			Token:     sessionToken,
+			UserID:    uuid.New(),
+			Data:      "user-data",
+			ExpiresAt: time.Now().Add(24 * time.Hour),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		expectedErr := errors.New("save failed")
+		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
+		store.On("Delete", ctx, sessionID).Return(nil)
+		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
 
 		err = transport.Logout(ctx, w, r)
 
