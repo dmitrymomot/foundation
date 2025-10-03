@@ -20,9 +20,9 @@ type Session[Data any] struct {
 	UpdatedAt time.Time
 }
 
-// generateToken creates a cryptographically secure random token using 32 bytes (256 bits)
+// GenerateToken creates a cryptographically secure random token using 32 bytes (256 bits)
 // encoded as base64 URL-safe string without padding.
-func generateToken() (string, error) {
+func GenerateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
