@@ -106,6 +106,10 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (Session[Da
 	// Set the raw token in the session for transport use
 	session.Token = token
 
+	// Initialize change tracking
+	session.dataHash = session.computeDataHash()
+	session.metaDirty = false
+
 	if session.IsExpired() {
 		m.logger.Debug("session expired, creating new with same device ID",
 			slog.String("old_session_id", session.ID.String()),
@@ -133,7 +137,22 @@ func (m *Manager[Data]) Load(w http.ResponseWriter, r *http.Request) (Session[Da
 }
 
 // Save persists session changes to store and updates the response.
+// Automatically skips store writes if neither data nor metadata changed.
 func (m *Manager[Data]) Save(w http.ResponseWriter, r *http.Request, session Session[Data]) error {
+	// Compute current hash to detect data changes
+	currentHash := session.computeDataHash()
+
+	// Check if anything actually changed
+	if currentHash == session.dataHash && !session.metaDirty {
+		// Nothing changed - skip expensive store write
+		// Still update transport to refresh cookie TTL
+		ttl := time.Until(session.ExpiresAt)
+		return m.transport.Embed(w, r, session.Token, ttl)
+	}
+
+	// Something changed - update tracking and save
+	session.dataHash = currentHash
+	session.metaDirty = false
 	session.UpdatedAt = time.Now()
 
 	if err := m.store.Store(r.Context(), session); err != nil {
@@ -178,6 +197,7 @@ func (m *Manager[Data]) touch(w http.ResponseWriter, r *http.Request, session Se
 
 	session.UpdatedAt = now
 	session.ExpiresAt = now.Add(m.config.TTL)
+	session.markMetaDirty() // Metadata changed (timestamps)
 
 	// Update storage
 	if err := m.store.Store(r.Context(), session); err != nil {
@@ -217,6 +237,7 @@ func (m *Manager[Data]) Auth(w http.ResponseWriter, r *http.Request, userID uuid
 	session.UserID = userID
 	session.UpdatedAt = time.Now()
 	session.ExpiresAt = time.Now().Add(m.config.TTL)
+	session.markMetaDirty() // Metadata changed (UserID, timestamps)
 
 	m.logger.Info("session authenticated",
 		slog.String("session_id", session.ID.String()),
@@ -283,13 +304,16 @@ func (m *Manager[Data]) Logout(w http.ResponseWriter, r *http.Request, opts ...L
 
 	// Always preserve DeviceID for analytics continuity
 	newSession.DeviceID = session.DeviceID
+	newSession.markMetaDirty() // Mark as dirty since we modified DeviceID
 
 	// Preserve custom data if specified
 	if cfg.preserveData != nil {
 		newSession.Data = cfg.preserveData(session.Data)
+		// Recompute hash since Data changed
+		newSession.dataHash = newSession.computeDataHash()
 	}
 
-	// Save anonymous session
+	// Save anonymous session (will write to store since marked dirty)
 	return m.Save(w, r, newSession)
 }
 
@@ -356,6 +380,10 @@ func (m *Manager[Data]) createNew() (Session[Data], error) {
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+
+	// Initialize change tracking for new session
+	session.dataHash = session.computeDataHash()
+	session.metaDirty = false
 
 	m.logger.Debug("created new anonymous session",
 		slog.String("session_id", session.ID.String()),

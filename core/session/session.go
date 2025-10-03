@@ -2,6 +2,8 @@ package session
 
 import (
 	"context"
+	"encoding/json"
+	"hash/fnv"
 	"net/http"
 	"time"
 
@@ -20,6 +22,10 @@ type Session[Data any] struct {
 	ExpiresAt time.Time `json:"expires_at"` // Session expiration time
 	CreatedAt time.Time `json:"created_at"` // Session creation time
 	UpdatedAt time.Time `json:"updated_at"` // Last update time
+
+	// Internal change tracking (unexported)
+	dataHash  uint64 // FNV-1a hash of Data for change detection
+	metaDirty bool   // Tracks if metadata (UserID, timestamps) changed
 }
 
 // IsAuthenticated returns true if the session has a valid user ID.
@@ -30,6 +36,22 @@ func (s Session[Data]) IsAuthenticated() bool {
 // IsExpired returns true if the session has expired.
 func (s Session[Data]) IsExpired() bool {
 	return time.Now().After(s.ExpiresAt)
+}
+
+// computeDataHash computes a FNV-1a hash of the Data field for change detection.
+// Returns 0 if encoding fails (treated as dirty to ensure safety).
+func (s *Session[Data]) computeDataHash() uint64 {
+	h := fnv.New64a()
+	if err := json.NewEncoder(h).Encode(s.Data); err != nil {
+		// If encoding fails, return 0 to force save (safe default)
+		return 0
+	}
+	return h.Sum64()
+}
+
+// markMetaDirty marks the session as having metadata changes.
+func (s *Session[Data]) markMetaDirty() {
+	s.metaDirty = true
 }
 
 // Store defines the interface for session persistence.
