@@ -58,6 +58,7 @@ type Store[Data any] interface {
 
     Save(ctx context.Context, sess Session[Data]) error
     Delete(ctx context.Context, id uuid.UUID) error
+    DeleteExpired(ctx context.Context) error // Cleanup for periodic task
 }
 ```
 
@@ -71,6 +72,18 @@ type Store[Data any] interface {
 - **ID** is stable (foreign key for cart_items, etc.)
 - **Token** rotates on authentication (security - session fixation prevention)
 - **Token** is the credential in both Cookie and JWT (JTI = Session.Token)
+
+**Token Generation:**
+
+```go
+func generateToken() string {
+    b := make([]byte, 32) // 256 bits for strong entropy
+    if _, err := rand.Read(b); err != nil {
+        panic(err) // crypto/rand should never fail
+    }
+    return base64.RawURLEncoding.EncodeToString(b) // base64url without padding
+}
+```
 
 ## Layer 2: Manager (Business Logic)
 
@@ -168,6 +181,14 @@ func (m *Manager[Data]) touch(sess Session[Data]) Session[Data] {
     sess.ExpiresAt = time.Now().Add(m.ttl)
     sess.UpdatedAt = time.Now()
     return sess
+}
+
+// CleanupExpired removes all expired sessions (periodic task)
+// Implements PeriodicTaskHandlerFunc interface from core/queue
+func (m *Manager[Data]) CleanupExpired(ctx context.Context) error {
+    // Implementation depends on Store having a cleanup method
+    // Store interface will need: DeleteExpired(ctx context.Context) error
+    return m.store.DeleteExpired(ctx)
 }
 ```
 
@@ -362,7 +383,7 @@ func (j *JWT[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, r *
     }, nil
 }
 
-// Refresh - generate new access token
+// Refresh - generate new access token and rotate refresh token
 func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.Session[Data], TokenPair, error) {
     // Load by refresh token
     sess, err := j.manager.GetByToken(ctx, refreshToken)
@@ -374,9 +395,17 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.S
         return session.Session[Data]{}, TokenPair{}, ErrNotAuthenticated
     }
 
-    // Generate new access token
+    // Rotate session token (security - refresh token rotation)
+    sess.Token = generateToken()
+    sess.ExpiresAt = time.Now().Add(j.manager.ttl)
+    sess.UpdatedAt = time.Now()
+    if err := j.manager.Save(ctx, sess); err != nil {
+        return session.Session[Data]{}, TokenPair{}, err
+    }
+
+    // Generate new access token with new session token
     accessToken, err := j.signer.Sign(jwt.Claims{
-        JTI:       sess.Token,            // Session token
+        JTI:       sess.Token,            // New session token
         Subject:   sess.UserID.String(),
         Issuer:    j.issuer,
         IssuedAt:  time.Now(),
@@ -388,7 +417,7 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.S
 
     return sess, TokenPair{
         AccessToken:  accessToken,
-        RefreshToken: sess.Token, // Same token in both JTI and refresh_token
+        RefreshToken: sess.Token, // New rotated refresh token
         TokenType:    "Bearer",
         ExpiresIn:    int(j.accessTTL.Seconds()),
         ExpiresAt:    time.Now().Add(j.accessTTL),
@@ -470,9 +499,13 @@ func Session[C handler.Context, Data any](
             resp := next(ctx)
 
             // Touch session (extends expiration if interval passed)
+            // Failures are logged but don't fail the request
             sess, ok := GetSession[Data](ctx)
             if ok {
-                transport.Touch(ctx.Context(), ctx.ResponseWriter(), sess)
+                if err := transport.Touch(ctx.Context(), ctx.ResponseWriter(), sess); err != nil {
+                    // TODO: Use proper logger instead of log package
+                    log.Printf("WARN: failed to touch session: %v", err)
+                }
             }
 
             return resp
@@ -529,6 +562,22 @@ func RequireGuest[C handler.Context, Data any]() handler.Middleware[C] {
 ```
 
 ## Usage Examples
+
+### Periodic Cleanup Task
+
+```go
+// Setup periodic cleanup (runs every hour to remove expired sessions)
+sessionMgr := session.NewManager(store, 24*time.Hour, 1*time.Hour)
+
+// Register as periodic task with queue system
+cleanupHandler := queue.NewPeriodicTaskHandler(
+    "session_cleanup",
+    sessionMgr.CleanupExpired,
+)
+
+// Schedule to run every hour
+scheduler.Register(cleanupHandler, 1*time.Hour)
+```
 
 ### Cookie-Based Web App
 
@@ -688,10 +737,12 @@ func handleProfile(ctx *AppContext) handler.Response {
 ### Built-in
 
 - Token rotation on authentication (session fixation prevention)
+- Refresh token rotation on JWT refresh (prevents token replay attacks)
 - Short TTLs with touch intervals (extend active sessions)
 - Automatic expiration checking
 - Separate ID/Token (preserves cart while rotating credentials)
 - Unified token approach (both Cookie and JWT use Session.Token)
+- Periodic cleanup of expired sessions
 
 ### Optional (Add as Needed)
 
@@ -714,15 +765,15 @@ func handleProfile(ctx *AppContext) handler.Response {
 
 ## Implementation Checklist
 
-- [ ] core/session/session.go - Session struct
-- [ ] core/session/manager.go - Manager implementation
-- [ ] core/session/store.go - Store interface
+- [ ] core/session/session.go - Session struct and token generation
+- [ ] core/session/manager.go - Manager implementation (including CleanupExpired)
+- [ ] core/session/store.go - Store interface (including DeleteExpired)
 - [ ] core/session/errors.go - Error types
 - [ ] core/sessiontransport/cookie.go - Cookie transport
-- [ ] core/sessiontransport/jwt.go - JWT transport
-- [ ] middleware/session.go - Session middleware
+- [ ] core/sessiontransport/jwt.go - JWT transport (with refresh token rotation)
+- [ ] middleware/session.go - Session middleware (with touch error handling)
 - [ ] Tests for all components
-- [ ] Example application
+- [ ] Example application (including cleanup task setup)
 
 ## Design Decisions
 
@@ -771,6 +822,31 @@ Extend active sessions without forcing re-authentication:
 - Transport decides how to handle touch (Cookie updates cookie, JWT only DB)
 - No redundant dependencies in middleware
 - Proper encapsulation: `Manager → Transport → Middleware`
+
+### Concurrent Touch Handling
+
+**Race condition is acceptable** - when two requests touch the same session simultaneously:
+- Both extend the session by the same TTL
+- Last write wins for timestamps (harmless)
+- No data corruption possible
+
+**Optional DB-level prevention** (if needed):
+```sql
+UPDATE sessions
+SET updated_at = $1, expires_at = $2
+WHERE id = $3
+  AND updated_at < $1 - touch_interval
+```
+
+Only updates if the interval has actually passed, preventing redundant writes.
+
+### Touch Failure Handling
+
+**Non-critical operation** - touch failures should not break requests:
+- Log as WARNING and continue
+- Session still valid, just not extended
+- User can continue their request normally
+- Next request will retry the touch
 
 ---
 
