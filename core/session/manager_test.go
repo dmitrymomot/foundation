@@ -1607,3 +1607,394 @@ func TestManagerPreserveData(t *testing.T) {
 		// where the option is passed to the Logout method
 	})
 }
+
+func TestManagerSave_ChangeTracking(t *testing.T) {
+	t.Parallel()
+
+	t.Run("skips store write when nothing changed after Load", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[TestData]{}
+		transport := &MockTransport{}
+
+		manager, err := session.New(
+			session.WithStore[TestData](store),
+			session.WithTransport[TestData](transport),
+			session.WithConfig[TestData](
+				session.WithTouchInterval(0), // Disable auto-touch
+			),
+		)
+		require.NoError(t, err)
+
+		token := "test-token"
+		existingSession := session.Session[TestData]{
+			ID:        uuid.New(),
+			Token:     token,
+			TokenHash: hashToken(token),
+			DeviceID:  uuid.New(),
+			UserID:    uuid.Nil,
+			Data: TestData{
+				Username: "testuser",
+				Counter:  5,
+			},
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now().Add(-time.Hour),
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}
+
+		// Setup mocks for Load
+		transport.On("Extract", mock.Anything).Return(token, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
+
+		// Setup expectations for Save - Store should NOT be called
+		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		// Load session (this initializes the hash)
+		sess, err := manager.Load(w, r)
+		require.NoError(t, err)
+		require.Equal(t, "testuser", sess.Data.Username)
+
+		// Save WITHOUT making any changes
+		err = manager.Save(w, r, sess)
+		require.NoError(t, err)
+
+		// Verify Store was NOT called (change tracking optimization worked)
+		store.AssertNotCalled(t, "Store")
+		// Transport should still be called to refresh cookie
+		transport.AssertCalled(t, "Embed", mock.Anything, mock.Anything, token, mock.Anything)
+	})
+
+	t.Run("writes to store when data changed after Load", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[TestData]{}
+		transport := &MockTransport{}
+
+		manager, err := session.New(
+			session.WithStore[TestData](store),
+			session.WithTransport[TestData](transport),
+			session.WithConfig[TestData](
+				session.WithTouchInterval(0), // Disable auto-touch
+			),
+		)
+		require.NoError(t, err)
+
+		token := "test-token"
+		existingSession := session.Session[TestData]{
+			ID:        uuid.New(),
+			Token:     token,
+			TokenHash: hashToken(token),
+			DeviceID:  uuid.New(),
+			UserID:    uuid.Nil,
+			Data: TestData{
+				Username: "testuser",
+				Counter:  5,
+			},
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now().Add(-time.Hour),
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}
+
+		// Setup mocks for Load
+		transport.On("Extract", mock.Anything).Return(token, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
+
+		// Setup expectations for Save - Store SHOULD be called
+		store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
+			return s.Data.Counter == 10 // Verify modified value
+		})).Return(nil)
+		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		// Load session (this initializes the hash)
+		sess, err := manager.Load(w, r)
+		require.NoError(t, err)
+
+		// Modify the data
+		sess.Data.Counter = 10
+
+		// Save with changes
+		err = manager.Save(w, r, sess)
+		require.NoError(t, err)
+
+		// Verify Store WAS called (data changed)
+		store.AssertCalled(t, "Store", mock.Anything, mock.Anything)
+		transport.AssertCalled(t, "Embed", mock.Anything, mock.Anything, token, mock.Anything)
+	})
+
+	t.Run("writes to store when metadata changed via Auth", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[TestData]{}
+		transport := &MockTransport{}
+
+		manager, err := session.New(
+			session.WithStore[TestData](store),
+			session.WithTransport[TestData](transport),
+		)
+		require.NoError(t, err)
+
+		// Start with anonymous session
+		token := "test-token"
+		anonSession := session.Session[TestData]{
+			ID:        uuid.New(),
+			Token:     token,
+			TokenHash: hashToken(token),
+			DeviceID:  uuid.New(),
+			UserID:    uuid.Nil,
+			Data:      TestData{},
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		// Setup mocks for Auth flow
+		transport.On("Extract", mock.Anything).Return(token, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(anonSession, nil)
+
+		// Auth will call Save, which should trigger Store
+		store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
+			return s.UserID != uuid.Nil // Should be authenticated
+		})).Return(nil)
+		transport.On("Embed", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		userID := uuid.New()
+		err = manager.Auth(w, r, userID)
+		require.NoError(t, err)
+
+		// Verify Store WAS called because metadata (UserID) changed
+		store.AssertCalled(t, "Store", mock.Anything, mock.Anything)
+	})
+
+	t.Run("writes to store when string field changed", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[TestData]{}
+		transport := &MockTransport{}
+
+		manager, err := session.New(
+			session.WithStore[TestData](store),
+			session.WithTransport[TestData](transport),
+			session.WithConfig[TestData](
+				session.WithTouchInterval(0), // Disable auto-touch
+			),
+		)
+		require.NoError(t, err)
+
+		token := "test-token"
+		existingSession := session.Session[TestData]{
+			ID:        uuid.New(),
+			Token:     token,
+			TokenHash: hashToken(token),
+			DeviceID:  uuid.New(),
+			UserID:    uuid.Nil,
+			Data: TestData{
+				Username: "oldname",
+				Counter:  5,
+			},
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now().Add(-time.Hour),
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}
+
+		// Setup mocks for Load
+		transport.On("Extract", mock.Anything).Return(token, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
+
+		// Setup expectations for Save - Store SHOULD be called
+		store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
+			return s.Data.Username == "newname" // Verify modified string value
+		})).Return(nil)
+		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		// Load session (this initializes the hash)
+		sess, err := manager.Load(w, r)
+		require.NoError(t, err)
+		require.Equal(t, "oldname", sess.Data.Username)
+
+		// Modify the string field (similar character set, different value)
+		sess.Data.Username = "newname"
+
+		// Save with changes
+		err = manager.Save(w, r, sess)
+		require.NoError(t, err)
+
+		// Verify Store WAS called (string changed)
+		store.AssertCalled(t, "Store", mock.Anything, mock.Anything)
+		transport.AssertCalled(t, "Embed", mock.Anything, mock.Anything, token, mock.Anything)
+	})
+
+	t.Run("writes to store when map field modified", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[TestData]{}
+		transport := &MockTransport{}
+
+		manager, err := session.New(
+			session.WithStore[TestData](store),
+			session.WithTransport[TestData](transport),
+			session.WithConfig[TestData](
+				session.WithTouchInterval(0), // Disable auto-touch
+			),
+		)
+		require.NoError(t, err)
+
+		token := "test-token"
+		existingSession := session.Session[TestData]{
+			ID:        uuid.New(),
+			Token:     token,
+			TokenHash: hashToken(token),
+			DeviceID:  uuid.New(),
+			UserID:    uuid.Nil,
+			Data: TestData{
+				Username: "testuser",
+				Settings: map[string]any{
+					"theme": "light",
+					"lang":  "en",
+				},
+				Counter: 5,
+			},
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now().Add(-time.Hour),
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}
+
+		// Setup mocks for Load
+		transport.On("Extract", mock.Anything).Return(token, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(existingSession, nil)
+
+		// Setup expectations for Save - Store SHOULD be called
+		store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
+			return s.Data.Settings["theme"] == "dark" // Verify map modification
+		})).Return(nil)
+		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		// Load session (this initializes the hash)
+		sess, err := manager.Load(w, r)
+		require.NoError(t, err)
+		require.Equal(t, "light", sess.Data.Settings["theme"])
+
+		// Modify the map field
+		sess.Data.Settings["theme"] = "dark"
+
+		// Save with changes
+		err = manager.Save(w, r, sess)
+		require.NoError(t, err)
+
+		// Verify Store WAS called (map changed)
+		store.AssertCalled(t, "Store", mock.Anything, mock.Anything)
+		transport.AssertCalled(t, "Embed", mock.Anything, mock.Anything, token, mock.Anything)
+	})
+
+	t.Run("sequential operations: modify, save, reload, save again without changes", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[TestData]{}
+		transport := &MockTransport{}
+
+		manager, err := session.New(
+			session.WithStore[TestData](store),
+			session.WithTransport[TestData](transport),
+			session.WithConfig[TestData](
+				session.WithTouchInterval(0), // Disable auto-touch
+			),
+		)
+		require.NoError(t, err)
+
+		token := "test-token"
+		sessionID := uuid.New()
+		deviceID := uuid.New()
+
+		initialSession := session.Session[TestData]{
+			ID:        sessionID,
+			Token:     token,
+			TokenHash: hashToken(token),
+			DeviceID:  deviceID,
+			UserID:    uuid.Nil,
+			Data: TestData{
+				Username: "testuser",
+				Counter:  5,
+			},
+			ExpiresAt: time.Now().Add(time.Hour),
+			CreatedAt: time.Now().Add(-time.Hour),
+			UpdatedAt: time.Now().Add(-time.Minute),
+		}
+
+		// First Load
+		transport.On("Extract", mock.Anything).Return(token, nil)
+		store.On("Get", mock.Anything, hashToken(token)).Return(initialSession, nil).Once()
+		transport.On("Embed", mock.Anything, mock.Anything, token, mock.Anything).Return(nil)
+
+		w1 := httptest.NewRecorder()
+		r1 := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		// Load and modify
+		sess, err := manager.Load(w1, r1)
+		require.NoError(t, err)
+		require.Equal(t, 5, sess.Data.Counter)
+
+		sess.Data.Counter = 10
+
+		// First Save with changes - should call Store
+		var capturedSession session.Session[TestData]
+		store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
+			if s.Data.Counter == 10 {
+				capturedSession = s
+				return true
+			}
+			return false
+		})).Return(nil).Once()
+
+		err = manager.Save(w1, r1, sess)
+		require.NoError(t, err)
+		store.AssertNumberOfCalls(t, "Store", 1)
+
+		// Reload the session (simulating a new request)
+		// Return the captured session from store
+		store.On("Get", mock.Anything, hashToken(token)).Return(capturedSession, nil).Once()
+
+		w2 := httptest.NewRecorder()
+		r2 := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		sess2, err := manager.Load(w2, r2)
+		require.NoError(t, err)
+		require.Equal(t, 10, sess2.Data.Counter)
+
+		// Save without changes - should NOT call Store again
+		err = manager.Save(w2, r2, sess2)
+		require.NoError(t, err)
+
+		// Still only 1 Store call (the change tracking worked!)
+		store.AssertNumberOfCalls(t, "Store", 1)
+
+		// Now make another change
+		sess2.Data.Counter = 20
+
+		store.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[TestData]) bool {
+			return s.Data.Counter == 20
+		})).Return(nil).Once()
+
+		w3 := httptest.NewRecorder()
+		r3 := httptest.NewRequest(http.MethodGet, "/test", nil)
+
+		err = manager.Save(w3, r3, sess2)
+		require.NoError(t, err)
+
+		// Now 2 Store calls total
+		store.AssertNumberOfCalls(t, "Store", 2)
+	})
+}
