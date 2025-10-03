@@ -8,7 +8,7 @@ package repository
 import (
 	"context"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const CreateUser = `-- name: CreateUser :one
@@ -24,7 +24,7 @@ type CreateUserParams struct {
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, CreateUser, arg.Name, arg.Email, arg.PasswordHash)
+	row := q.db.QueryRow(ctx, CreateUser, arg.Name, arg.Email, arg.PasswordHash)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -43,7 +43,7 @@ WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRowContext(ctx, GetUserByEmail, email)
+	row := q.db.QueryRow(ctx, GetUserByEmail, email)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -61,8 +61,8 @@ SELECT id, name, email, password_hash, created_at, updated_at FROM users
 WHERE id = $1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
-	row := q.db.QueryRowContext(ctx, GetUserByID, id)
+func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
+	row := q.db.QueryRow(ctx, GetUserByID, id)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -82,11 +82,11 @@ WHERE id = $2
 `
 
 type UpdateUserPasswordParams struct {
-	PasswordHash []byte    `json:"password_hash"`
-	ID           uuid.UUID `json:"id"`
+	PasswordHash []byte      `json:"password_hash"`
+	ID           pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
-	_, err := q.db.ExecContext(ctx, UpdateUserPassword, arg.PasswordHash, arg.ID)
+	_, err := q.db.Exec(ctx, UpdateUserPassword, arg.PasswordHash, arg.ID)
 	return err
 }
