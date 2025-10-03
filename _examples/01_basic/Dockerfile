@@ -26,7 +26,7 @@ COPY --from=builder /build/app .
 RUN chmod +x app
 
 # Copy migrations
-# COPY --from=builder /build/internal/db/migrations ./internal/db/migrations/
+COPY --from=builder /build/internal/db/migrations ./internal/db/migrations/
 
 EXPOSE 8080
 
