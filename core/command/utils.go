@@ -55,5 +55,5 @@ func unmarshalPayload[T any](payload any) (T, error) {
 		return cmd, nil
 	}
 
-	return zero, fmt.Errorf("unexpected payload type: %T", payload)
+	return zero, fmt.Errorf("unsupported payload type %T: expected %T, []byte, or map[string]any", payload, zero)
 }

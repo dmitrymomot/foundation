@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 )
 
 // HandlerFunc is a type-safe function signature for processing commands of type T.
@@ -63,7 +64,7 @@ func (h *handlerFuncWrapper[T]) CommandName() string {
 func (h *handlerFuncWrapper[T]) Handle(ctx context.Context, payload any) error {
 	typed, err := unmarshalPayload[T](payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("command %s: %w", h.name, err)
 	}
 	return h.fn(ctx, typed)
 }

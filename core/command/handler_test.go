@@ -111,7 +111,8 @@ func TestNewHandlerFunc(t *testing.T) {
 
 		err := handler.Handle(context.Background(), "invalid-payload")
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unexpected payload type")
+		assert.Contains(t, err.Error(), "command CreateUser")
+		assert.Contains(t, err.Error(), "unsupported payload type")
 	})
 
 	t.Run("respects context cancellation", func(t *testing.T) {

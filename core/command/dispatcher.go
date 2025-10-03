@@ -375,7 +375,8 @@ func (d *Dispatcher) Healthcheck(ctx context.Context) error {
 
 	var healthErrors []error
 
-	if !stats.LastActivityAt.IsZero() {
+	// Only check for staleness if commands have been processed
+	if stats.CommandsProcessed > 0 && !stats.LastActivityAt.IsZero() {
 		timeSinceActivity := time.Since(stats.LastActivityAt)
 		if timeSinceActivity > d.staleThreshold {
 			healthErrors = append(healthErrors, fmt.Errorf("%w: last activity %s ago (threshold: %s)",
