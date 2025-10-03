@@ -1,4 +1,4 @@
-.PHONY: help env up down logs clean rebuild check-docker
+.PHONY: help env up down logs clean rebuild check-docker sqlc
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -50,3 +50,8 @@ logs: check-docker ## View logs
 clean: check-docker ## Stop services and remove containers, volumes, networks, and images
 	@docker-compose down -v --rmi local --remove-orphans
 	@echo "✓ Services stopped and all resources removed"
+
+sqlc: ## Generate sqlc code from queries
+	@echo "Generating sqlc code..."
+	@sqlc generate -f db/sqlc.yaml
+	@echo "✓ sqlc code generated successfully!"
