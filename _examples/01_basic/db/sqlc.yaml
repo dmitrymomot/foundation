@@ -14,3 +14,47 @@ sql:
         emit_empty_slices: true
         emit_all_enum_values: true
         emit_exported_queries: true
+        overrides:
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+            nullable: false
+          - db_type: "uuid"
+            go_type:
+              import: "github.com/google/uuid"
+              type: "UUID"
+              pointer: true
+            nullable: true
+          - db_type: "pg_catalog.timestamp"
+            go_type:
+              import: "time"
+              type: "Time"
+            nullable: false
+          - db_type: "pg_catalog.timestamp"
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+            nullable: true
+          - db_type: "pg_catalog.varchar"
+            go_type:
+              type: "string"
+              pointer: true
+            nullable: true
+          - db_type: "text"
+            go_type:
+              type: "string"
+              pointer: true
+            nullable: true
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+            nullable: false
+          - db_type: "timestamptz"
+            go_type:
+              import: "time"
+              type: "Time"
+              pointer: true
+            nullable: true

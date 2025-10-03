@@ -8,7 +8,7 @@ package repository
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/google/uuid"
 )
 
 const CreateUser = `-- name: CreateUser :one
@@ -61,7 +61,7 @@ SELECT id, name, email, password_hash, created_at, updated_at FROM users
 WHERE id = $1
 `
 
-func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error) {
+func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, GetUserByID, id)
 	var i User
 	err := row.Scan(
@@ -82,8 +82,8 @@ WHERE id = $2
 `
 
 type UpdateUserPasswordParams struct {
-	PasswordHash []byte      `json:"password_hash"`
-	ID           pgtype.UUID `json:"id"`
+	PasswordHash []byte    `json:"password_hash"`
+	ID           uuid.UUID `json:"id"`
 }
 
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
