@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"foundation-basic-example/db/repository"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +12,8 @@ import (
 	"github.com/dmitrymomot/foundation/core/logger"
 	"github.com/dmitrymomot/foundation/core/router"
 	"github.com/dmitrymomot/foundation/core/server"
+	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/dmitrymomot/foundation/integration/database/pg"
 	"github.com/dmitrymomot/foundation/middleware"
 	"golang.org/x/sync/errgroup"
@@ -34,6 +37,20 @@ func main() {
 	// Run migrations automatically on app start
 	if err := pg.Migrate(ctx, db, cfg.DB, log.With("component", "migration")); err != nil {
 		log.Error("Failed to migrate database", logger.Component("database.migration"), logger.Error(err))
+		os.Exit(1)
+	}
+
+	repo := repository.New(db)
+
+	// Setup session manager
+	sesStorage := &sessionStorage{repo}
+	sesJwt, err := sessiontransport.NewJWT(cfg.JwtSigningKey, sesStorage)
+	ses, err := session.NewFromConfig[SessionData](cfg.Session,
+		session.WithStore(sesStorage),
+		session.WithTransport[SessionData](sesJwt),
+	)
+	if err != nil {
+		log.Error("Failed to create session manager", logger.Component("session"), logger.Error(err))
 		os.Exit(1)
 	}
 
