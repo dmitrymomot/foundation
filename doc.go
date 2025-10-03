@@ -31,11 +31,13 @@
 //
 //	github.com/dmitrymomot/foundation/core/binder        - HTTP request data binding with validation
 //	github.com/dmitrymomot/foundation/core/cache         - Thread-safe LRU cache implementation
+//	github.com/dmitrymomot/foundation/core/command       - CQRS command pattern with handlers and message bus
 //	github.com/dmitrymomot/foundation/core/config        - Type-safe environment variable loading
 //	github.com/dmitrymomot/foundation/core/cookie        - Secure HTTP cookie management with encryption
 //	github.com/dmitrymomot/foundation/core/email         - Email sending interface with template support
 //	github.com/dmitrymomot/foundation/core/email/templates - Email template rendering using templ
 //	github.com/dmitrymomot/foundation/core/email/templates/components - Reusable email template components
+//	github.com/dmitrymomot/foundation/core/event         - Event-driven architecture with type-safe handlers
 //	github.com/dmitrymomot/foundation/core/handler       - Type-safe HTTP handler abstractions
 //	github.com/dmitrymomot/foundation/core/health        - HTTP handlers for service health monitoring
 //	github.com/dmitrymomot/foundation/core/i18n          - Internationalization with CLDR plural rules
