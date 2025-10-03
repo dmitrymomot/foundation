@@ -57,16 +57,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup new router with global middlewares and default context
-	r := router.New(
+	// Setup new router with custom context and global middlewares
+	r := router.New[*Context](
+		router.WithContextFactory[*Context](newContext),
 		router.WithMiddleware(
-			middleware.RequestID[*router.Context](),
-			middleware.ClientIP[*router.Context](),
+			middleware.RequestID[*Context](),
+			middleware.ClientIP[*Context](),
+			middleware.Session[*Context, SessionData](ses),
 		),
 	)
 
 	r.Get("/live", health.Liveness)
-	r.Get("/ready", health.Readiness[*router.Context](log, pg.Healthcheck(db))) // ping db connection
+	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db))) // ping db connection
 
 	eg, ctx := errgroup.WithContext(ctx)
 
