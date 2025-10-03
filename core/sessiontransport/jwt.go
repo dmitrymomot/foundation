@@ -58,7 +58,36 @@ func WithJWTAudience(audience string) JWTOption {
 }
 
 // NewJWT creates a new JWT-based session transport.
-// The revoker can be nil if token revocation is not needed.
+//
+// # Revoker Parameter
+//
+// The revoker parameter is OPTIONAL and can be nil. Understanding when to use it:
+//
+// WITHOUT Revoker (revoker = nil):
+//   - Every request validates JWT signature, then calls Store.Get(tokenHash)
+//   - Deleting session from Store is SUFFICIENT to invalidate the JWT
+//   - JWT becomes useless because Store.Get() returns ErrSessionNotFound
+//   - Simple, works fine for most applications
+//   - Recommended unless you have specific performance/security needs
+//
+// WITH Revoker (revoker = implementation):
+//   - Provides fast-fail before hitting Store (performance optimization)
+//   - Useful when Store is slower than Revoker (e.g., Redis blacklist vs DB lookup)
+//   - Explicit distinction between "revoked" vs "session not found"
+//   - Additional security layer for sensitive operations
+//   - Requires maintaining revocation list with TTL matching JWT expiration
+//
+// Example without revoker:
+//
+//	transport, err := sessiontransport.NewJWT(signingKey, nil)
+//	// Delete from Store invalidates the JWT - no revoker needed
+//	manager.Delete(w, r)
+//
+// Example with revoker:
+//
+//	revoker := &RedisRevoker{client: redisClient}
+//	transport, err := sessiontransport.NewJWT(signingKey, revoker)
+//	// Fast revocation check before Store lookup
 func NewJWT(signingKey string, revoker Revoker, opts ...JWTOption) (*JWTTransport, error) {
 	service, err := jwt.NewFromString(signingKey)
 	if err != nil {
