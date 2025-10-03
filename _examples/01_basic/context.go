@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/middleware"
 )
 
 // Context is the default context implementation that delegates to the request's context.
@@ -56,6 +59,12 @@ func (c *Context) Param(key string) string {
 		return ""
 	}
 	return c.params[key]
+}
+
+// Session retrieves the current session from the request context.
+// Returns the session and a boolean indicating whether it was found.
+func (c *Context) Session() (session.Session[SessionData], bool) {
+	return middleware.GetSession[SessionData](c)
 }
 
 // newContext creates a new Context instance.
