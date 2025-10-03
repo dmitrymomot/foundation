@@ -263,12 +263,11 @@ func SecurityHeadersRelaxed[C handler.Context]() handler.Middleware[C] {
 // - Monitor security headers with online scanners (securityheaders.com)
 // - Set IsDevelopment=true in local environments to avoid HSTS issues
 func SecurityHeadersWithConfig[C handler.Context](cfg SecurityHeadersConfig) handler.Middleware[C] {
-	// Handle development mode - disable HSTS
 	if cfg.IsDevelopment {
 		cfg.StrictTransportSecurity = ""
 	}
 
-	// Pre-build headers map to avoid repeated checks
+	// Pre-compute headers map once to avoid string allocations on every request
 	headers := make(map[string]string)
 	if cfg.ContentTypeOptions != "" {
 		headers["X-Content-Type-Options"] = cfg.ContentTypeOptions

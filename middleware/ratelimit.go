@@ -79,7 +79,6 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 		panic("ratelimit middleware: limiter is required")
 	}
 
-	// Default to using client IP as the rate limiting key
 	if cfg.KeyExtractor == nil {
 		cfg.KeyExtractor = func(ctx handler.Context) string {
 			if ip, ok := GetClientIP(ctx); ok {
@@ -89,7 +88,6 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 		}
 	}
 
-	// Default error handler returns 429 with retry information
 	if cfg.ErrorHandler == nil {
 		cfg.ErrorHandler = func(ctx handler.Context, result *ratelimiter.Result) handler.Response {
 			err := response.ErrTooManyRequests
@@ -148,7 +146,7 @@ func RateLimit[C handler.Context](cfg RateLimitConfig) handler.Middleware[C] {
 func wrapWithRateLimitHeaders(resp handler.Response, result *ratelimiter.Result) handler.Response {
 	return func(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(result.Limit))
-		// Clamp remaining count to zero to prevent confusing negative values in API responses
+		// Clamp to zero to avoid exposing negative values to clients (race conditions during high load)
 		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(max(0, result.Remaining)))
 		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(result.ResetAt.Unix(), 10))
 

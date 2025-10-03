@@ -176,9 +176,8 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[Data]) han
 				// Execute the handler's response first
 				err := resp(w, r)
 
-				// Save session after response (best effort)
+				// Best-effort save after response sent; logging errors without failing request
 				if saveErr := cfg.Manager.Save(w, r, currentSess); saveErr != nil {
-					// Log but don't fail the request - response already sent
 					cfg.Logger.Error("failed to save session",
 						slog.String("path", r.URL.Path),
 						slog.String("session_id", currentSess.ID.String()),
