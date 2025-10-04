@@ -234,11 +234,53 @@ func TestValidate(t *testing.T) {
 			"Accept":     "text/html",
 		}, "192.168.1.101:54321")
 
+		// Generate with IP option
 		storedFingerprint := fingerprint.Generate(req1, fingerprint.WithIP())
-		err := fingerprint.Validate(req2, storedFingerprint)
+		// Validate with the same IP option
+		err := fingerprint.Validate(req2, storedFingerprint, fingerprint.WithIP())
 
 		assert.Error(t, err, "should detect IP change")
-		assert.ErrorIs(t, err, fingerprint.ErrIPMismatch, "should return ErrIPMismatch")
+		assert.ErrorIs(t, err, fingerprint.ErrMismatch, "should return ErrMismatch")
+	})
+
+	t.Run("ValidateCookie matches Cookie generator", func(t *testing.T) {
+		t.Parallel()
+		req := createTestRequest(map[string]string{
+			"User-Agent":      "Mozilla/5.0",
+			"Accept":          "text/html",
+			"Accept-Language": "en-US",
+		}, "192.168.1.100:54321")
+
+		storedFP := fingerprint.Cookie(req)
+		err := fingerprint.ValidateCookie(req, storedFP)
+
+		assert.NoError(t, err, "ValidateCookie should validate Cookie-generated fingerprints")
+	})
+
+	t.Run("ValidateJWT matches JWT generator", func(t *testing.T) {
+		t.Parallel()
+		req := createTestRequest(map[string]string{
+			"User-Agent": "Mozilla/5.0",
+			"Accept":     "text/html",
+		}, "192.168.1.100:54321")
+
+		storedFP := fingerprint.JWT(req)
+		err := fingerprint.ValidateJWT(req, storedFP)
+
+		assert.NoError(t, err, "ValidateJWT should validate JWT-generated fingerprints")
+	})
+
+	t.Run("ValidateStrict matches Strict generator", func(t *testing.T) {
+		t.Parallel()
+		req := createTestRequest(map[string]string{
+			"User-Agent": "Mozilla/5.0",
+			"Accept":     "text/html",
+		}, "192.168.1.100:54321")
+
+		storedFP := fingerprint.Strict(req)
+		err := fingerprint.ValidateStrict(req, storedFP)
+
+		assert.NoError(t, err, "ValidateStrict should validate Strict-generated fingerprints")
 	})
 }
 

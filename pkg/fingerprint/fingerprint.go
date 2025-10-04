@@ -10,6 +10,12 @@ import (
 	"github.com/dmitrymomot/foundation/pkg/clientip"
 )
 
+const (
+	fingerprintVersion  = "v1:"
+	fingerprintHashLen  = 16
+	fingerprintTotalLen = 35 // len("v1:") + hex.Encode(16 bytes) = 3 + 32
+)
+
 // Generate creates a device fingerprint from the HTTP request.
 // Returns a version-prefixed fingerprint string in format: "v1:hash"
 //
@@ -44,7 +50,6 @@ func Generate(r *http.Request, opts ...Option) string {
 		components = append(components, getHeaders(r))
 	}
 
-	// Filter out empty components
 	filtered := make([]string, 0, len(components))
 	for _, comp := range components {
 		if comp != "" {
@@ -52,83 +57,49 @@ func Generate(r *http.Request, opts ...Option) string {
 		}
 	}
 
-	// Create SHA256 hash of all components
 	combined := strings.Join(filtered, "|")
 	hash := sha256.Sum256([]byte(combined))
 
-	// Return version-prefixed fingerprint
-	return "v1:" + hex.EncodeToString(hash[:16])
+	// Use first 16 bytes (128 bits) for balance between uniqueness and storage efficiency
+	return fingerprintVersion + hex.EncodeToString(hash[:fingerprintHashLen])
 }
 
 // Validate compares the current request fingerprint with a stored fingerprint.
-// Returns nil if fingerprints match, or a specific error indicating which component changed.
+// Returns nil if fingerprints match, or ErrMismatch if they don't.
 //
 // The stored fingerprint should be in format "v1:hash". Invalid formats return ErrInvalidFingerprint.
 //
-// To check which component changed, use errors.Is():
+// IMPORTANT: Use the same options that were used to generate the stored fingerprint.
+// For example, if the stored fingerprint was generated with WithIP(), validate with WithIP():
 //
-//	if err := Validate(r, storedFP); err != nil {
-//	    if errors.Is(err, ErrIPMismatch) {
-//	        // Handle IP change gracefully
-//	    } else {
-//	        // Potential session hijacking
-//	    }
+//	stored := Generate(r, WithIP())
+//	// ... store the fingerprint ...
+//	// Later, validate with the same options:
+//	if err := Validate(r, stored, WithIP()); err != nil {
+//	    // Fingerprint mismatch - potential session hijacking
 //	}
-func Validate(r *http.Request, sessionFingerprint string) error {
-	// Validate format
-	if !strings.HasPrefix(sessionFingerprint, "v1:") || len(sessionFingerprint) != 35 {
+//
+// For convenience, use the helper functions that match their corresponding generators:
+//   - ValidateCookie() matches Cookie()
+//   - ValidateJWT() matches JWT()
+//   - ValidateStrict() matches Strict()
+func Validate(r *http.Request, sessionFingerprint string, opts ...Option) error {
+	// Expected format: "v1:" (3 chars) + 32 hex chars = 35 total
+	if !strings.HasPrefix(sessionFingerprint, fingerprintVersion) || len(sessionFingerprint) != fingerprintTotalLen {
 		return ErrInvalidFingerprint
 	}
 
-	// Try with default options first (most common case)
-	currentFingerprint := Generate(r)
+	currentFingerprint := Generate(r, opts...)
 	if currentFingerprint == sessionFingerprint {
 		return nil
 	}
 
-	// Fingerprint mismatch - try to determine which component changed
-	// Try with IP included in case the stored fingerprint was generated with IncludeIP: true
-	if Generate(r, WithIP()) == sessionFingerprint {
-		// Matches with IP - means stored fingerprint had IP and it still matches
-		// This shouldn't happen as we already tried default, but keep for safety
-		return nil
-	}
-
-	// We can't match the current request with stored fingerprint using any combination
-	// Try to identify what component is different by process of elimination
-
-	// Test without UserAgent
-	fpNoUA := Generate(r, WithoutUserAgent())
-
-	// Test without Accept headers
-	fpNoAccept := Generate(r, WithoutAcceptHeaders())
-
-	// Test without HeaderSet
-	fpNoHeaderSet := Generate(r, WithoutHeaderSet())
-
-	// If removing UA makes it match, UA was the problem
-	if fpNoUA == sessionFingerprint {
-		return ErrUserAgentMismatch
-	}
-
-	// If removing Accept headers makes it match, they were the problem
-	if fpNoAccept == sessionFingerprint {
-		return ErrHeadersMismatch
-	}
-
-	// If removing HeaderSet makes it match, it was the problem
-	if fpNoHeaderSet == sessionFingerprint {
-		return ErrHeaderSetMismatch
-	}
-
-	// If nothing matches, likely the stored fingerprint included IP and it changed
-	// Or multiple components changed
-	return ErrIPMismatch
+	return ErrMismatch
 }
 
 // getHeaders creates a fingerprint based on which standard HTTP headers are present.
 //
-// This function fingerprints the *presence* of common browser headers, not their order.
+// This function fingerprints the *presence* of common browser headers, not their values.
 // Different browsers and HTTP clients send different sets of headers, making this
 // a useful signal for device identification:
 //   - Chrome sends Sec-Fetch-* headers
@@ -136,15 +107,12 @@ func Validate(r *http.Request, sessionFingerprint string) error {
 //   - API clients typically send minimal headers
 //   - Mobile browsers may omit certain headers
 //
-// The function filters for stable, commonly-present headers and ignores headers
-// that frequently change (cookies, cache directives, etc.) to reduce false positives.
-// Headers are sorted alphabetically to ensure consistent output for the same header set.
+// Only stable, commonly-present headers are included. Frequently-changing headers
+// (cookies, cache directives, etc.) are excluded to reduce false positives.
 func getHeaders(r *http.Request) string {
 	var headerNames []string
 	for name := range r.Header {
-		// Only include stable, commonly-present headers that are useful
-		// for browser/client fingerprinting. Skip headers that vary
-		// frequently or are added by proxies/CDNs.
+		// Whitelist stable headers that identify browser/client type
 		switch strings.ToLower(name) {
 		case "user-agent", "accept", "accept-language", "accept-encoding",
 			"connection", "upgrade-insecure-requests", "sec-fetch-dest",
@@ -153,7 +121,6 @@ func getHeaders(r *http.Request) string {
 		}
 	}
 
-	// Sort to ensure consistent output for identical header sets
 	sort.Strings(headerNames)
 	return strings.Join(headerNames, ",")
 }
@@ -178,4 +145,26 @@ func Cookie(r *http.Request) string {
 // may vary with content negotiation.
 func JWT(r *http.Request) string {
 	return Generate(r, WithoutAcceptHeaders())
+}
+
+// ValidateStrict validates a fingerprint generated with Strict().
+// Use for high-security scenarios where IP changes should invalidate sessions.
+// WARNING: Will cause false positives for mobile users, VPN users, and users
+// behind dynamic proxies.
+func ValidateStrict(r *http.Request, sessionFingerprint string) error {
+	return Validate(r, sessionFingerprint, WithIP())
+}
+
+// ValidateCookie validates a fingerprint generated with Cookie().
+// Excludes IP address to avoid false positives from mobile networks and VPNs.
+// This is the recommended default for most web applications.
+func ValidateCookie(r *http.Request, sessionFingerprint string) error {
+	return Validate(r, sessionFingerprint) // Uses defaults
+}
+
+// ValidateJWT validates a fingerprint generated with JWT().
+// Includes only User-Agent and header set, excluding Accept headers which
+// may vary with content negotiation.
+func ValidateJWT(r *http.Request, sessionFingerprint string) error {
+	return Validate(r, sessionFingerprint, WithoutAcceptHeaders())
 }

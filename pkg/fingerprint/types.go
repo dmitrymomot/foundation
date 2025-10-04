@@ -66,9 +66,8 @@ func WithoutHeaderSet() Option {
 	}
 }
 
-// defaultOptions returns the default options for fingerprint generation.
-// Default configuration excludes IP address to avoid false positives from
-// mobile networks, VPNs, and corporate proxies.
+// defaultOptions returns the default fingerprint configuration.
+// Excludes IP address to avoid false positives from mobile networks, VPNs, and corporate proxies.
 func defaultOptions() *options {
 	return &options{
 		includeIP:            false,
@@ -78,7 +77,6 @@ func defaultOptions() *options {
 	}
 }
 
-// applyOptions applies functional options to the default configuration.
 func applyOptions(opts ...Option) *options {
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -91,6 +89,15 @@ func applyOptions(opts ...Option) *options {
 var (
 	// ErrInvalidFingerprint indicates the stored fingerprint has invalid format.
 	ErrInvalidFingerprint = errors.New("invalid fingerprint format")
+
+	// ErrMismatch indicates the fingerprint doesn't match the current request.
+	// This could indicate a session hijacking attempt or legitimate changes to
+	// the client's browser/network configuration.
+	ErrMismatch = errors.New("fingerprint mismatch")
+
+	// Deprecated: The following errors are no longer returned by Validate().
+	// They are kept for backward compatibility but may be removed in a future version.
+	// Use the new Validate() function with matching options instead.
 
 	// ErrIPMismatch indicates the client IP address changed.
 	ErrIPMismatch = errors.New("client IP changed")
