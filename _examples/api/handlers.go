@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
+	"github.com/dmitrymomot/foundation/_examples/api/db/repository"
 	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/response"
 	"github.com/dmitrymomot/foundation/core/validator"
@@ -93,16 +93,14 @@ func signupHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 			return response.Error(response.ErrInternalServerError)
 		}
 
-		// Authenticate session (creates token pair)
-		tokens, err := ctx.Auth(user.ID)
+		// Authenticate with session data (creates token pair)
+		tokens, err := ctx.Auth(user.ID, SessionData{
+			Name:  user.Name,
+			Email: user.Email,
+		})
 		if err != nil {
 			return response.Error(response.ErrInternalServerError)
 		}
-
-		// Get session and update session data
-		sess, _ := ctx.Session()
-		sess.Data.Name = user.Name
-		sess.Data.Email = user.Email
 
 		return response.JSONWithStatus(SignupResponse{
 			User: UserResponse{
@@ -148,16 +146,14 @@ func loginHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 			return response.Error(response.ErrUnauthorized.WithMessage("Invalid credentials"))
 		}
 
-		// Authenticate session (creates token pair)
-		tokens, err := ctx.Auth(user.ID)
+		// Authenticate with session data (creates token pair)
+		tokens, err := ctx.Auth(user.ID, SessionData{
+			Name:  user.Name,
+			Email: user.Email,
+		})
 		if err != nil {
 			return response.Error(response.ErrInternalServerError)
 		}
-
-		// Get session and update session data
-		sess, _ := ctx.Session()
-		sess.Data.Name = user.Name
-		sess.Data.Email = user.Email
 
 		return response.JSON(LoginResponse{
 			User: UserResponse{

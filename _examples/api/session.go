@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
+	"github.com/dmitrymomot/foundation/_examples/api/db/repository"
 	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/google/uuid"
 )

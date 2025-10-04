@@ -160,9 +160,17 @@ func (c *Context) Bind(v any) error {
 
 // Auth authenticates a user and returns token pair.
 // It wraps transport.Authenticate with context.
-func (c *Context) Auth(userID uuid.UUID) (sessiontransport.TokenPair, error) {
-	_, tokens, err := c.transport.Authenticate(c, userID)
+// Optional data parameter allows setting session data during authentication.
+func (c *Context) Auth(userID uuid.UUID, data ...SessionData) (sessiontransport.TokenPair, error) {
+	_, tokens, err := c.transport.Authenticate(c, userID, data...)
 	return tokens, err
+}
+
+// UpdateSession saves modified session data to storage.
+// For JWT transport, only the database is updated (tokens remain immutable).
+// Use this when you need to update session data after authentication.
+func (c *Context) UpdateSession(sess session.Session[SessionData]) error {
+	return c.transport.Save(c, sess)
 }
 
 // Refresh refreshes the session using refresh token and returns new token pair.

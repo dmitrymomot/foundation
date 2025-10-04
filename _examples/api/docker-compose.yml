@@ -1,11 +1,13 @@
+version: "3.8"
+
 services:
   postgres:
     image: postgres:alpine
     container_name: foundation-basic-db
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: dbname
+      POSTGRES_USER: pguser
+      POSTGRES_PASSWORD: pgpass
+      POSTGRES_DB: pgdb
     ports:
       - "5432:5432"
     volumes:

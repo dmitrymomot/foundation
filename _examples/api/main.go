@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
+	"github.com/dmitrymomot/foundation/_examples/api/db/repository"
 	"github.com/dmitrymomot/foundation/core/config"
 	"github.com/dmitrymomot/foundation/core/health"
 	"github.com/dmitrymomot/foundation/core/logger"
