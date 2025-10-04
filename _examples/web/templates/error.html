@@ -1,0 +1,14 @@
+{{define "content"}}
+<h1>Error {{.StatusCode}}</h1>
+
+<div class="error">
+    <strong>{{.Title}}</strong>
+    {{if .Message}}
+    <p style="margin-top: 10px;">{{.Message}}</p>
+    {{end}}
+</div>
+
+<div class="link">
+    <a href="/">Go to Home</a>
+</div>
+{{end}}

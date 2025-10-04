@@ -1,0 +1,27 @@
+{{define "content"}}
+<h1>Log In</h1>
+
+{{if .Error}}
+<div class="error">
+    {{.Error}}
+</div>
+{{end}}
+
+<form method="POST" action="/login">
+    <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required>
+    </div>
+
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required>
+    </div>
+
+    <button type="submit">Log In</button>
+</form>
+
+<div class="link">
+    Don't have an account? <a href="/signup">Sign up</a>
+</div>
+{{end}}
