@@ -658,3 +658,256 @@ func TestRequireGuest(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "no session ok")
 	})
 }
+
+func TestSession_IPAndUserAgentExtraction(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extracts IP from CF-Connecting-IP header", func(t *testing.T) {
+		t.Parallel()
+
+		mockTransport := new(MockTransport[string])
+		testIP := "203.0.113.42"
+		testUA := "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.Nil,
+			IP:        testIP,
+			UserAgent: testUA,
+			Data:      "data",
+		}
+
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
+
+		r := router.New[*router.Context]()
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
+
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			retrieved, ok := middleware.GetSession[string](ctx)
+			assert.True(t, ok)
+			assert.Equal(t, testIP, retrieved.IP, "IP should be extracted")
+			assert.Equal(t, testUA, retrieved.UserAgent, "UserAgent should be extracted")
+			return response.JSON(map[string]string{"status": "ok"})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("CF-Connecting-IP", testIP)
+		req.Header.Set("User-Agent", testUA)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockTransport.AssertExpectations(t)
+	})
+
+	t.Run("extracts IP from X-Forwarded-For header", func(t *testing.T) {
+		t.Parallel()
+
+		mockTransport := new(MockTransport[string])
+		testIP := "198.51.100.5"
+		testUA := "Mozilla/5.0 (iPhone) Safari/17.0"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.Nil,
+			IP:        testIP,
+			UserAgent: testUA,
+			Data:      "data",
+		}
+
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
+
+		r := router.New[*router.Context]()
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
+
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			retrieved, ok := middleware.GetSession[string](ctx)
+			assert.True(t, ok)
+			assert.Equal(t, testIP, retrieved.IP)
+			assert.Equal(t, testUA, retrieved.UserAgent)
+			return response.JSON(map[string]string{"status": "ok"})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("X-Forwarded-For", testIP+", 192.168.1.1")
+		req.Header.Set("User-Agent", testUA)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockTransport.AssertExpectations(t)
+	})
+
+	t.Run("handles IPv6 addresses", func(t *testing.T) {
+		t.Parallel()
+
+		mockTransport := new(MockTransport[string])
+		testIP := "2001:db8::1"
+		testUA := "Mozilla/5.0 (Macintosh) Firefox/120.0"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.New(),
+			IP:        testIP,
+			UserAgent: testUA,
+			Data:      "data",
+		}
+
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
+
+		r := router.New[*router.Context]()
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
+
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			retrieved, ok := middleware.GetSession[string](ctx)
+			assert.True(t, ok)
+			assert.Equal(t, testIP, retrieved.IP)
+			assert.Equal(t, testUA, retrieved.UserAgent)
+			return response.JSON(map[string]string{"status": "ok"})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("CF-Connecting-IP", testIP)
+		req.Header.Set("User-Agent", testUA)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockTransport.AssertExpectations(t)
+	})
+
+	t.Run("allows empty User-Agent", func(t *testing.T) {
+		t.Parallel()
+
+		mockTransport := new(MockTransport[string])
+		testIP := "203.0.113.1"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.Nil,
+			IP:        testIP,
+			UserAgent: "",
+			Data:      "data",
+		}
+
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
+
+		r := router.New[*router.Context]()
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
+
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			retrieved, ok := middleware.GetSession[string](ctx)
+			assert.True(t, ok)
+			assert.Equal(t, testIP, retrieved.IP)
+			assert.Equal(t, "", retrieved.UserAgent, "Empty UserAgent should be allowed")
+			return response.JSON(map[string]string{"status": "ok"})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("CF-Connecting-IP", testIP)
+		// No User-Agent header
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockTransport.AssertExpectations(t)
+	})
+
+	t.Run("handles bot User-Agent", func(t *testing.T) {
+		t.Parallel()
+
+		mockTransport := new(MockTransport[string])
+		testIP := "66.249.66.1"
+		botUA := "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.Nil,
+			IP:        testIP,
+			UserAgent: botUA,
+			Data:      "data",
+		}
+
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
+
+		r := router.New[*router.Context]()
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
+
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			retrieved, ok := middleware.GetSession[string](ctx)
+			assert.True(t, ok)
+			assert.Equal(t, testIP, retrieved.IP)
+			assert.Equal(t, botUA, retrieved.UserAgent)
+			return response.JSON(map[string]string{"status": "ok"})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("CF-Connecting-IP", testIP)
+		req.Header.Set("User-Agent", botUA)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockTransport.AssertExpectations(t)
+	})
+
+	t.Run("session Device() method works with extracted UserAgent", func(t *testing.T) {
+		t.Parallel()
+
+		mockTransport := new(MockTransport[string])
+		testIP := "203.0.113.1"
+		testUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.Nil,
+			IP:        testIP,
+			UserAgent: testUA,
+			Data:      "data",
+		}
+
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
+
+		r := router.New[*router.Context]()
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
+
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			retrieved, ok := middleware.GetSession[string](ctx)
+			assert.True(t, ok)
+			assert.Equal(t, testUA, retrieved.UserAgent)
+
+			device := retrieved.Device()
+			assert.NotEqual(t, "Unknown device", device, "Device should be recognized")
+			assert.Contains(t, device, "Chrome", "Device identifier should contain browser")
+
+			return response.JSON(map[string]string{"status": "ok"})
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req.Header.Set("CF-Connecting-IP", testIP)
+		req.Header.Set("User-Agent", testUA)
+		w := httptest.NewRecorder()
+
+		r.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockTransport.AssertExpectations(t)
+	})
+}

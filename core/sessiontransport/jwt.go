@@ -10,6 +10,7 @@ import (
 
 	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
 	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
@@ -63,13 +64,20 @@ func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 
 	var claims jwtClaims
 	if err := j.signer.Parse(token, &claims); err != nil {
-		return j.manager.New(ctx, fingerprint.JWT(ctx.Request()))
+		return j.manager.New(ctx, session.NewSessionParams{
+			Fingerprint: fingerprint.JWT(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		})
 	}
 
-	// JTI claim contains Session.Token
 	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
-		return j.manager.New(ctx, fingerprint.JWT(ctx.Request()))
+		return j.manager.New(ctx, session.NewSessionParams{
+			Fingerprint: fingerprint.JWT(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		})
 	}
 
 	return sess, nil
@@ -87,9 +95,8 @@ func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (session
 	if err != nil && err != ErrNoToken {
 		return session.Session[Data]{}, TokenPair{}, err
 	}
-	// If ErrNoToken, currentSess will be anonymous from Load fallback
+	// ErrNoToken is acceptable - Load creates anonymous session as fallback
 
-	// Rotates token for security
 	authSess, err := j.manager.Authenticate(ctx, currentSess, userID)
 	if err != nil {
 		return session.Session[Data]{}, TokenPair{}, err
@@ -110,7 +117,6 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.S
 		return session.Session[Data]{}, TokenPair{}, ErrInvalidToken
 	}
 
-	// JTI contains Session.Token
 	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
 		return session.Session[Data]{}, TokenPair{}, err
@@ -158,13 +164,9 @@ func (j *JWT[Data]) Delete(ctx handler.Context) error {
 }
 
 // Touch updates session expiration in the database if the touch interval has elapsed.
-// This is called by the session middleware after each request to extend session lifetime.
-//
-// For JWT transport, tokens are immutable so we only update the database record.
-// The method retrieves the session from the store, which automatically touches it if needed.
+// For JWT transport, tokens are immutable so only the database record is updated.
 // The client continues using their existing JWT until it expires or they refresh.
 func (j *JWT[Data]) Touch(ctx handler.Context, sess session.Session[Data]) error {
-	// JWT is immutable - retrieve session to trigger database touch if needed
 	_, err := j.manager.GetByID(ctx, sess.ID)
 	return err
 }

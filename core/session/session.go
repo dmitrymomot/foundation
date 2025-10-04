@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/dmitrymomot/foundation/pkg/useragent"
 )
 
 // Session represents a user session with generic data storage.
@@ -24,6 +26,12 @@ type Session[Data any] struct {
 	// Fingerprint is the device fingerprint for security validation (format: v1:hash, 35 chars)
 	Fingerprint string
 
+	// IP is the client IP address
+	IP string
+
+	// UserAgent is the raw User-Agent string from HTTP request
+	UserAgent string
+
 	// Data holds custom application-specific session information.
 	// Examples: shopping cart, UI preferences, A/B test variants.
 	Data Data
@@ -36,6 +44,22 @@ type Session[Data any] struct {
 
 	// UpdatedAt tracks last session modification or touch
 	UpdatedAt time.Time
+}
+
+// Device returns a human-readable device identifier based on the User-Agent string.
+// Returns "Unknown device" if UserAgent is empty or parsing fails.
+// Examples: "Chrome/120.0 (Windows, desktop)", "Safari/17.0 (iOS, mobile)", "Bot: Googlebot"
+func (s Session[Data]) Device() string {
+	if s.UserAgent == "" {
+		return "Unknown device"
+	}
+
+	ua, err := useragent.Parse(s.UserAgent)
+	if err != nil {
+		return "Unknown device"
+	}
+
+	return ua.GetShortIdentifier()
 }
 
 // generateToken creates a cryptographically secure random token using 32 bytes (256 bits)

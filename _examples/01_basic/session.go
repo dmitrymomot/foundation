@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 
 	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
@@ -41,13 +42,16 @@ func (s *sessionStorage) GetByID(ctx context.Context, id uuid.UUID) (*session.Se
 
 	// Convert database model to session.Session
 	sess := &session.Session[SessionData]{
-		ID:        dbSession.ID,
-		Token:     dbSession.Token,
-		UserID:    uuid.Nil,
-		Data:      data,
-		ExpiresAt: dbSession.ExpiresAt,
-		CreatedAt: dbSession.CreatedAt,
-		UpdatedAt: dbSession.UpdatedAt,
+		ID:          dbSession.ID,
+		Token:       dbSession.Token,
+		UserID:      uuid.Nil,
+		Fingerprint: dbSession.Fingerprint,
+		IP:          dbSession.IpAddress,
+		UserAgent:   dbSession.UserAgent.String,
+		Data:        data,
+		ExpiresAt:   dbSession.ExpiresAt,
+		CreatedAt:   dbSession.CreatedAt,
+		UpdatedAt:   dbSession.UpdatedAt,
 	}
 
 	// Handle nullable user_id
@@ -73,13 +77,16 @@ func (s *sessionStorage) GetByToken(ctx context.Context, token string) (*session
 
 	// Convert database model to session.Session
 	sess := &session.Session[SessionData]{
-		ID:        dbSession.ID,
-		Token:     dbSession.Token,
-		UserID:    uuid.Nil,
-		Data:      data,
-		ExpiresAt: dbSession.ExpiresAt,
-		CreatedAt: dbSession.CreatedAt,
-		UpdatedAt: dbSession.UpdatedAt,
+		ID:          dbSession.ID,
+		Token:       dbSession.Token,
+		UserID:      uuid.Nil,
+		Fingerprint: dbSession.Fingerprint,
+		IP:          dbSession.IpAddress,
+		UserAgent:   dbSession.UserAgent.String,
+		Data:        data,
+		ExpiresAt:   dbSession.ExpiresAt,
+		CreatedAt:   dbSession.CreatedAt,
+		UpdatedAt:   dbSession.UpdatedAt,
 	}
 
 	// Handle nullable user_id
@@ -110,16 +117,25 @@ func (s *sessionStorage) Save(ctx context.Context, sess *session.Session[Session
 		userID = &sess.UserID
 	}
 
+	// Prepare nullable user_agent
+	var userAgent sql.NullString
+	if sess.UserAgent != "" {
+		userAgent = sql.NullString{String: sess.UserAgent, Valid: true}
+	}
+
 	// Upsert into database
 	_, err = s.repo.UpsertSession(ctx, repository.UpsertSessionParams{
-		ID:        sess.ID,
-		Token:     sess.Token,
-		DeviceID:  deviceID,
-		UserID:    userID,
-		Data:      dataJSON,
-		ExpiresAt: sess.ExpiresAt,
-		CreatedAt: sess.CreatedAt,
-		UpdatedAt: sess.UpdatedAt,
+		ID:          sess.ID,
+		Token:       sess.Token,
+		DeviceID:    deviceID,
+		Fingerprint: sess.Fingerprint,
+		IpAddress:   sess.IP,
+		UserAgent:   userAgent,
+		UserID:      userID,
+		Data:        dataJSON,
+		ExpiresAt:   sess.ExpiresAt,
+		CreatedAt:   sess.CreatedAt,
+		UpdatedAt:   sess.UpdatedAt,
 	})
 
 	return err

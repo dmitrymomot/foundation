@@ -10,6 +10,7 @@ import (
 	"github.com/dmitrymomot/foundation/core/cookie"
 	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
 	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
 
@@ -35,12 +36,20 @@ func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr *cookie.Manager, 
 func (c *Cookie[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 	token, err := c.cookieMgr.GetSigned(ctx.Request(), c.name)
 	if err != nil {
-		return c.manager.New(ctx, fingerprint.Cookie(ctx.Request()))
+		return c.manager.New(ctx, session.NewSessionParams{
+			Fingerprint: fingerprint.Cookie(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		})
 	}
 
 	sess, err := c.manager.GetByToken(ctx, token)
 	if err != nil {
-		return c.manager.New(ctx, fingerprint.Cookie(ctx.Request()))
+		return c.manager.New(ctx, session.NewSessionParams{
+			Fingerprint: fingerprint.Cookie(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		})
 	}
 
 	return sess, nil
@@ -71,7 +80,6 @@ func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (sess
 		return session.Session[Data]{}, err
 	}
 
-	// Rotates token for security
 	authSess, err := c.manager.Authenticate(ctx, currentSess, userID)
 	if err != nil {
 		return session.Session[Data]{}, err
@@ -92,7 +100,6 @@ func (c *Cookie[Data]) Logout(ctx handler.Context) (session.Session[Data], error
 		return session.Session[Data]{}, err
 	}
 
-	// Rotates token for security
 	anonSess, err := c.manager.Logout(ctx, currentSess)
 	if err != nil {
 		return session.Session[Data]{}, err
@@ -123,12 +130,9 @@ func (c *Cookie[Data]) Delete(ctx handler.Context) error {
 
 // Touch updates session expiration if the touch interval has elapsed.
 // This is called by the session middleware after each request to extend session lifetime.
-//
-// The method retrieves the session from the store (which automatically touches it if needed)
-// and saves the updated cookie if the session was refreshed. This ensures the client's
-// cookie MaxAge stays in sync with the server-side session expiration.
+// Ensures the client's cookie MaxAge stays synchronized with server-side session expiration.
 func (c *Cookie[Data]) Touch(ctx handler.Context, sess session.Session[Data]) error {
-	// GetByID triggers automatic touch if TouchInterval has passed
+	// Manager automatically extends expiration if touchInterval has elapsed
 	refreshed, err := c.manager.GetByID(ctx, sess.ID)
 	if err != nil {
 		return err

@@ -105,7 +105,11 @@ func TestManager_New(t *testing.T) {
 		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
 		beforeCreate := time.Now()
-		sess, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
+		sess, err := mgr.New(ctx, session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "192.168.1.1",
+			UserAgent:   "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0",
+		})
 		afterCreate := time.Now()
 
 		require.NoError(t, err)
@@ -118,6 +122,10 @@ func TestManager_New(t *testing.T) {
 		assert.NotEqual(t, uuid.Nil, sess.ID)
 		assert.Equal(t, uuid.Nil, sess.UserID)
 		assert.Equal(t, "", sess.Data) // Zero value for string
+
+		// Verify IP and UserAgent are set
+		assert.Equal(t, "192.168.1.1", sess.IP)
+		assert.Equal(t, "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0", sess.UserAgent)
 
 		// Verify expiration time is set correctly (TTL from creation time)
 		assert.True(t, sess.ExpiresAt.After(beforeCreate.Add(ttl).Add(-time.Second)))
@@ -141,10 +149,16 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
-		sess1, err1 := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
+		params := session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "192.168.1.1",
+			UserAgent:   "Mozilla/5.0",
+		}
+
+		sess1, err1 := mgr.New(ctx, params)
 		require.NoError(t, err1)
 
-		sess2, err2 := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
+		sess2, err2 := mgr.New(ctx, params)
 		require.NoError(t, err2)
 
 		// Tokens should be unique
@@ -165,11 +179,58 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(expectedErr)
 
-		_, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
+		_, err := mgr.New(ctx, session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "192.168.1.1",
+			UserAgent:   "Mozilla/5.0",
+		})
 
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, "failed to save session")
 		assert.ErrorIs(t, err, expectedErr)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("returns error when IP is empty", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		mgr := session.NewManager(store, time.Hour, time.Minute)
+
+		ctx := context.Background()
+
+		_, err := mgr.New(ctx, session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "",
+			UserAgent:   "Mozilla/5.0",
+		})
+
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "IP address is required")
+
+		// Store should not be called when validation fails
+		store.AssertNotCalled(t, "Save", mock.Anything, mock.Anything)
+	})
+
+	t.Run("allows empty UserAgent", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		mgr := session.NewManager(store, time.Hour, time.Minute)
+
+		ctx := context.Background()
+
+		store.On("Save", ctx, mock.Anything).Return(nil)
+
+		sess, err := mgr.New(ctx, session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "192.168.1.1",
+			UserAgent:   "", // Empty is allowed
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, "", sess.UserAgent)
 
 		store.AssertExpectations(t)
 	})
@@ -184,7 +245,11 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
-		sess, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
+		sess, err := mgr.New(ctx, session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "192.168.1.1",
+			UserAgent:   "Mozilla/5.0",
+		})
 
 		require.NoError(t, err)
 		assert.Equal(t, testData{}, sess.Data) // Zero value
@@ -202,7 +267,11 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
-		sess, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
+		sess, err := mgr.New(ctx, session.NewSessionParams{
+			Fingerprint: "v1:0123456789abcdef0123456789abcdef",
+			IP:          "192.168.1.1",
+			UserAgent:   "Mozilla/5.0",
+		})
 
 		require.NoError(t, err)
 		assert.Nil(t, sess.Data) // Zero value for map
@@ -828,6 +897,45 @@ func TestManager_Authenticate(t *testing.T) {
 
 		store.AssertExpectations(t)
 	})
+
+	t.Run("preserves IP and UserAgent from old session", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		mgr := session.NewManager(store, time.Hour, time.Minute)
+
+		ctx := context.Background()
+		oldSessionID := uuid.New()
+		userID := uuid.New()
+		testIP := "203.0.113.42"
+		testUA := "Mozilla/5.0 (iPhone) Safari/17.0"
+
+		oldSession := session.Session[string]{
+			ID:        oldSessionID,
+			Token:     "old-token",
+			UserID:    uuid.Nil,
+			IP:        testIP,
+			UserAgent: testUA,
+			Data:      "test-data",
+			ExpiresAt: time.Now().Add(30 * time.Minute),
+			CreatedAt: time.Now().Add(-1 * time.Hour),
+			UpdatedAt: time.Now().Add(-1 * time.Hour),
+		}
+
+		store.On("Delete", ctx, oldSessionID).Return(nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.IP == testIP && s.UserAgent == testUA
+		})).Return(nil)
+
+		newSession, err := mgr.Authenticate(ctx, oldSession, userID)
+
+		require.NoError(t, err)
+		assert.Equal(t, testIP, newSession.IP, "IP should be preserved")
+		assert.Equal(t, testUA, newSession.UserAgent, "UserAgent should be preserved")
+		assert.Equal(t, userID, newSession.UserID)
+
+		store.AssertExpectations(t)
+	})
 }
 
 func TestManager_Logout(t *testing.T) {
@@ -969,6 +1077,46 @@ func TestManager_Logout(t *testing.T) {
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, "failed to save anonymous session")
 		assert.ErrorIs(t, err, expectedErr)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("preserves IP and UserAgent from old session", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		mgr := session.NewManager(store, time.Hour, time.Minute)
+
+		ctx := context.Background()
+		oldSessionID := uuid.New()
+		userID := uuid.New()
+		testIP := "2001:db8::1"
+		testUA := "Mozilla/5.0 (Macintosh) Chrome/120.0"
+
+		oldSession := session.Session[string]{
+			ID:        oldSessionID,
+			Token:     "old-token",
+			UserID:    userID,
+			IP:        testIP,
+			UserAgent: testUA,
+			Data:      "test-data",
+			ExpiresAt: time.Now().Add(30 * time.Minute),
+			CreatedAt: time.Now().Add(-1 * time.Hour),
+			UpdatedAt: time.Now().Add(-10 * time.Minute),
+		}
+
+		store.On("Delete", ctx, oldSessionID).Return(nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.IP == testIP && s.UserAgent == testUA && s.UserID == uuid.Nil
+		})).Return(nil)
+
+		newSession, err := mgr.Logout(ctx, oldSession)
+
+		require.NoError(t, err)
+		assert.Equal(t, testIP, newSession.IP, "IP should be preserved")
+		assert.Equal(t, testUA, newSession.UserAgent, "UserAgent should be preserved")
+		assert.Equal(t, uuid.Nil, newSession.UserID, "UserID should be cleared")
+		assert.Equal(t, "", newSession.Data, "Data should be cleared")
 
 		store.AssertExpectations(t)
 	})
@@ -1165,7 +1313,11 @@ func TestSession_FingerprintPersistence(t *testing.T) {
 	store.On("Delete", ctx, mock.Anything).Return(nil)
 
 	// 1. Create new session with fingerprint
-	sess, err := mgr.New(ctx, testFingerprint)
+	sess, err := mgr.New(ctx, session.NewSessionParams{
+		Fingerprint: testFingerprint,
+		IP:          "192.168.1.1",
+		UserAgent:   "Mozilla/5.0",
+	})
 	require.NoError(t, err)
 	assert.Equal(t, testFingerprint, sess.Fingerprint, "fingerprint should be set in New()")
 
@@ -1185,6 +1337,119 @@ func TestSession_FingerprintPersistence(t *testing.T) {
 	assert.Equal(t, testFingerprint, loggedOut.Fingerprint, "fingerprint should be preserved through Logout()")
 
 	store.AssertExpectations(t)
+}
+
+func TestSession_Device(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns device identifier for desktop Chrome", func(t *testing.T) {
+		t.Parallel()
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			UserAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+		}
+
+		device := sess.Device()
+		assert.Contains(t, device, "Chrome")
+		assert.Contains(t, device, "Windows")
+	})
+
+	t.Run("returns device identifier for mobile Safari", func(t *testing.T) {
+		t.Parallel()
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			UserAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+		}
+
+		device := sess.Device()
+		assert.Contains(t, device, "Safari")
+		assert.Contains(t, device, "iOS")
+	})
+
+	t.Run("returns device identifier for bot", func(t *testing.T) {
+		t.Parallel()
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			UserAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+		}
+
+		device := sess.Device()
+		assert.Contains(t, device, "Bot")
+	})
+
+	t.Run("returns Unknown device for empty UserAgent", func(t *testing.T) {
+		t.Parallel()
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			UserAgent: "",
+		}
+
+		device := sess.Device()
+		assert.Equal(t, "Unknown device", device)
+	})
+
+	t.Run("returns Unknown device for malformed UserAgent", func(t *testing.T) {
+		t.Parallel()
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			UserAgent: "invalid-user-agent",
+		}
+
+		device := sess.Device()
+		assert.Equal(t, "Unknown device", device)
+	})
+}
+
+func TestSession_IPAndUserAgent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stores IP and UserAgent fields", func(t *testing.T) {
+		t.Parallel()
+
+		testIP := "192.168.1.100"
+		testUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     "test-token",
+			IP:        testIP,
+			UserAgent: testUA,
+		}
+
+		assert.Equal(t, testIP, sess.IP)
+		assert.Equal(t, testUA, sess.UserAgent)
+	})
+
+	t.Run("supports IPv6 addresses", func(t *testing.T) {
+		t.Parallel()
+
+		testIPv6 := "2001:0db8:85a3:0000:0000:8a2e:0370:7334"
+
+		sess := session.Session[string]{
+			ID: uuid.New(),
+			IP: testIPv6,
+		}
+
+		assert.Equal(t, testIPv6, sess.IP)
+	})
+
+	t.Run("allows empty UserAgent", func(t *testing.T) {
+		t.Parallel()
+
+		sess := session.Session[string]{
+			ID:        uuid.New(),
+			IP:        "192.168.1.1",
+			UserAgent: "",
+		}
+
+		assert.Equal(t, "", sess.UserAgent)
+		assert.Equal(t, "Unknown device", sess.Device())
+	})
 }
 
 func TestManager_Refresh(t *testing.T) {

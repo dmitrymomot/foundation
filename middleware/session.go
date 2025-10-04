@@ -17,11 +17,14 @@ type sessionKey struct{}
 //
 // The middleware:
 //   - Loads session from transport (logs errors but continues with empty session)
+//   - Automatically captures client IP and User-Agent from HTTP headers
 //   - Stores session in request context
 //   - Processes the request
 //   - Touches session after request (logs errors but doesn't fail)
 //
 // Transport must implement Load and Touch methods for session management.
+// Transport implementations automatically extract IP via clientip.GetIP() and
+// User-Agent from request headers when creating new sessions.
 // Logger is used for structured logging of session errors.
 func Session[C handler.Context, Data any](
 	transport interface {
@@ -34,14 +37,13 @@ func Session[C handler.Context, Data any](
 		return func(ctx C) handler.Response {
 			sess, err := transport.Load(ctx)
 			if err != nil {
-				// Check if context was cancelled
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return response.Error(ctxErr)
 				}
 				if logger != nil {
 					logger.Error("failed to load session", "error", err)
 				}
-				// Use empty session to allow graceful degradation instead of failing the request
+				// Allow graceful degradation instead of failing the request
 				sess = session.Session[Data]{}
 			}
 
@@ -50,7 +52,6 @@ func Session[C handler.Context, Data any](
 			resp := next(ctx)
 
 			if err := transport.Touch(ctx, sess); err != nil {
-				// Check if context was cancelled during cleanup
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					if logger != nil {
 						logger.Warn("context cancelled during touch")

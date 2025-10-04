@@ -16,7 +16,7 @@
 //   - RateLimit: Implements request rate limiting with token bucket algorithm
 //   - RequestID: Generates unique request identifiers for tracing
 //   - SecureHeaders: Sets security-focused HTTP response headers
-//   - Session: Manages user sessions with automatic loading and saving
+//   - Session: Manages user sessions with automatic IP/UserAgent tracking and touch mechanism
 //
 // # Common Patterns
 //
@@ -62,6 +62,32 @@
 //			return strings.HasPrefix(ctx.Request().URL.Path, "/health")
 //		},
 //	}))
+//
+// # Session Middleware
+//
+// The Session middleware automatically tracks client IP and User-Agent information:
+//
+//	// Session middleware with automatic tracking
+//	app.Use(middleware.Session(transport))
+//
+//	// Sessions automatically include:
+//	// - Client IP (via clientip.GetIP with proxy header support)
+//	// - User-Agent string
+//	// - Device identifier (via sess.Device() method)
+//
+//	// Access session information in handlers
+//	func handler(ctx *YourContext) handler.Response {
+//		sess := middleware.GetSession[SessionData](ctx)
+//		log.Info("Request from",
+//			"ip", sess.IP,
+//			"device", sess.Device(),
+//			"user_id", sess.UserID,
+//		)
+//		return response.JSON(map[string]any{"status": "ok"})
+//	}
+//
+// For session hijacking detection and security monitoring examples,
+// see the core/session package documentation.
 //
 // # Documentation
 //

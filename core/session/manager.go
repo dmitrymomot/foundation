@@ -17,6 +17,13 @@ type Manager[Data any] struct {
 	touchInterval time.Duration
 }
 
+// NewSessionParams contains parameters for creating a new session.
+type NewSessionParams struct {
+	Fingerprint string
+	IP          string
+	UserAgent   string
+}
+
 // NewManager creates a session manager with the specified store, time-to-live duration,
 // and touch interval. The touchInterval prevents updating session expiration on every access,
 // reducing write operations to the store.
@@ -29,7 +36,11 @@ func NewManager[Data any](store Store[Data], ttl, touchInterval time.Duration) *
 }
 
 // New creates and persists a new anonymous session with empty data.
-func (m *Manager[Data]) New(ctx context.Context, fingerprint string) (Session[Data], error) {
+func (m *Manager[Data]) New(ctx context.Context, params NewSessionParams) (Session[Data], error) {
+	if params.IP == "" {
+		return Session[Data]{}, fmt.Errorf("IP address is required")
+	}
+
 	token, err := generateToken()
 	if err != nil {
 		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
@@ -40,8 +51,10 @@ func (m *Manager[Data]) New(ctx context.Context, fingerprint string) (Session[Da
 		ID:          uuid.New(),
 		Token:       token,
 		UserID:      uuid.Nil,
-		Fingerprint: fingerprint,
-		Data:        *new(Data),
+		Fingerprint: params.Fingerprint,
+		IP:          params.IP,
+		UserAgent:   params.UserAgent,
+		Data:        *new(Data), // Generic-safe zero value initialization
 		ExpiresAt:   now.Add(m.ttl),
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -108,7 +121,7 @@ func (m *Manager[Data]) Save(ctx context.Context, sess *Session[Data]) error {
 }
 
 // Authenticate converts an anonymous session to an authenticated session.
-// Rotates the session token for security, preserves session data, and extends expiration.
+// Rotates the session token for security, preserves session data, IP, and UserAgent, and extends expiration.
 func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], userID uuid.UUID) (Session[Data], error) {
 	newToken, err := generateToken()
 	if err != nil {
@@ -125,6 +138,8 @@ func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], us
 		Token:       newToken,
 		UserID:      userID,
 		Fingerprint: sess.Fingerprint,
+		IP:          sess.IP,
+		UserAgent:   sess.UserAgent,
 		Data:        sess.Data,
 		ExpiresAt:   now.Add(m.ttl),
 		CreatedAt:   now,
@@ -139,7 +154,8 @@ func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], us
 }
 
 // Logout converts an authenticated session to an anonymous session.
-// Rotates the session token for security, clears user ID and data, and extends expiration.
+// Rotates the session token for security, clears user ID, resets custom data, and extends expiration.
+// Preserves IP and UserAgent to maintain device continuity across authentication state changes.
 func (m *Manager[Data]) Logout(ctx context.Context, sess Session[Data]) (Session[Data], error) {
 	newToken, err := generateToken()
 	if err != nil {
@@ -156,7 +172,9 @@ func (m *Manager[Data]) Logout(ctx context.Context, sess Session[Data]) (Session
 		Token:       newToken,
 		UserID:      uuid.Nil,
 		Fingerprint: sess.Fingerprint,
-		Data:        *new(Data),
+		IP:          sess.IP,
+		UserAgent:   sess.UserAgent,
+		Data:        *new(Data), // Generic-safe zero value initialization
 		ExpiresAt:   now.Add(m.ttl),
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -174,14 +192,11 @@ func (m *Manager[Data]) Delete(ctx context.Context, id uuid.UUID) error {
 	return m.store.Delete(ctx, id)
 }
 
-// shouldTouch returns true if enough time has passed since the last update
-// to warrant extending the session expiration.
 func (m *Manager[Data]) shouldTouch(session *Session[Data]) bool {
 	return time.Since(session.UpdatedAt) >= m.touchInterval
 }
 
-// touch extends the session expiration and updates the timestamp.
-// This reduces write operations by only updating when touchInterval has elapsed.
+// touch reduces database writes by only extending expiration when touchInterval has elapsed.
 func (m *Manager[Data]) touch(ctx context.Context, sess Session[Data]) (Session[Data], error) {
 	if err := ctx.Err(); err != nil {
 		return Session[Data]{}, err

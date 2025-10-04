@@ -2744,3 +2744,269 @@ func TestJWTTransport_EdgeCases(t *testing.T) {
 		store.AssertExpectations(t)
 	})
 }
+
+// ============================================================================
+// IP and UserAgent Extraction Tests
+// ============================================================================
+
+func TestCookie_Load_IPExtraction(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extracts IP from CF-Connecting-IP header", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("CF-Connecting-IP", "203.0.113.42")
+		r.Header.Set("X-Forwarded-For", "192.168.1.1")
+		r.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0")
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.IP == "203.0.113.42" // CF-Connecting-IP has priority
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, "203.0.113.42", sess.IP)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("extracts IP from X-Forwarded-For header", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("X-Forwarded-For", "198.51.100.5, 192.168.1.1")
+		r.Header.Set("User-Agent", "Mozilla/5.0")
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.IP == "198.51.100.5" // Leftmost IP from X-Forwarded-For
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, "198.51.100.5", sess.IP)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("extracts IP from X-Real-IP header", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("X-Real-IP", "198.51.100.10")
+		r.Header.Set("User-Agent", "Mozilla/5.0")
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.IP == "198.51.100.10"
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, "198.51.100.10", sess.IP)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("extracts IPv6 address", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("CF-Connecting-IP", "2001:db8::1")
+		r.Header.Set("User-Agent", "Mozilla/5.0")
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.IP == "2001:db8::1"
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, "2001:db8::1", sess.IP)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("falls back to RemoteAddr when no proxy headers", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.RemoteAddr = "192.168.1.100:12345"
+		r.Header.Set("User-Agent", "Mozilla/5.0")
+
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		// clientip.GetIP will return the RemoteAddr when no headers present
+		assert.Contains(t, sess.IP, "192.168.1.100")
+
+		store.AssertExpectations(t)
+	})
+}
+
+func TestCookie_Load_UserAgentExtraction(t *testing.T) {
+	t.Parallel()
+
+	t.Run("extracts User-Agent header", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		testUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("User-Agent", testUA)
+		r.Header.Set("CF-Connecting-IP", "203.0.113.1")
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.UserAgent == testUA
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, testUA, sess.UserAgent)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("allows empty User-Agent", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("CF-Connecting-IP", "203.0.113.1")
+		// No User-Agent header set
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.UserAgent == ""
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, "", sess.UserAgent)
+
+		store.AssertExpectations(t)
+	})
+
+	t.Run("handles bot User-Agent", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		botUA := "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		r.Header.Set("User-Agent", botUA)
+		r.Header.Set("CF-Connecting-IP", "66.249.66.1")
+
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
+			return s.UserAgent == botUA
+		})).Return(nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		assert.Equal(t, botUA, sess.UserAgent)
+
+		store.AssertExpectations(t)
+	})
+}
+
+func TestCookie_Load_IPAndUserAgentPersistence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("preserves IP and UserAgent in existing session", func(t *testing.T) {
+		t.Parallel()
+
+		store := &MockStore[string]{}
+		sessionMgr := session.NewManager(store, 1*time.Hour, 5*time.Minute)
+		cookieMgr := newTestCookieManager(t)
+		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
+
+		token := "existing-session-token"
+		originalIP := "198.51.100.100"
+		originalUA := "Mozilla/5.0 (Original) Firefox/110.0"
+
+		// Create request with signed cookie
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		require.NoError(t, cookieMgr.SetSigned(w, r, "session", token, cookie.WithEssential()))
+		for _, c := range w.Result().Cookies() {
+			r.AddCookie(c)
+		}
+
+		// Set different IP/UA in headers (should not override existing session)
+		r.Header.Set("CF-Connecting-IP", "203.0.113.99")
+		r.Header.Set("User-Agent", "Mozilla/5.0 (Different) Chrome/120.0")
+
+		existingSession := session.Session[string]{
+			ID:        uuid.New(),
+			Token:     token,
+			UserID:    uuid.New(),
+			IP:        originalIP,
+			UserAgent: originalUA,
+			Data:      "test-data",
+			ExpiresAt: time.Now().Add(1 * time.Hour),
+			CreatedAt: time.Now().Add(-30 * time.Minute),
+			UpdatedAt: time.Now().Add(-1 * time.Minute), // Recent update, no touch
+		}
+
+		store.On("GetByToken", mock.Anything, token).Return(existingSession, nil)
+
+		sess, err := transport.Load(newTestContext(w, r))
+
+		require.NoError(t, err)
+		// Should preserve original IP/UA from stored session
+		assert.Equal(t, originalIP, sess.IP)
+		assert.Equal(t, originalUA, sess.UserAgent)
+
+		store.AssertExpectations(t)
+	})
+}
