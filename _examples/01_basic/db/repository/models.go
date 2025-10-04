@@ -11,14 +11,17 @@ import (
 )
 
 type Session struct {
-	ID        uuid.UUID  `json:"id"`
-	Token     string     `json:"token"`
-	DeviceID  uuid.UUID  `json:"device_id"`
-	UserID    *uuid.UUID `json:"user_id"`
-	Data      []byte     `json:"data"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID          uuid.UUID  `json:"id"`
+	Token       string     `json:"token"`
+	DeviceID    uuid.UUID  `json:"device_id"`
+	Fingerprint string     `json:"fingerprint"`
+	IpAddress   string     `json:"ip_address"`
+	UserAgent   *string    `json:"user_agent"`
+	UserID      *uuid.UUID `json:"user_id"`
+	Data        []byte     `json:"data"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 type User struct {

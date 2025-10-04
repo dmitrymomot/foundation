@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/json"
 
 	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
@@ -47,7 +46,6 @@ func (s *sessionStorage) GetByID(ctx context.Context, id uuid.UUID) (*session.Se
 		UserID:      uuid.Nil,
 		Fingerprint: dbSession.Fingerprint,
 		IP:          dbSession.IpAddress,
-		UserAgent:   dbSession.UserAgent.String,
 		Data:        data,
 		ExpiresAt:   dbSession.ExpiresAt,
 		CreatedAt:   dbSession.CreatedAt,
@@ -57,6 +55,11 @@ func (s *sessionStorage) GetByID(ctx context.Context, id uuid.UUID) (*session.Se
 	// Handle nullable user_id
 	if dbSession.UserID != nil {
 		sess.UserID = *dbSession.UserID
+	}
+
+	// Handle nullable user_agent
+	if dbSession.UserAgent != nil {
+		sess.UserAgent = *dbSession.UserAgent
 	}
 
 	return sess, nil
@@ -82,7 +85,6 @@ func (s *sessionStorage) GetByToken(ctx context.Context, token string) (*session
 		UserID:      uuid.Nil,
 		Fingerprint: dbSession.Fingerprint,
 		IP:          dbSession.IpAddress,
-		UserAgent:   dbSession.UserAgent.String,
 		Data:        data,
 		ExpiresAt:   dbSession.ExpiresAt,
 		CreatedAt:   dbSession.CreatedAt,
@@ -92,6 +94,11 @@ func (s *sessionStorage) GetByToken(ctx context.Context, token string) (*session
 	// Handle nullable user_id
 	if dbSession.UserID != nil {
 		sess.UserID = *dbSession.UserID
+	}
+
+	// Handle nullable user_agent
+	if dbSession.UserAgent != nil {
+		sess.UserAgent = *dbSession.UserAgent
 	}
 
 	return sess, nil
@@ -118,9 +125,9 @@ func (s *sessionStorage) Save(ctx context.Context, sess *session.Session[Session
 	}
 
 	// Prepare nullable user_agent
-	var userAgent sql.NullString
+	var userAgent *string
 	if sess.UserAgent != "" {
-		userAgent = sql.NullString{String: sess.UserAgent, Valid: true}
+		userAgent = &sess.UserAgent
 	}
 
 	// Upsert into database

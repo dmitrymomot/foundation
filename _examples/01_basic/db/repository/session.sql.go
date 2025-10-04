@@ -33,7 +33,7 @@ func (q *Queries) DeleteSessionByID(ctx context.Context, id uuid.UUID) error {
 }
 
 const GetSessionByID = `-- name: GetSessionByID :one
-SELECT id, token, device_id, user_id, data, expires_at, created_at, updated_at FROM sessions
+SELECT id, token, device_id, fingerprint, ip_address, user_agent, user_id, data, expires_at, created_at, updated_at FROM sessions
 WHERE id = $1
   AND expires_at > CURRENT_TIMESTAMP
 `
@@ -45,6 +45,9 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, er
 		&i.ID,
 		&i.Token,
 		&i.DeviceID,
+		&i.Fingerprint,
+		&i.IpAddress,
+		&i.UserAgent,
 		&i.UserID,
 		&i.Data,
 		&i.ExpiresAt,
@@ -55,7 +58,7 @@ func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, er
 }
 
 const GetSessionByToken = `-- name: GetSessionByToken :one
-SELECT id, token, device_id, user_id, data, expires_at, created_at, updated_at FROM sessions
+SELECT id, token, device_id, fingerprint, ip_address, user_agent, user_id, data, expires_at, created_at, updated_at FROM sessions
 WHERE token = $1
   AND expires_at > CURRENT_TIMESTAMP
 `
@@ -67,6 +70,9 @@ func (q *Queries) GetSessionByToken(ctx context.Context, token string) (Session,
 		&i.ID,
 		&i.Token,
 		&i.DeviceID,
+		&i.Fingerprint,
+		&i.IpAddress,
+		&i.UserAgent,
 		&i.UserID,
 		&i.Data,
 		&i.ExpiresAt,
@@ -77,27 +83,33 @@ func (q *Queries) GetSessionByToken(ctx context.Context, token string) (Session,
 }
 
 const UpsertSession = `-- name: UpsertSession :one
-INSERT INTO sessions (id, token, device_id, user_id, data, expires_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO sessions (id, token, device_id, fingerprint, ip_address, user_agent, user_id, data, expires_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 ON CONFLICT (id) DO UPDATE
 SET token = EXCLUDED.token,
     device_id = EXCLUDED.device_id,
+    fingerprint = EXCLUDED.fingerprint,
+    ip_address = EXCLUDED.ip_address,
+    user_agent = EXCLUDED.user_agent,
     user_id = EXCLUDED.user_id,
     data = EXCLUDED.data,
     expires_at = EXCLUDED.expires_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, token, device_id, user_id, data, expires_at, created_at, updated_at
+RETURNING id, token, device_id, fingerprint, ip_address, user_agent, user_id, data, expires_at, created_at, updated_at
 `
 
 type UpsertSessionParams struct {
-	ID        uuid.UUID  `json:"id"`
-	Token     string     `json:"token"`
-	DeviceID  uuid.UUID  `json:"device_id"`
-	UserID    *uuid.UUID `json:"user_id"`
-	Data      []byte     `json:"data"`
-	ExpiresAt time.Time  `json:"expires_at"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID          uuid.UUID  `json:"id"`
+	Token       string     `json:"token"`
+	DeviceID    uuid.UUID  `json:"device_id"`
+	Fingerprint string     `json:"fingerprint"`
+	IpAddress   string     `json:"ip_address"`
+	UserAgent   *string    `json:"user_agent"`
+	UserID      *uuid.UUID `json:"user_id"`
+	Data        []byte     `json:"data"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) (Session, error) {
@@ -105,6 +117,9 @@ func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) (S
 		arg.ID,
 		arg.Token,
 		arg.DeviceID,
+		arg.Fingerprint,
+		arg.IpAddress,
+		arg.UserAgent,
 		arg.UserID,
 		arg.Data,
 		arg.ExpiresAt,
@@ -116,6 +131,9 @@ func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) (S
 		&i.ID,
 		&i.Token,
 		&i.DeviceID,
+		&i.Fingerprint,
+		&i.IpAddress,
+		&i.UserAgent,
 		&i.UserID,
 		&i.Data,
 		&i.ExpiresAt,
