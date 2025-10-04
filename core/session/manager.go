@@ -29,7 +29,7 @@ func NewManager[Data any](store Store[Data], ttl, touchInterval time.Duration) *
 }
 
 // New creates and persists a new anonymous session with empty data.
-func (m *Manager[Data]) New(ctx context.Context) (Session[Data], error) {
+func (m *Manager[Data]) New(ctx context.Context, fingerprint string) (Session[Data], error) {
 	token, err := generateToken()
 	if err != nil {
 		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
@@ -37,13 +37,14 @@ func (m *Manager[Data]) New(ctx context.Context) (Session[Data], error) {
 
 	now := time.Now()
 	session := Session[Data]{
-		ID:        uuid.New(),
-		Token:     token,
-		UserID:    uuid.Nil,
-		Data:      *new(Data),
-		ExpiresAt: now.Add(m.ttl),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.New(),
+		Token:       token,
+		UserID:      uuid.Nil,
+		Fingerprint: fingerprint,
+		Data:        *new(Data),
+		ExpiresAt:   now.Add(m.ttl),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := m.store.Save(ctx, &session); err != nil {
@@ -120,13 +121,14 @@ func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], us
 
 	now := time.Now()
 	authenticated := Session[Data]{
-		ID:        uuid.New(),
-		Token:     newToken,
-		UserID:    userID,
-		Data:      sess.Data,
-		ExpiresAt: now.Add(m.ttl),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.New(),
+		Token:       newToken,
+		UserID:      userID,
+		Fingerprint: sess.Fingerprint,
+		Data:        sess.Data,
+		ExpiresAt:   now.Add(m.ttl),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := m.store.Save(ctx, &authenticated); err != nil {
@@ -150,13 +152,14 @@ func (m *Manager[Data]) Logout(ctx context.Context, sess Session[Data]) (Session
 
 	now := time.Now()
 	anonymous := Session[Data]{
-		ID:        uuid.New(),
-		Token:     newToken,
-		UserID:    uuid.Nil,
-		Data:      *new(Data),
-		ExpiresAt: now.Add(m.ttl),
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          uuid.New(),
+		Token:       newToken,
+		UserID:      uuid.Nil,
+		Fingerprint: sess.Fingerprint,
+		Data:        *new(Data),
+		ExpiresAt:   now.Add(m.ttl),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := m.store.Save(ctx, &anonymous); err != nil {

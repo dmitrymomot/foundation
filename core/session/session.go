@@ -21,6 +21,9 @@ type Session[Data any] struct {
 	// UserID identifies the authenticated user (uuid.Nil for anonymous sessions)
 	UserID uuid.UUID
 
+	// Fingerprint is the device fingerprint for security validation (format: v1:hash, 35 chars)
+	Fingerprint string
+
 	// Data holds custom application-specific session information.
 	// Examples: shopping cart, UI preferences, A/B test variants.
 	Data Data

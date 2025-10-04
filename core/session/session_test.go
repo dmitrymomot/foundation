@@ -48,7 +48,7 @@ func (m *MockStore[Data]) Delete(ctx context.Context, id uuid.UUID) error {
 
 func (m *MockStore[Data]) DeleteExpired(ctx context.Context) error {
 	args := m.Called(ctx)
-	return args.Error(1)
+	return args.Error(0)
 }
 
 // Test data types
@@ -105,7 +105,7 @@ func TestManager_New(t *testing.T) {
 		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
 		beforeCreate := time.Now()
-		sess, err := mgr.New(ctx)
+		sess, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
 		afterCreate := time.Now()
 
 		require.NoError(t, err)
@@ -141,10 +141,10 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
-		sess1, err1 := mgr.New(ctx)
+		sess1, err1 := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
 		require.NoError(t, err1)
 
-		sess2, err2 := mgr.New(ctx)
+		sess2, err2 := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
 		require.NoError(t, err2)
 
 		// Tokens should be unique
@@ -165,7 +165,7 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(expectedErr)
 
-		_, err := mgr.New(ctx)
+		_, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
 
 		assert.Error(t, err)
 		assert.ErrorContains(t, err, "failed to save session")
@@ -184,7 +184,7 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
-		sess, err := mgr.New(ctx)
+		sess, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
 
 		require.NoError(t, err)
 		assert.Equal(t, testData{}, sess.Data) // Zero value
@@ -202,7 +202,7 @@ func TestManager_New(t *testing.T) {
 
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
-		sess, err := mgr.New(ctx)
+		sess, err := mgr.New(ctx, "v1:0123456789abcdef0123456789abcdef")
 
 		require.NoError(t, err)
 		assert.Nil(t, sess.Data) // Zero value for map
@@ -1027,7 +1027,7 @@ func TestManager_CleanupExpired(t *testing.T) {
 
 		ctx := context.Background()
 
-		store.On("DeleteExpired", ctx).Return(int64(5), nil)
+		store.On("DeleteExpired", ctx).Return(nil)
 
 		err := mgr.CleanupExpired(ctx)
 
@@ -1045,7 +1045,7 @@ func TestManager_CleanupExpired(t *testing.T) {
 		ctx := context.Background()
 		expectedErr := errors.New("database error")
 
-		store.On("DeleteExpired", ctx).Return(int64(0), expectedErr)
+		store.On("DeleteExpired", ctx).Return(expectedErr)
 
 		err := mgr.CleanupExpired(ctx)
 
@@ -1063,7 +1063,7 @@ func TestManager_CleanupExpired(t *testing.T) {
 
 		ctx := context.Background()
 
-		store.On("DeleteExpired", ctx).Return(int64(0), nil)
+		store.On("DeleteExpired", ctx).Return(nil)
 
 		err := mgr.CleanupExpired(ctx)
 
@@ -1149,6 +1149,42 @@ func TestSession_WithDifferentDataTypes(t *testing.T) {
 
 		assert.Equal(t, emptyData{}, sess.Data)
 	})
+}
+
+func TestSession_FingerprintPersistence(t *testing.T) {
+	t.Parallel()
+
+	store := &MockStore[string]{}
+	mgr := session.NewManager(store, time.Hour, time.Minute)
+	ctx := context.Background()
+	testFingerprint := "v1:test1234567890abcdef1234567890ab"
+	userID := uuid.New()
+
+	// Mock all store operations
+	store.On("Save", ctx, mock.Anything).Return(nil)
+	store.On("Delete", ctx, mock.Anything).Return(nil)
+
+	// 1. Create new session with fingerprint
+	sess, err := mgr.New(ctx, testFingerprint)
+	require.NoError(t, err)
+	assert.Equal(t, testFingerprint, sess.Fingerprint, "fingerprint should be set in New()")
+
+	// 2. Authenticate and verify fingerprint preserved
+	authenticated, err := mgr.Authenticate(ctx, sess, userID)
+	require.NoError(t, err)
+	assert.Equal(t, testFingerprint, authenticated.Fingerprint, "fingerprint should be preserved through Authenticate()")
+
+	// 3. Refresh and verify fingerprint preserved
+	refreshed, err := mgr.Refresh(ctx, authenticated)
+	require.NoError(t, err)
+	assert.Equal(t, testFingerprint, refreshed.Fingerprint, "fingerprint should be preserved through Refresh()")
+
+	// 4. Logout and verify fingerprint preserved
+	loggedOut, err := mgr.Logout(ctx, refreshed)
+	require.NoError(t, err)
+	assert.Equal(t, testFingerprint, loggedOut.Fingerprint, "fingerprint should be preserved through Logout()")
+
+	store.AssertExpectations(t)
 }
 
 func TestManager_Refresh(t *testing.T) {
