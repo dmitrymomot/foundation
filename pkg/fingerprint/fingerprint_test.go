@@ -196,8 +196,7 @@ func TestValidate(t *testing.T) {
 		err := fingerprint.Validate(req2, storedFingerprint)
 
 		assert.Error(t, err, "should reject non-matching fingerprints")
-		// Note: Without storing which components were used, we can't reliably determine
-		// which specific component changed. The error will be one of the component errors.
+		assert.ErrorIs(t, err, fingerprint.ErrMismatch, "should return ErrMismatch")
 	})
 
 	t.Run("rejects invalid stored fingerprint", func(t *testing.T) {
@@ -281,6 +280,116 @@ func TestValidate(t *testing.T) {
 		err := fingerprint.ValidateStrict(req, storedFP)
 
 		assert.NoError(t, err, "ValidateStrict should validate Strict-generated fingerprints")
+	})
+
+	t.Run("Validate fails when options don't match generation", func(t *testing.T) {
+		t.Parallel()
+		req := createTestRequest(map[string]string{
+			"User-Agent": "Mozilla/5.0",
+			"Accept":     "text/html",
+		}, "192.168.1.100:54321")
+
+		// Generate with IP option
+		storedFP := fingerprint.Generate(req, fingerprint.WithIP())
+
+		// Validate WITHOUT IP option - should fail because fingerprints won't match
+		err := fingerprint.Validate(req, storedFP)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, fingerprint.ErrMismatch, "should return ErrMismatch when options don't match")
+
+		// Validate WITH IP option - should succeed
+		err = fingerprint.Validate(req, storedFP, fingerprint.WithIP())
+		assert.NoError(t, err, "should succeed when using same options")
+	})
+
+	t.Run("validation helpers reject mismatched fingerprints", func(t *testing.T) {
+		t.Parallel()
+		req := createTestRequest(map[string]string{
+			"User-Agent":      "Mozilla/5.0",
+			"Accept":          "text/html",
+			"Accept-Language": "en-US",
+		}, "192.168.1.100:54321")
+
+		// Cookie fingerprint validated with JWT should fail (different Accept header handling)
+		cookieFP := fingerprint.Cookie(req)
+		err := fingerprint.ValidateJWT(req, cookieFP)
+		assert.Error(t, err, "ValidateJWT should reject Cookie fingerprint")
+		assert.ErrorIs(t, err, fingerprint.ErrMismatch)
+
+		// JWT fingerprint validated with Cookie should fail
+		jwtFP := fingerprint.JWT(req)
+		err = fingerprint.ValidateCookie(req, jwtFP)
+		assert.Error(t, err, "ValidateCookie should reject JWT fingerprint")
+		assert.ErrorIs(t, err, fingerprint.ErrMismatch)
+
+		// Strict fingerprint validated with Cookie should fail (different IP handling)
+		strictFP := fingerprint.Strict(req)
+		err = fingerprint.ValidateCookie(req, strictFP)
+		assert.Error(t, err, "ValidateCookie should reject Strict fingerprint")
+		assert.ErrorIs(t, err, fingerprint.ErrMismatch)
+	})
+
+	t.Run("handles all components disabled", func(t *testing.T) {
+		t.Parallel()
+		req1 := createTestRequest(map[string]string{
+			"User-Agent":      "Mozilla/5.0",
+			"Accept":          "text/html",
+			"Accept-Language": "en-US",
+		}, "192.168.1.100:54321")
+
+		req2 := createTestRequest(map[string]string{
+			"User-Agent":      "Different Browser",
+			"Accept":          "application/json",
+			"Accept-Language": "fr-FR",
+		}, "192.168.1.200:12345")
+
+		// Generate fingerprints with all components disabled
+		fp1 := fingerprint.Generate(req1,
+			fingerprint.WithoutUserAgent(),
+			fingerprint.WithoutAcceptHeaders(),
+			fingerprint.WithoutHeaderSet(),
+		)
+		fp2 := fingerprint.Generate(req2,
+			fingerprint.WithoutUserAgent(),
+			fingerprint.WithoutAcceptHeaders(),
+			fingerprint.WithoutHeaderSet(),
+		)
+
+		require.NotEmpty(t, fp1)
+		assert.Len(t, fp1, 35, "should still produce valid fingerprint format")
+		assert.Equal(t, fp1, fp2, "should produce same fingerprint when all components disabled")
+
+		// Should validate successfully
+		err := fingerprint.Validate(req2, fp1,
+			fingerprint.WithoutUserAgent(),
+			fingerprint.WithoutAcceptHeaders(),
+			fingerprint.WithoutHeaderSet(),
+		)
+		assert.NoError(t, err)
+	})
+
+	t.Run("ignores non-whitelisted headers", func(t *testing.T) {
+		t.Parallel()
+		req1 := createTestRequest(map[string]string{
+			"User-Agent":    "Mozilla/5.0",
+			"Accept":        "text/html",
+			"Cookie":        "session=xyz",
+			"Authorization": "Bearer token",
+			"X-Custom":      "value1",
+		}, "192.168.1.100:54321")
+
+		req2 := createTestRequest(map[string]string{
+			"User-Agent":    "Mozilla/5.0",
+			"Accept":        "text/html",
+			"Cookie":        "session=different",
+			"Authorization": "Bearer other_token",
+			"X-Custom":      "value2",
+		}, "192.168.1.100:54321")
+
+		fp1 := fingerprint.Generate(req1)
+		fp2 := fingerprint.Generate(req2)
+
+		assert.Equal(t, fp1, fp2, "non-whitelisted headers (Cookie, Authorization, X-Custom) should not affect fingerprint")
 	})
 }
 

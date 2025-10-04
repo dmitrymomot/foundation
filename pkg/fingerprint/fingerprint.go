@@ -11,9 +11,14 @@ import (
 )
 
 const (
-	fingerprintVersion  = "v1:"
-	fingerprintHashLen  = 16
-	fingerprintTotalLen = 35 // len("v1:") + hex.Encode(16 bytes) = 3 + 32
+	fingerprintVersion = "v1:"
+	// fingerprintHashLen uses 16 bytes (128 bits) for balance between uniqueness
+	// and storage efficiency. SHA-256 provides 256 bits, but 128 bits is sufficient
+	// for fingerprinting and reduces storage by 50%.
+	fingerprintHashLen = 16
+	// fingerprintTotalLen is the total length of a fingerprint string:
+	// 3 bytes ("v1:") + 32 bytes (hex encoding of 16 bytes) = 35 bytes
+	fingerprintTotalLen = 35
 )
 
 // Generate creates a device fingerprint from the HTTP request.
@@ -50,6 +55,8 @@ func Generate(r *http.Request, opts ...Option) string {
 		components = append(components, getHeaders(r))
 	}
 
+	// Filter out empty components to ensure consistent hashing.
+	// Empty values could come from missing headers or disabled options.
 	filtered := make([]string, 0, len(components))
 	for _, comp := range components {
 		if comp != "" {
@@ -57,10 +64,11 @@ func Generate(r *http.Request, opts ...Option) string {
 		}
 	}
 
+	// Join with pipe delimiter to prevent collision attacks where
+	// ["ab", "c"] and ["a", "bc"] would otherwise produce the same hash.
 	combined := strings.Join(filtered, "|")
 	hash := sha256.Sum256([]byte(combined))
 
-	// Use first 16 bytes (128 bits) for balance between uniqueness and storage efficiency
 	return fingerprintVersion + hex.EncodeToString(hash[:fingerprintHashLen])
 }
 
@@ -84,7 +92,6 @@ func Generate(r *http.Request, opts ...Option) string {
 //   - ValidateJWT() matches JWT()
 //   - ValidateStrict() matches Strict()
 func Validate(r *http.Request, sessionFingerprint string, opts ...Option) error {
-	// Expected format: "v1:" (3 chars) + 32 hex chars = 35 total
 	if !strings.HasPrefix(sessionFingerprint, fingerprintVersion) || len(sessionFingerprint) != fingerprintTotalLen {
 		return ErrInvalidFingerprint
 	}

@@ -94,20 +94,4 @@ var (
 	// This could indicate a session hijacking attempt or legitimate changes to
 	// the client's browser/network configuration.
 	ErrMismatch = errors.New("fingerprint mismatch")
-
-	// Deprecated: The following errors are no longer returned by Validate().
-	// They are kept for backward compatibility but may be removed in a future version.
-	// Use the new Validate() function with matching options instead.
-
-	// ErrIPMismatch indicates the client IP address changed.
-	ErrIPMismatch = errors.New("client IP changed")
-
-	// ErrUserAgentMismatch indicates the User-Agent header changed.
-	ErrUserAgentMismatch = errors.New("user agent changed")
-
-	// ErrHeadersMismatch indicates Accept-* headers changed.
-	ErrHeadersMismatch = errors.New("accept headers changed")
-
-	// ErrHeaderSetMismatch indicates the set of present headers changed.
-	ErrHeaderSetMismatch = errors.New("header set changed")
 )
