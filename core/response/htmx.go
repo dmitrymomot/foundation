@@ -66,11 +66,15 @@ func WithHTMX(response handler.Response, opts ...HTMXOption) handler.Response {
 		return response
 	}
 
+	// Build config from options
+	cfg := &htmxConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) error {
-		// Build config from options
-		cfg := &htmxConfig{}
-		for _, opt := range opts {
-			opt(cfg)
+		if !IsHTMXRequest(r) {
+			return response(w, r)
 		}
 
 		// Apply HTMX headers based on config

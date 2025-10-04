@@ -52,6 +52,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -84,6 +85,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("POST", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -115,6 +117,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("POST", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -142,6 +145,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("POST", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -168,6 +172,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -186,6 +191,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -204,6 +210,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("POST", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -222,6 +229,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("POST", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -269,6 +277,7 @@ func TestWithHTMX(t *testing.T) {
 				)
 
 				req := httptest.NewRequest("GET", "/test", nil)
+				req.Header.Set(response.HeaderHXRequest, "true")
 				w := httptest.NewRecorder()
 
 				err := wrappedResponse(w, req)
@@ -289,6 +298,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -307,6 +317,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -328,6 +339,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -357,6 +369,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -387,6 +400,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("POST", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
@@ -417,6 +431,7 @@ func TestWithHTMX(t *testing.T) {
 		)
 
 		req := httptest.NewRequest("GET", "/test", nil)
+		req.Header.Set(response.HeaderHXRequest, "true")
 		w := httptest.NewRecorder()
 
 		err := wrappedResponse(w, req)
