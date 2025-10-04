@@ -2,7 +2,6 @@ package middleware_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -26,13 +25,13 @@ type MockTransport[Data any] struct {
 	mock.Mock
 }
 
-func (m *MockTransport[Data]) Load(ctx context.Context, r *http.Request) (session.Session[Data], error) {
-	args := m.Called(ctx, r)
+func (m *MockTransport[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
+	args := m.Called(ctx)
 	return args.Get(0).(session.Session[Data]), args.Error(1)
 }
 
-func (m *MockTransport[Data]) Touch(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
-	args := m.Called(w, r, sess)
+func (m *MockTransport[Data]) Touch(ctx handler.Context, sess session.Session[Data]) error {
+	args := m.Called(ctx, sess)
 	return args.Error(0)
 }
 
@@ -55,8 +54,8 @@ func TestSession(t *testing.T) {
 			Data:   testSessionData{Theme: "dark", Language: "en"},
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, testSessionData](mockTransport, nil))
@@ -92,8 +91,8 @@ func TestSession(t *testing.T) {
 			Data:   "test-data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		handlerCalled := false
 
@@ -125,8 +124,8 @@ func TestSession(t *testing.T) {
 			Data:   "test",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -141,7 +140,7 @@ func TestSession(t *testing.T) {
 		r.ServeHTTP(w, req)
 
 		// Verify Touch was called with the loaded session
-		mockTransport.AssertCalled(t, "Touch", mock.Anything, mock.Anything, sess)
+		mockTransport.AssertCalled(t, "Touch", mock.Anything, sess)
 		mockTransport.AssertExpectations(t)
 	})
 
@@ -155,8 +154,8 @@ func TestSession(t *testing.T) {
 		mockTransport := new(MockTransport[string])
 		loadErr := errors.New("database connection failed")
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(session.Session[string]{}, loadErr)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(session.Session[string]{}, loadErr)
+		mockTransport.On("Touch", mock.Anything, mock.Anything).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, logger))
@@ -197,8 +196,8 @@ func TestSession(t *testing.T) {
 		}
 		touchErr := errors.New("redis connection timeout")
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(touchErr)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(touchErr)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, logger))
@@ -239,8 +238,8 @@ func TestSession(t *testing.T) {
 			},
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, complexData](mockTransport, nil))
@@ -278,8 +277,8 @@ func TestGetSession(t *testing.T) {
 			Data:   "test-data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -349,8 +348,8 @@ func TestMustGetSession(t *testing.T) {
 			Data:   "test-data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -407,8 +406,8 @@ func TestSetSession(t *testing.T) {
 			Data:   "original",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(originalSess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(originalSess, nil)
+		mockTransport.On("Touch", mock.Anything, mock.Anything).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -454,8 +453,8 @@ func TestSetSession(t *testing.T) {
 			Data:   testSessionData{Theme: "light", Language: "fr"},
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(originalSess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(originalSess, nil)
+		mockTransport.On("Touch", mock.Anything, mock.Anything).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, testSessionData](mockTransport, nil))
@@ -500,8 +499,8 @@ func TestRequireAuth(t *testing.T) {
 			Data:   "data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -532,8 +531,8 @@ func TestRequireAuth(t *testing.T) {
 			Data:   "data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -586,8 +585,8 @@ func TestRequireGuest(t *testing.T) {
 			Data:   "data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
@@ -618,8 +617,8 @@ func TestRequireGuest(t *testing.T) {
 			Data:   "data",
 		}
 
-		mockTransport.On("Load", mock.Anything, mock.Anything).Return(sess, nil)
-		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
+		mockTransport.On("Load", mock.Anything).Return(sess, nil)
+		mockTransport.On("Touch", mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))

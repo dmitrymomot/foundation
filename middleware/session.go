@@ -1,9 +1,7 @@
 package middleware
 
 import (
-	"context"
 	"log/slog"
-	"net/http"
 
 	"github.com/google/uuid"
 
@@ -27,14 +25,14 @@ type sessionKey struct{}
 // Logger is used for structured logging of session errors.
 func Session[C handler.Context, Data any](
 	transport interface {
-		Load(context.Context, *http.Request) (session.Session[Data], error)
-		Touch(http.ResponseWriter, *http.Request, session.Session[Data]) error
+		Load(handler.Context) (session.Session[Data], error)
+		Touch(handler.Context, session.Session[Data]) error
 	},
 	logger *slog.Logger,
 ) handler.Middleware[C] {
 	return func(next handler.HandlerFunc[C]) handler.HandlerFunc[C] {
 		return func(ctx C) handler.Response {
-			sess, err := transport.Load(ctx, ctx.Request())
+			sess, err := transport.Load(ctx)
 			if err != nil {
 				// Check if context was cancelled
 				if ctxErr := ctx.Err(); ctxErr != nil {
@@ -51,7 +49,7 @@ func Session[C handler.Context, Data any](
 
 			resp := next(ctx)
 
-			if err := transport.Touch(ctx.ResponseWriter(), ctx.Request(), sess); err != nil {
+			if err := transport.Touch(ctx, sess); err != nil {
 				// Check if context was cancelled during cleanup
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					if logger != nil {
