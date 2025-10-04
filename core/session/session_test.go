@@ -46,9 +46,9 @@ func (m *MockStore[Data]) Delete(ctx context.Context, id uuid.UUID) error {
 	return args.Error(0)
 }
 
-func (m *MockStore[Data]) DeleteExpired(ctx context.Context) (int64, error) {
+func (m *MockStore[Data]) DeleteExpired(ctx context.Context) error {
 	args := m.Called(ctx)
-	return args.Get(0).(int64), args.Error(1)
+	return args.Error(1)
 }
 
 // Test data types
@@ -594,7 +594,7 @@ func TestManager_Save(t *testing.T) {
 			return s.UpdatedAt.After(oldUpdatedAt)
 		})).Return(nil)
 
-		err := mgr.Save(ctx, sess)
+		err := mgr.Save(ctx, &sess)
 
 		require.NoError(t, err)
 
@@ -621,7 +621,7 @@ func TestManager_Save(t *testing.T) {
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
 		sess.Data = "updated-data"
-		err := mgr.Save(ctx, sess)
+		err := mgr.Save(ctx, &sess)
 
 		require.NoError(t, err)
 
@@ -648,7 +648,7 @@ func TestManager_Save(t *testing.T) {
 		expectedErr := errors.New("database error")
 		store.On("Save", ctx, mock.Anything).Return(expectedErr)
 
-		err := mgr.Save(ctx, sess)
+		err := mgr.Save(ctx, &sess)
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -676,7 +676,7 @@ func TestManager_Save(t *testing.T) {
 		store.On("Save", ctx, mock.Anything).Return(nil)
 
 		sess.Data = testData{Key: "updated", Value: 42}
-		err := mgr.Save(ctx, sess)
+		err := mgr.Save(ctx, &sess)
 
 		require.NoError(t, err)
 

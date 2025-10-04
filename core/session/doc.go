@@ -97,7 +97,7 @@
 //	// Update session data
 //	sess.Data.Theme = "dark"
 //	sess.Data.Language = "en"
-//	if err := mgr.Save(ctx, sess); err != nil {
+//	if err := mgr.Save(ctx, &sess); err != nil {
 //		// handle error
 //	}
 //
