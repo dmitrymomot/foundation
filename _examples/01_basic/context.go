@@ -3,17 +3,24 @@ package main
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/dmitrymomot/foundation/core/binder"
+	"github.com/dmitrymomot/foundation/core/sanitizer"
 	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/core/sessiontransport"
+	"github.com/dmitrymomot/foundation/core/validator"
 	"github.com/dmitrymomot/foundation/middleware"
+	"github.com/google/uuid"
 )
 
 // Context is the default context implementation that delegates to the request's context.
 type Context struct {
-	w      http.ResponseWriter
-	r      *http.Request
-	params map[string]string
+	w         http.ResponseWriter
+	r         *http.Request
+	params    map[string]string
+	transport *sessiontransport.JWT[SessionData]
 }
 
 // Deadline returns the time when work done on behalf of this context should be canceled.
@@ -67,11 +74,110 @@ func (c *Context) Session() (session.Session[SessionData], bool) {
 	return middleware.GetSession[SessionData](c)
 }
 
+// Bind binds, sanitizes, and validates request data into the provided struct.
+// It automatically selects the appropriate binder based on:
+// - Content-Type header (JSON, Form)
+// - HTTP method (Query for GET/DELETE)
+// - Path parameters (always applied)
+//
+// After binding, it:
+// 1. Sanitizes the struct using `sanitize` struct tags (e.g., `sanitize:"trim,lower"`)
+// 2. Validates the struct using `validate` struct tags (e.g., `validate:"required;min:2"`)
+//
+// Returns validation errors in a structured format compatible with response.Error.
+//
+// Example usage:
+//
+//	type SignupRequest struct {
+//	    Name     string `json:"name" sanitize:"trim,title" validate:"required;min:2"`
+//	    Email    string `json:"email" sanitize:"email" validate:"required;email"`
+//	    Password string `json:"password" validate:"required;min:8"`
+//	    Username string `json:"username" sanitize:"trim,lower,alphanum" validate:"required;min:3;max:20"`
+//	}
+//
+//	var req SignupRequest
+//	if err := ctx.Bind(&req); err != nil {
+//	    return response.Error(response.ErrBadRequest.WithError(err))
+//	}
+func (c *Context) Bind(v any) error {
+	// Always bind path parameters first (if available)
+	if len(c.params) > 0 {
+		pathBinder := binder.Path(func(r *http.Request, fieldName string) string {
+			return c.Param(fieldName)
+		})
+		if err := pathBinder(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
+			return err
+		}
+	}
+
+	// Bind query parameters for GET/DELETE methods
+	if c.r.Method == http.MethodGet || c.r.Method == http.MethodDelete {
+		if err := binder.Query()(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
+			return err
+		}
+	}
+
+	// Bind body based on Content-Type
+	contentType := c.r.Header.Get("Content-Type")
+	if contentType != "" {
+		// Remove charset and other parameters
+		if idx := strings.Index(contentType, ";"); idx != -1 {
+			contentType = strings.TrimSpace(contentType[:idx])
+		}
+
+		switch contentType {
+		case "application/json":
+			if err := binder.JSON()(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
+				return err
+			}
+		case "application/x-www-form-urlencoded", "multipart/form-data":
+			if err := binder.Form()(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
+				return err
+			}
+		}
+	}
+
+	// Sanitize using struct tags
+	if err := sanitizer.SanitizeStruct(v); err != nil {
+		return err
+	}
+
+	// Validate using struct tags
+	if err := validator.ValidateStruct(v); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Auth authenticates a user and returns token pair.
+// It wraps transport.Authenticate with context.
+func (c *Context) Auth(userID uuid.UUID) (sessiontransport.TokenPair, error) {
+	_, tokens, err := c.transport.Authenticate(c, userID)
+	return tokens, err
+}
+
+// Refresh refreshes the session using refresh token and returns new token pair.
+// It wraps transport.Refresh with the refresh token.
+func (c *Context) Refresh(refreshToken string) (sessiontransport.TokenPair, error) {
+	_, tokens, err := c.transport.Refresh(c, refreshToken)
+	return tokens, err
+}
+
+// Logout logs out the current session.
+// It wraps transport.Logout with context.
+func (c *Context) Logout() error {
+	return c.transport.Logout(c)
+}
+
 // newContext creates a new Context instance.
-func newContext(w http.ResponseWriter, r *http.Request, params map[string]string) *Context {
-	return &Context{
-		w:      w,
-		r:      r,
-		params: params,
+func newContext(transport *sessiontransport.JWT[SessionData]) func(http.ResponseWriter, *http.Request, map[string]string) *Context {
+	return func(w http.ResponseWriter, r *http.Request, params map[string]string) *Context {
+		return &Context{
+			w:         w,
+			r:         r,
+			params:    params,
+			transport: transport,
+		}
 	}
 }

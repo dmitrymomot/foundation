@@ -62,7 +62,7 @@ func main() {
 
 	// Setup new router with custom context and global middlewares
 	r := router.New[*Context](
-		router.WithContextFactory[*Context](newContext),
+		router.WithContextFactory[*Context](newContext(sesJwt)),
 		router.WithMiddleware(
 			middleware.RequestID[*Context](),
 			middleware.ClientIP[*Context](),
@@ -74,16 +74,16 @@ func main() {
 	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db)))
 
 	// Public auth endpoints
-	r.Post("/auth/signup", signupHandler(repo, sesJwt))
-	r.Post("/auth/login", loginHandler(repo, sesJwt))
-	r.Post("/auth/refresh", refreshHandler(sesJwt))
+	r.Post("/auth/signup", signupHandler(repo))
+	r.Post("/auth/login", loginHandler(repo))
+	r.Post("/auth/refresh", refreshHandler())
 
-	// Protected endpoints (require JWT authentication)
+	// Protected endpoints (require session authentication)
 	r.Group(func(protected router.Router[*Context]) {
-		protected.Use(middleware.JWT[*Context](cfg.JwtSigningKey))
+		protected.Use(middleware.Session[*Context](sesJwt, log))
 		protected.Get("/api/profile", getProfileHandler(repo))
 		protected.Put("/api/profile/password", updatePasswordHandler(repo))
-		protected.Post("/api/auth/logout", logoutHandler(sesJwt))
+		protected.Post("/api/auth/logout", logoutHandler())
 	})
 
 	eg, ctx := errgroup.WithContext(ctx)

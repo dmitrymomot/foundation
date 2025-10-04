@@ -1,18 +1,13 @@
 package main
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/dmitrymomot/foundation/_examples/01_basic/db/repository"
-	"github.com/dmitrymomot/foundation/core/binder"
 	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/response"
-	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/dmitrymomot/foundation/core/validator"
-	"github.com/dmitrymomot/foundation/middleware"
+	"github.com/dmitrymomot/foundation/integration/database/pg"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -20,23 +15,23 @@ import (
 // Request/Response types
 
 type SignupRequest struct {
-	Name     string `json:"name"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Name     string `json:"name" sanitize:"trim,title" validate:"required;min:2"`
+	Email    string `json:"email" sanitize:"email" validate:"required;email"`
+	Password string `json:"password" validate:"required;min:8;strong_password;not_common_password"`
 }
 
 type LoginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email    string `json:"email" sanitize:"email" validate:"required;email"`
+	Password string `json:"password" validate:"required"`
 }
 
 type RefreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
+	RefreshToken string `json:"refresh_token" sanitize:"trim" validate:"required"`
 }
 
 type UpdatePasswordRequest struct {
-	OldPassword string `json:"old_password"`
-	NewPassword string `json:"new_password"`
+	OldPassword string `json:"old_password" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required;min:8;strong_password;not_common_password"`
 }
 
 type TokenPairResponse struct {
@@ -63,31 +58,19 @@ type LoginResponse struct {
 
 // Auth Handlers
 
-func signupHandler(repo repository.Querier, transport *sessiontransport.JWT[SessionData]) handler.HandlerFunc[*Context] {
+func signupHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req SignupRequest
-		if err := binder.JSON()(ctx.Request(), &req); err != nil {
-			return response.Error(response.ErrBadRequest.WithMessage("Failed to parse request body").WithError(err))
-		}
-
-		// Validate input
-		rules := []validator.Rule{
-			validator.Required("name", req.Name),
-			validator.MinLen("name", req.Name, 2),
-			validator.Required("email", req.Email),
-			validator.ValidEmail("email", req.Email),
-			validator.Required("password", req.Password),
-			validator.StrongPassword("password", req.Password, validator.DefaultPasswordStrength()),
-			validator.NotCommonPassword("password", req.Password),
-		}
-
-		if err := validator.Apply(rules...); err != nil {
-			validationErrs := validator.ExtractValidationErrors(err)
-			return response.Error(
-				response.ErrBadRequest.WithDetails(map[string]any{
-					"errors": validationErrs,
-				}),
-			)
+		if err := ctx.Bind(&req); err != nil {
+			if validator.IsValidationError(err) {
+				validationErrs := validator.ExtractValidationErrors(err)
+				return response.Error(
+					response.ErrBadRequest.WithDetails(map[string]any{
+						"errors": validationErrs,
+					}),
+				)
+			}
+			return response.Error(response.ErrBadRequest.WithMessage("Failed to parse request").WithError(err))
 		}
 
 		// Hash password
@@ -96,27 +79,28 @@ func signupHandler(repo repository.Querier, transport *sessiontransport.JWT[Sess
 			return response.Error(response.ErrInternalServerError)
 		}
 
-		// Create user
-		user, err := repo.CreateUser(ctx.Request().Context(), repository.CreateUserParams{
+		// Create user (name and email already sanitized by Bind)
+		user, err := repo.CreateUser(ctx, repository.CreateUserParams{
 			Name:         req.Name,
-			Email:        strings.ToLower(strings.TrimSpace(req.Email)),
+			Email:        req.Email,
 			PasswordHash: passwordHash,
 		})
 		if err != nil {
-			// Check for duplicate email
-			if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			// Check for duplicate email (unique constraint violation)
+			if pg.IsDuplicateKeyError(err) {
 				return response.Error(response.ErrConflict.WithMessage("Email already exists"))
 			}
 			return response.Error(response.ErrInternalServerError)
 		}
 
 		// Authenticate session (creates token pair)
-		sess, tokens, err := transport.Authenticate(ctx.Request().Context(), ctx.ResponseWriter(), ctx.Request(), user.ID)
+		tokens, err := ctx.Auth(user.ID)
 		if err != nil {
 			return response.Error(response.ErrInternalServerError)
 		}
 
-		// Update session data
+		// Get session and update session data
+		sess, _ := ctx.Session()
 		sess.Data.Name = user.Name
 		sess.Data.Email = user.Email
 
@@ -135,33 +119,25 @@ func signupHandler(repo repository.Querier, transport *sessiontransport.JWT[Sess
 	}
 }
 
-func loginHandler(repo repository.Querier, transport *sessiontransport.JWT[SessionData]) handler.HandlerFunc[*Context] {
+func loginHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req LoginRequest
-		if err := binder.JSON()(ctx.Request(), &req); err != nil {
-			return response.Error(response.ErrBadRequest.WithError(err))
+		if err := ctx.Bind(&req); err != nil {
+			if validator.IsValidationError(err) {
+				validationErrs := validator.ExtractValidationErrors(err)
+				return response.Error(
+					response.ErrBadRequest.WithDetails(map[string]any{
+						"errors": validationErrs,
+					}),
+				)
+			}
+			return response.Error(response.ErrBadRequest.WithMessage("Failed to parse request").WithError(err))
 		}
 
-		// Validate input
-		rules := []validator.Rule{
-			validator.Required("email", req.Email),
-			validator.ValidEmail("email", req.Email),
-			validator.Required("password", req.Password),
-		}
-
-		if err := validator.Apply(rules...); err != nil {
-			validationErrs := validator.ExtractValidationErrors(err)
-			return response.Error(
-				response.ErrBadRequest.WithDetails(map[string]any{
-					"errors": validationErrs,
-				}),
-			)
-		}
-
-		// Find user
-		user, err := repo.GetUserByEmail(ctx.Request().Context(), strings.ToLower(strings.TrimSpace(req.Email)))
+		// Find user (email already sanitized by Bind)
+		user, err := repo.GetUserByEmail(ctx, req.Email)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if pg.IsNotFoundError(err) {
 				return response.Error(response.ErrUnauthorized.WithMessage("Invalid credentials"))
 			}
 			return response.Error(response.ErrInternalServerError)
@@ -173,12 +149,13 @@ func loginHandler(repo repository.Querier, transport *sessiontransport.JWT[Sessi
 		}
 
 		// Authenticate session (creates token pair)
-		sess, tokens, err := transport.Authenticate(ctx.Request().Context(), ctx.ResponseWriter(), ctx.Request(), user.ID)
+		tokens, err := ctx.Auth(user.ID)
 		if err != nil {
 			return response.Error(response.ErrInternalServerError)
 		}
 
-		// Update session data
+		// Get session and update session data
+		sess, _ := ctx.Session()
 		sess.Data.Name = user.Name
 		sess.Data.Email = user.Email
 
@@ -197,20 +174,23 @@ func loginHandler(repo repository.Querier, transport *sessiontransport.JWT[Sessi
 	}
 }
 
-func refreshHandler(transport *sessiontransport.JWT[SessionData]) handler.HandlerFunc[*Context] {
+func refreshHandler() handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req RefreshRequest
-		if err := binder.JSON()(ctx.Request(), &req); err != nil {
-			return response.Error(response.ErrBadRequest.WithError(err))
-		}
-
-		// Validate input
-		if err := validator.Apply(validator.Required("refresh_token", req.RefreshToken)); err != nil {
-			return response.Error(response.ErrBadRequest.WithError(err))
+		if err := ctx.Bind(&req); err != nil {
+			if validator.IsValidationError(err) {
+				validationErrs := validator.ExtractValidationErrors(err)
+				return response.Error(
+					response.ErrBadRequest.WithDetails(map[string]any{
+						"errors": validationErrs,
+					}),
+				)
+			}
+			return response.Error(response.ErrBadRequest.WithMessage("Failed to parse request").WithError(err))
 		}
 
 		// Refresh tokens
-		_, tokens, err := transport.Refresh(ctx.Request().Context(), req.RefreshToken)
+		tokens, err := ctx.Refresh(req.RefreshToken)
 		if err != nil {
 			return response.Error(response.ErrUnauthorized.WithMessage("Invalid or expired refresh token"))
 		}
@@ -223,10 +203,10 @@ func refreshHandler(transport *sessiontransport.JWT[SessionData]) handler.Handle
 	}
 }
 
-func logoutHandler(transport *sessiontransport.JWT[SessionData]) handler.HandlerFunc[*Context] {
+func logoutHandler() handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		// Delete session
-		if err := transport.Logout(ctx.Request().Context(), ctx.ResponseWriter(), ctx.Request()); err != nil {
+		if err := ctx.Logout(); err != nil {
 			// Don't fail logout on error, just log it
 			// The client should discard their tokens anyway
 		}
@@ -241,21 +221,16 @@ func logoutHandler(transport *sessiontransport.JWT[SessionData]) handler.Handler
 
 func getProfileHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
-		// Get user ID from JWT claims
-		claims, ok := middleware.GetStandardClaims(ctx)
+		// Get user ID from session
+		sess, ok := ctx.Session()
 		if !ok {
 			return response.Error(response.ErrUnauthorized)
 		}
 
-		userID, err := uuid.Parse(claims.Subject)
-		if err != nil {
-			return response.Error(response.ErrUnauthorized)
-		}
-
 		// Get user from database
-		user, err := repo.GetUserByID(ctx.Request().Context(), userID)
+		user, err := repo.GetUserByID(ctx, sess.UserID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if pg.IsNotFoundError(err) {
 				return response.Error(response.ErrNotFound.WithMessage("User not found"))
 			}
 			return response.Error(response.ErrInternalServerError)
@@ -272,42 +247,28 @@ func getProfileHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 func updatePasswordHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req UpdatePasswordRequest
-		if err := binder.JSON()(ctx.Request(), &req); err != nil {
-			return response.Error(response.ErrBadRequest.WithError(err))
+		if err := ctx.Bind(&req); err != nil {
+			if validator.IsValidationError(err) {
+				validationErrs := validator.ExtractValidationErrors(err)
+				return response.Error(
+					response.ErrBadRequest.WithDetails(map[string]any{
+						"errors": validationErrs,
+					}),
+				)
+			}
+			return response.Error(response.ErrBadRequest.WithMessage("Failed to parse request").WithError(err))
 		}
 
-		// Validate input
-		rules := []validator.Rule{
-			validator.Required("old_password", req.OldPassword),
-			validator.Required("new_password", req.NewPassword),
-			validator.StrongPassword("new_password", req.NewPassword, validator.DefaultPasswordStrength()),
-			validator.NotCommonPassword("new_password", req.NewPassword),
-		}
-
-		if err := validator.Apply(rules...); err != nil {
-			validationErrs := validator.ExtractValidationErrors(err)
-			return response.Error(
-				response.ErrBadRequest.WithDetails(map[string]any{
-					"errors": validationErrs,
-				}),
-			)
-		}
-
-		// Get user ID from JWT claims
-		claims, ok := middleware.GetStandardClaims(ctx)
+		// Get user ID from session
+		sess, ok := ctx.Session()
 		if !ok {
 			return response.Error(response.ErrUnauthorized)
 		}
 
-		userID, err := uuid.Parse(claims.Subject)
-		if err != nil {
-			return response.Error(response.ErrUnauthorized)
-		}
-
 		// Get user from database
-		user, err := repo.GetUserByID(ctx.Request().Context(), userID)
+		user, err := repo.GetUserByID(ctx, sess.UserID)
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
+			if pg.IsNotFoundError(err) {
 				return response.Error(response.ErrNotFound.WithMessage("User not found"))
 			}
 			return response.Error(response.ErrInternalServerError)
@@ -325,8 +286,8 @@ func updatePasswordHandler(repo repository.Querier) handler.HandlerFunc[*Context
 		}
 
 		// Update password
-		if err := repo.UpdateUserPassword(ctx.Request().Context(), repository.UpdateUserPasswordParams{
-			ID:           userID,
+		if err := repo.UpdateUserPassword(ctx, repository.UpdateUserPasswordParams{
+			ID:           sess.UserID,
 			PasswordHash: newPasswordHash,
 		}); err != nil {
 			return response.Error(response.ErrInternalServerError)
