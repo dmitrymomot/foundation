@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dmitrymomot/foundation/core/cookie"
+	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/dmitrymomot/foundation/pkg/jwt"
@@ -79,6 +80,31 @@ func newTestJWTService(t *testing.T) *jwt.Service {
 	return svc
 }
 
+// newTestContext creates a test handler.Context for testing
+func newTestContext(w http.ResponseWriter, r *http.Request) handler.Context {
+	return &testContext{
+		w: w,
+		r: r,
+	}
+}
+
+type testContext struct {
+	w http.ResponseWriter
+	r *http.Request
+}
+
+func (c *testContext) Deadline() (time.Time, bool) { return c.r.Context().Deadline() }
+func (c *testContext) Done() <-chan struct{}       { return c.r.Context().Done() }
+func (c *testContext) Err() error                  { return c.r.Context().Err() }
+func (c *testContext) Value(key any) any           { return c.r.Context().Value(key) }
+func (c *testContext) SetValue(key, val any) {
+	ctx := context.WithValue(c.r.Context(), key, val)
+	c.r = c.r.WithContext(ctx)
+}
+func (c *testContext) Request() *http.Request              { return c.r }
+func (c *testContext) ResponseWriter() http.ResponseWriter { return c.w }
+func (c *testContext) Param(key string) string             { return "" }
+
 // ============================================================================
 // Cookie Transport Tests
 // ============================================================================
@@ -133,7 +159,7 @@ func TestCookie_Load(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionID := uuid.New()
 		token := "valid-session-token"
 		expected := session.Session[string]{
@@ -156,11 +182,11 @@ func TestCookie_Load(t *testing.T) {
 			r.AddCookie(c)
 		}
 
-		store.On("GetByToken", ctx, token).Return(expected, nil)
+		store.On("GetByToken", mock.Anything, token).Return(expected, nil)
 		// GetByToken triggers touch/save since UpdatedAt is old
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, expected.ID, sess.ID)
@@ -178,12 +204,13 @@ func TestCookie_Load(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -200,8 +227,9 @@ func TestCookie_Load(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 
 		// Add cookie with invalid signature (not signed properly)
 		r.AddCookie(&http.Cookie{
@@ -209,9 +237,9 @@ func TestCookie_Load(t *testing.T) {
 			Value: "invalid-signature-value",
 		})
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -227,7 +255,7 @@ func TestCookie_Load(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		token := "missing-session-token"
 
 		// Create request with valid signed cookie
@@ -239,10 +267,10 @@ func TestCookie_Load(t *testing.T) {
 			r.AddCookie(c)
 		}
 
-		store.On("GetByToken", ctx, token).Return(nil, session.ErrNotFound)
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("GetByToken", mock.Anything, token).Return(nil, session.ErrNotFound)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -258,7 +286,7 @@ func TestCookie_Load(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		token := "expired-session-token"
 
 		// Create request with valid signed cookie
@@ -270,10 +298,10 @@ func TestCookie_Load(t *testing.T) {
 			r.AddCookie(c)
 		}
 
-		store.On("GetByToken", ctx, token).Return(nil, session.ErrExpired)
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("GetByToken", mock.Anything, token).Return(nil, session.ErrExpired)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -306,7 +334,7 @@ func TestCookie_Save(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		err := transport.Save(w, r, sess)
+		err := transport.Save(newTestContext(w, r), sess)
 
 		require.NoError(t, err)
 
@@ -342,7 +370,7 @@ func TestCookie_Save(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		err := transport.Save(w, r, sess)
+		err := transport.Save(newTestContext(w, r), sess)
 
 		require.NoError(t, err)
 
@@ -373,7 +401,7 @@ func TestCookie_Save(t *testing.T) {
 			UpdatedAt: time.Now().Add(-1 * time.Hour),
 		}
 
-		err := transport.Save(w, r, sess)
+		err := transport.Save(newTestContext(w, r), sess)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "cannot save expired session")
@@ -391,7 +419,7 @@ func TestCookie_Authenticate(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		userID := uuid.New()
 		oldToken := "old-anonymous-token"
 		oldID := uuid.New()
@@ -414,16 +442,16 @@ func TestCookie_Authenticate(t *testing.T) {
 			UpdatedAt: time.Now().Add(-30 * time.Minute),
 		}
 
-		store.On("GetByToken", ctx, oldToken).Return(currentSess, nil)
+		store.On("GetByToken", mock.Anything, oldToken).Return(currentSess, nil)
 		// GetByToken triggers touch/save since UpdatedAt is old
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(nil)
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID != oldID && s.Token != oldToken && s.UserID == userID
 		})).Return(nil)
 
 		w = httptest.NewRecorder() // Fresh recorder for authenticate response
-		sess, err := transport.Authenticate(ctx, w, r, userID)
+		sess, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		require.NoError(t, err)
 		assert.NotEqual(t, oldID, sess.ID)
@@ -447,15 +475,15 @@ func TestCookie_Authenticate(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		userID := uuid.New()
 		r := httptest.NewRequest("POST", "/login", nil)
 		w := httptest.NewRecorder()
 
 		expectedErr := errors.New("failed to create anonymous session")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
 
-		_, err := transport.Authenticate(ctx, w, r, userID)
+		_, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -471,16 +499,16 @@ func TestCookie_Authenticate(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		userID := uuid.New()
 		r := httptest.NewRequest("POST", "/login", nil)
 		w := httptest.NewRecorder()
 
 		expectedErr := errors.New("authentication failed")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(expectedErr)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(expectedErr)
 
-		_, err := transport.Authenticate(ctx, w, r, userID)
+		_, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -500,7 +528,7 @@ func TestCookie_Logout(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		userID := uuid.New()
 		oldToken := "authenticated-token"
 		oldID := uuid.New()
@@ -523,16 +551,16 @@ func TestCookie_Logout(t *testing.T) {
 			UpdatedAt: time.Now().Add(-30 * time.Minute),
 		}
 
-		store.On("GetByToken", ctx, oldToken).Return(authSess, nil)
+		store.On("GetByToken", mock.Anything, oldToken).Return(authSess, nil)
 		// GetByToken triggers touch/save since UpdatedAt is old
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(nil)
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID != oldID && s.Token != oldToken && s.UserID == uuid.Nil
 		})).Return(nil)
 
 		w = httptest.NewRecorder() // Fresh recorder
-		sess, err := transport.Logout(ctx, w, r)
+		sess, err := transport.Logout(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.NotEqual(t, oldID, sess.ID)
@@ -556,14 +584,14 @@ func TestCookie_Logout(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("POST", "/logout", nil)
 		w := httptest.NewRecorder()
 
 		expectedErr := errors.New("failed to create anonymous session")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
 
-		_, err := transport.Logout(ctx, w, r)
+		_, err := transport.Logout(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -579,15 +607,15 @@ func TestCookie_Logout(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("POST", "/logout", nil)
 		w := httptest.NewRecorder()
 
 		expectedErr := errors.New("logout failed")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(expectedErr)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(expectedErr)
 
-		_, err := transport.Logout(ctx, w, r)
+		_, err := transport.Logout(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -607,7 +635,7 @@ func TestCookie_Delete(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionID := uuid.New()
 		token := "session-to-delete"
 
@@ -629,11 +657,11 @@ func TestCookie_Delete(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		store.On("GetByToken", ctx, token).Return(sess, nil)
-		store.On("Delete", ctx, sessionID).Return(nil)
+		store.On("GetByToken", mock.Anything, token).Return(sess, nil)
+		store.On("Delete", mock.Anything, sessionID).Return(nil)
 
 		w = httptest.NewRecorder() // Fresh recorder
-		err := transport.Delete(ctx, w, r)
+		err := transport.Delete(newTestContext(w, r))
 
 		require.NoError(t, err)
 
@@ -654,14 +682,14 @@ func TestCookie_Delete(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("DELETE", "/session", nil)
 		w := httptest.NewRecorder()
 
 		expectedErr := errors.New("failed to load session")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(expectedErr)
 
-		err := transport.Delete(ctx, w, r)
+		err := transport.Delete(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -677,15 +705,15 @@ func TestCookie_Delete(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("DELETE", "/session", nil)
 		w := httptest.NewRecorder()
 
 		expectedErr := errors.New("database error")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(expectedErr)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(expectedErr)
 
-		err := transport.Delete(ctx, w, r)
+		err := transport.Delete(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -734,7 +762,7 @@ func TestCookie_Touch(t *testing.T) {
 
 		store.On("GetByID", mock.Anything, sessionID).Return(refreshedSess, nil)
 
-		err := transport.Touch(w, r, currentSess)
+		err := transport.Touch(newTestContext(w, r), currentSess)
 
 		require.NoError(t, err)
 
@@ -773,7 +801,7 @@ func TestCookie_Touch(t *testing.T) {
 		// GetByID returns same session (not touched)
 		store.On("GetByID", mock.Anything, sessionID).Return(currentSess, nil)
 
-		err := transport.Touch(w, r, currentSess)
+		err := transport.Touch(newTestContext(w, r), currentSess)
 
 		require.NoError(t, err)
 
@@ -809,7 +837,7 @@ func TestCookie_Touch(t *testing.T) {
 		expectedErr := session.ErrExpired
 		store.On("GetByID", mock.Anything, sessionID).Return(nil, expectedErr)
 
-		err := transport.Touch(w, r, currentSess)
+		err := transport.Touch(newTestContext(w, r), currentSess)
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -887,7 +915,7 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionID := uuid.New()
 		sessionToken := "session-token-in-jti"
 		userID := uuid.New()
@@ -914,11 +942,12 @@ func TestJWT_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
-		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 
-		loadedSess, err := transport.Load(ctx, r)
+		loadedSess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, sess.ID, loadedSess.ID)
@@ -936,10 +965,11 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 
-		_, err = transport.Load(ctx, r)
+		_, err = transport.Load(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
@@ -953,11 +983,12 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "")
 
-		_, err = transport.Load(ctx, r)
+		_, err = transport.Load(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
@@ -971,11 +1002,12 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Basic dXNlcjpwYXNz")
 
-		_, err = transport.Load(ctx, r)
+		_, err = transport.Load(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
@@ -989,13 +1021,14 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer invalid.jwt.token")
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -1012,7 +1045,7 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "non-existent-session-token"
 
 		claims := jwt.StandardClaims{
@@ -1026,12 +1059,13 @@ func TestJWT_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
-		store.On("GetByToken", ctx, sessionToken).Return(nil, session.ErrNotFound)
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(nil, session.ErrNotFound)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -1048,7 +1082,7 @@ func TestJWT_Load(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "expired-session-token"
 
 		claims := jwt.StandardClaims{
@@ -1062,12 +1096,13 @@ func TestJWT_Load(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
-		store.On("GetByToken", ctx, sessionToken).Return(nil, session.ErrExpired)
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(nil, session.ErrExpired)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -1100,7 +1135,7 @@ func TestJWT_Save(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		err = transport.Save(w, r, sess)
+		err = transport.Save(newTestContext(w, r), sess)
 
 		require.NoError(t, err)
 
@@ -1121,15 +1156,16 @@ func TestJWT_Authenticate(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/login", nil)
+		w = httptest.NewRecorder()
 		userID := uuid.New()
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
 
-		sess, tokens, err := transport.Authenticate(ctx, w, r, userID)
+		sess, tokens, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		require.NoError(t, err)
 		assert.Equal(t, userID, sess.UserID)
@@ -1165,7 +1201,7 @@ func TestJWT_Authenticate(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		w := httptest.NewRecorder()
 		userID := uuid.New()
 		oldSessionToken := "old-session-token"
@@ -1195,13 +1231,13 @@ func TestJWT_Authenticate(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		store.On("GetByToken", ctx, oldSessionToken).Return(currentSess, nil)
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("GetByToken", mock.Anything, oldSessionToken).Return(currentSess, nil)
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(nil)
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.UserID == userID && s.Token != oldSessionToken
 		})).Return(nil)
 
-		sess, tokens, err := transport.Authenticate(ctx, w, r, userID)
+		sess, tokens, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		require.NoError(t, err)
 		assert.NotEqual(t, oldSessionToken, sess.Token)
@@ -1218,16 +1254,17 @@ func TestJWT_Authenticate(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/login", nil)
+		w = httptest.NewRecorder()
 		userID := uuid.New()
 
 		expectedErr := errors.New("authentication failed")
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(expectedErr).Maybe()
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(expectedErr).Maybe()
 
-		_, _, err = transport.Authenticate(ctx, w, r, userID)
+		_, _, err = transport.Authenticate(newTestContext(w, r), userID)
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -1275,13 +1312,13 @@ func TestJWT_Refresh(t *testing.T) {
 		}
 
 		// New implementation: GetByToken (triggers touch/save) + Save (refresh)
-		store.On("GetByToken", ctx, oldSessionToken).Return(oldSess, nil)
+		store.On("GetByToken", mock.Anything, oldSessionToken).Return(oldSess, nil)
 		// First Save is from touch (extends expiration, keeps same token)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID == sessionID && s.Token == oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
 		// Second Save is from refresh (rotates token, extends expiration)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID == sessionID && s.Token != oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
 
@@ -1353,7 +1390,7 @@ func TestJWT_Refresh(t *testing.T) {
 		refreshToken, err := jwtSvc.Generate(claims)
 		require.NoError(t, err)
 
-		store.On("GetByToken", ctx, sessionToken).Return(nil, session.ErrNotFound)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(nil, session.ErrNotFound)
 
 		_, _, err = transport.Refresh(ctx, refreshToken)
 
@@ -1398,8 +1435,8 @@ func TestJWT_Refresh(t *testing.T) {
 		}
 
 		expectedErr := errors.New("save failed")
-		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
-		store.On("Save", ctx, mock.Anything).Return(expectedErr)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
+		store.On("Save", mock.Anything, mock.Anything).Return(expectedErr)
 
 		_, _, err = transport.Refresh(ctx, refreshToken)
 
@@ -1441,7 +1478,7 @@ func TestJWT_Refresh(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		store.On("GetByToken", ctx, sessionToken).Return(anonymousSess, nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(anonymousSess, nil)
 
 		_, _, err = transport.Refresh(ctx, refreshToken)
 
@@ -1483,7 +1520,7 @@ func TestJWT_Logout(t *testing.T) {
 		jwtToken, err := jwtSvc.Generate(claims)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r = httptest.NewRequest("POST", "/logout", nil)
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
@@ -1500,7 +1537,7 @@ func TestJWT_Logout(t *testing.T) {
 		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 		store.On("Delete", mock.Anything, sessionID).Return(nil)
 
-		err = transport.Logout(ctx, w, r)
+		err = transport.Logout(newTestContext(w, r))
 
 		require.NoError(t, err)
 
@@ -1515,11 +1552,12 @@ func TestJWT_Logout(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/logout", nil)
+		w = httptest.NewRecorder()
 
-		err = transport.Logout(ctx, w, r)
+		err = transport.Logout(newTestContext(w, r))
 
 		require.NoError(t, err) // No error when already logged out
 	})
@@ -1548,7 +1586,7 @@ func TestJWT_Logout(t *testing.T) {
 		jwtToken, err := jwtSvc.Generate(claims)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r = httptest.NewRequest("POST", "/logout", nil)
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
@@ -1566,7 +1604,7 @@ func TestJWT_Logout(t *testing.T) {
 		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 		store.On("Delete", mock.Anything, sessionID).Return(expectedErr)
 
-		err = transport.Logout(ctx, w, r)
+		err = transport.Logout(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -1598,7 +1636,7 @@ func TestJWT_Logout(t *testing.T) {
 		jwtToken, err := jwtSvc.Generate(claims)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r = httptest.NewRequest("POST", "/logout", nil)
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
@@ -1616,7 +1654,7 @@ func TestJWT_Logout(t *testing.T) {
 		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 		store.On("Delete", mock.Anything, sessionID).Return(expectedErr)
 
-		err = transport.Logout(ctx, w, r)
+		err = transport.Logout(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -1652,7 +1690,7 @@ func TestJWT_Delete(t *testing.T) {
 		jwtToken, err := jwtSvc.Generate(claims)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r = httptest.NewRequest("DELETE", "/session", nil)
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
@@ -1669,7 +1707,7 @@ func TestJWT_Delete(t *testing.T) {
 		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 		store.On("Delete", mock.Anything, sessionID).Return(nil)
 
-		err = transport.Delete(ctx, w, r)
+		err = transport.Delete(newTestContext(w, r))
 
 		require.NoError(t, err)
 
@@ -1684,11 +1722,12 @@ func TestJWT_Delete(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("DELETE", "/session", nil)
+		w = httptest.NewRecorder()
 
-		err = transport.Delete(ctx, w, r)
+		err = transport.Delete(newTestContext(w, r))
 
 		require.NoError(t, err) // No error when no session to delete
 	})
@@ -1717,7 +1756,7 @@ func TestJWT_Delete(t *testing.T) {
 		jwtToken, err := jwtSvc.Generate(claims)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r = httptest.NewRequest("DELETE", "/session", nil)
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
@@ -1735,7 +1774,7 @@ func TestJWT_Delete(t *testing.T) {
 		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 		store.On("Delete", mock.Anything, sessionID).Return(expectedErr)
 
-		err = transport.Delete(ctx, w, r)
+		err = transport.Delete(newTestContext(w, r))
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -1784,7 +1823,7 @@ func TestJWT_Touch(t *testing.T) {
 
 		store.On("GetByID", mock.Anything, sessionID).Return(refreshedSess, nil)
 
-		err = transport.Touch(w, r, currentSess)
+		err = transport.Touch(newTestContext(w, r), currentSess)
 
 		require.NoError(t, err)
 
@@ -1818,7 +1857,7 @@ func TestJWT_Touch(t *testing.T) {
 
 		store.On("GetByID", mock.Anything, sessionID).Return(sess, nil)
 
-		err = transport.Touch(w, r, sess)
+		err = transport.Touch(newTestContext(w, r), sess)
 
 		require.NoError(t, err)
 
@@ -1850,7 +1889,7 @@ func TestJWT_Touch(t *testing.T) {
 		expectedErr := session.ErrExpired
 		store.On("GetByID", mock.Anything, sessionID).Return(nil, expectedErr)
 
-		err = transport.Touch(w, r, sess)
+		err = transport.Touch(newTestContext(w, r), sess)
 
 		assert.Error(t, err)
 		assert.ErrorIs(t, err, expectedErr)
@@ -1871,7 +1910,7 @@ func TestExtractBearerToken(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "valid-session-token"
 
 		claims := jwt.StandardClaims{
@@ -1885,6 +1924,7 @@ func TestExtractBearerToken(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
 		sess := session.Session[string]{
@@ -1897,9 +1937,9 @@ func TestExtractBearerToken(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
-		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 
-		loadedSess, err := transport.Load(ctx, r)
+		loadedSess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, sess.Token, loadedSess.Token)
@@ -1915,10 +1955,11 @@ func TestExtractBearerToken(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		_ = context.Background() // ctx not needed with handler.Context
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 
-		_, err = transport.Load(ctx, r)
+		_, err = transport.Load(newTestContext(w, r))
 
 		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
 	})
@@ -1931,7 +1972,7 @@ func TestExtractBearerToken(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 
 		testCases := []string{
 			"NoBearer token-value",
@@ -1940,13 +1981,14 @@ func TestExtractBearerToken(t *testing.T) {
 		}
 
 		// When token extraction fails, Load creates new anonymous session
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
 
 		for _, tc := range testCases {
 			r := httptest.NewRequest("GET", "/", nil)
+			w := httptest.NewRecorder()
 			r.Header.Set("Authorization", tc)
 
-			_, err := transport.Load(ctx, r)
+			_, err := transport.Load(newTestContext(w, r))
 
 			assert.ErrorIs(t, err, sessiontransport.ErrNoToken, "Failed for: %s", tc)
 		}
@@ -1961,7 +2003,7 @@ func TestExtractBearerToken(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "session-token"
 
 		claims := jwt.StandardClaims{
@@ -1983,6 +2025,7 @@ func TestExtractBearerToken(t *testing.T) {
 
 		for _, tc := range testCases {
 			r := httptest.NewRequest("GET", "/", nil)
+			w := httptest.NewRecorder()
 			r.Header.Set("Authorization", tc)
 
 			sess := session.Session[string]{
@@ -1995,9 +2038,9 @@ func TestExtractBearerToken(t *testing.T) {
 				UpdatedAt: time.Now(),
 			}
 
-			store.On("GetByToken", ctx, sessionToken).Return(sess, nil).Once()
+			store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil).Once()
 
-			loadedSess, err := transport.Load(ctx, r)
+			loadedSess, err := transport.Load(newTestContext(w, r))
 
 			require.NoError(t, err, "Failed for: %s", tc)
 			assert.Equal(t, sessionToken, loadedSess.Token)
@@ -2015,7 +2058,7 @@ func TestExtractBearerToken(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "session-token"
 
 		claims := jwt.StandardClaims{
@@ -2030,15 +2073,16 @@ func TestExtractBearerToken(t *testing.T) {
 
 		// JWT might contain spaces in value portion (unlikely but possible in malformed tokens)
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken+" extra")
 
 		// Split on first space only, so "jwtToken extra" is the extracted value
 		tokenWithExtra := jwtToken + " extra"
 
 		// Parse will fail for invalid JWT, creating anonymous session
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -2066,7 +2110,7 @@ func TestCookieTransport_Integration_TokenRotation(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		userID := uuid.New()
 
 		// Create initial anonymous session
@@ -2090,15 +2134,15 @@ func TestCookieTransport_Integration_TokenRotation(t *testing.T) {
 			r.AddCookie(c)
 		}
 
-		store.On("GetByToken", ctx, anonToken).Return(anonSess, nil)
-		store.On("Delete", ctx, anonID).Return(nil)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("GetByToken", mock.Anything, anonToken).Return(anonSess, nil)
+		store.On("Delete", mock.Anything, anonID).Return(nil)
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			// Verify new session has different ID and token
 			return s.ID != anonID && s.Token != anonToken && s.UserID == userID
 		})).Return(nil)
 
 		w = httptest.NewRecorder()
-		authSess, err := transport.Authenticate(ctx, w, r, userID)
+		authSess, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		require.NoError(t, err)
 		assert.NotEqual(t, anonID, authSess.ID)
@@ -2120,7 +2164,7 @@ func TestCookieTransport_Integration_TokenRotation(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		authID := uuid.New()
 		authToken := "authenticated-token-12345"
 		userID := uuid.New()
@@ -2143,14 +2187,14 @@ func TestCookieTransport_Integration_TokenRotation(t *testing.T) {
 			r.AddCookie(c)
 		}
 
-		store.On("GetByToken", ctx, authToken).Return(authSess, nil)
-		store.On("Delete", ctx, authID).Return(nil)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("GetByToken", mock.Anything, authToken).Return(authSess, nil)
+		store.On("Delete", mock.Anything, authID).Return(nil)
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID != authID && s.Token != authToken && s.UserID == uuid.Nil
 		})).Return(nil)
 
 		w = httptest.NewRecorder()
-		anonSess, err := transport.Logout(ctx, w, r)
+		anonSess, err := transport.Logout(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.NotEqual(t, authID, anonSess.ID)
@@ -2173,15 +2217,16 @@ func TestJWTTransport_Integration_TokenRotation(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		w := httptest.NewRecorder()
 		r := httptest.NewRequest("POST", "/login", nil)
+		w = httptest.NewRecorder()
 		userID := uuid.New()
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
-		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Delete", mock.Anything, mock.AnythingOfType("uuid.UUID")).Return(nil).Once()
 
-		sess, tokens, err := transport.Authenticate(ctx, w, r, userID)
+		sess, tokens, err := transport.Authenticate(newTestContext(w, r), userID)
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, tokens.AccessToken)
@@ -2241,13 +2286,13 @@ func TestJWTTransport_Integration_TokenRotation(t *testing.T) {
 		}
 
 		// New implementation: GetByToken (triggers touch/save) + Save (refresh)
-		store.On("GetByToken", ctx, oldSessionToken).Return(oldSess, nil)
+		store.On("GetByToken", mock.Anything, oldSessionToken).Return(oldSess, nil)
 		// First Save is from touch (extends expiration, keeps same token)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID == sessionID && s.Token == oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
 		// Second Save is from refresh (rotates token, extends expiration)
-		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[string]) bool {
+		store.On("Save", mock.Anything, mock.MatchedBy(func(s *session.Session[string]) bool {
 			return s.ID == sessionID && s.Token != oldSessionToken && s.UserID == userID
 		})).Return(nil).Once()
 
@@ -2315,7 +2360,7 @@ func TestCookieTransport_WithRealCookieManager(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "signed-session-token"
 		sessionID := uuid.New()
 
@@ -2339,14 +2384,15 @@ func TestCookieTransport_WithRealCookieManager(t *testing.T) {
 
 		// Extract cookie and add to new request
 		r2 := httptest.NewRequest("GET", "/", nil)
+		w2 := httptest.NewRecorder()
 		for _, c := range w1.Result().Cookies() {
 			r2.AddCookie(c)
 		}
 
 		// Verify cookie is properly signed and can be retrieved
-		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 
-		loadedSess, err := transport.Load(ctx, r2)
+		loadedSess, err := transport.Load(newTestContext(w2, r2))
 
 		require.NoError(t, err)
 		assert.Equal(t, sessionToken, loadedSess.Token)
@@ -2363,18 +2409,19 @@ func TestCookieTransport_WithRealCookieManager(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 
 		// Create request with tampered cookie (unsigned)
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.AddCookie(&http.Cookie{
 			Name:  "session",
 			Value: "tampered-value-without-signature",
 		})
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID) // Should create anonymous session
@@ -2398,7 +2445,7 @@ func TestJWTTransport_WithRealJWTService(t *testing.T) {
 		jwtSvc, err := jwt.NewFromString(secret)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "valid-session-token"
 		sessionID := uuid.New()
 		userID := uuid.New()
@@ -2425,11 +2472,12 @@ func TestJWTTransport_WithRealJWTService(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
-		store.On("GetByToken", ctx, sessionToken).Return(sess, nil)
+		store.On("GetByToken", mock.Anything, sessionToken).Return(sess, nil)
 
-		loadedSess, err := transport.Load(ctx, r)
+		loadedSess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, sessionToken, loadedSess.Token)
@@ -2450,7 +2498,7 @@ func TestJWTTransport_WithRealJWTService(t *testing.T) {
 		wrongJWTSvc, err := jwt.NewFromString("wrong-secret-key-32-characters!")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "session-token"
 
 		claims := jwt.StandardClaims{
@@ -2464,11 +2512,12 @@ func TestJWTTransport_WithRealJWTService(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+wrongJWT)
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID) // Should create anonymous session
@@ -2488,7 +2537,7 @@ func TestJWTTransport_WithRealJWTService(t *testing.T) {
 		jwtSvc, err := jwt.NewFromString(secret)
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		sessionToken := "expired-session-token"
 
 		// Generate expired JWT
@@ -2503,11 +2552,12 @@ func TestJWTTransport_WithRealJWTService(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+expiredJWT)
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID) // Should create anonymous session
@@ -2527,7 +2577,7 @@ func TestCookieTransport_EdgeCases(t *testing.T) {
 		cookieMgr := newTestCookieManager(t)
 		transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 		validToken := "valid-token"
 
 		sess := session.Session[string]{
@@ -2553,11 +2603,11 @@ func TestCookieTransport_EdgeCases(t *testing.T) {
 		// Add a duplicate cookie with different value (shouldn't happen, but test it)
 		r.AddCookie(&http.Cookie{Name: "session", Value: "tampered-value"})
 
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(sess, nil).Maybe()
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
+		store.On("GetByToken", mock.Anything, mock.AnythingOfType("string")).Return(sess, nil).Maybe()
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Maybe()
 
 		// Should handle gracefully (first cookie wins in http.Request)
-		_, err := transport.Load(ctx, r)
+		_, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 	})
@@ -2586,7 +2636,7 @@ func TestCookieTransport_EdgeCases(t *testing.T) {
 		}
 
 		// Cookie manager should handle long values (with signing, may exceed 4KB limit)
-		err := transport.Save(w, r, sess)
+		err := transport.Save(newTestContext(w, r), sess)
 
 		// May succeed or fail depending on cookie size limit, just ensure it doesn't panic
 		_ = err
@@ -2604,7 +2654,7 @@ func TestJWTTransport_EdgeCases(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 
 		testCases := []string{
 			"not.a.jwt",
@@ -2616,11 +2666,12 @@ func TestJWTTransport_EdgeCases(t *testing.T) {
 
 		for _, tc := range testCases {
 			r := httptest.NewRequest("GET", "/", nil)
+			w := httptest.NewRecorder()
 			r.Header.Set("Authorization", "Bearer "+tc)
 
-			store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil).Once()
+			store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil).Once()
 
-			sess, err := transport.Load(ctx, r)
+			sess, err := transport.Load(newTestContext(w, r))
 
 			require.NoError(t, err, "Failed for: %s", tc)
 			assert.Equal(t, uuid.Nil, sess.UserID, "Should create anonymous session for: %s", tc)
@@ -2638,7 +2689,7 @@ func TestJWTTransport_EdgeCases(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 
 		// Generate JWT with empty/missing ID (JTI)
 		claims := jwt.StandardClaims{
@@ -2652,13 +2703,14 @@ func TestJWTTransport_EdgeCases(t *testing.T) {
 		require.NoError(t, err)
 
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+jwtToken)
 
 		// Empty token should fail GetByToken, creating anonymous session
-		store.On("GetByToken", ctx, "").Return(nil, session.ErrNotFound)
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("GetByToken", mock.Anything, "").Return(nil, session.ErrNotFound)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)
@@ -2674,16 +2726,17 @@ func TestJWTTransport_EdgeCases(t *testing.T) {
 		transport, err := sessiontransport.NewJWT(sessionMgr, "test-jwt-secret-key-32-chars!!", 15*time.Minute, "test-app")
 		require.NoError(t, err)
 
-		ctx := context.Background()
+		// ctx not needed with handler.Context
 
 		// Create extremely long authorization header
 		longToken := strings.Repeat("a", 10000)
 		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
 		r.Header.Set("Authorization", "Bearer "+longToken)
 
-		store.On("Save", ctx, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
 
-		sess, err := transport.Load(ctx, r)
+		sess, err := transport.Load(newTestContext(w, r))
 
 		require.NoError(t, err)
 		assert.Equal(t, uuid.Nil, sess.UserID)

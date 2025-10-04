@@ -1,7 +1,6 @@
 package sessiontransport
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dmitrymomot/foundation/core/cookie"
+	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
@@ -32,29 +32,29 @@ func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr *cookie.Manager, 
 
 // Load session from cookie. Creates new anonymous session if no cookie or invalid.
 // This provides graceful degradation - always returns a valid session.
-func (c *Cookie[Data]) Load(ctx context.Context, r *http.Request) (session.Session[Data], error) {
-	token, err := c.cookieMgr.GetSigned(r, c.name)
+func (c *Cookie[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
+	token, err := c.cookieMgr.GetSigned(ctx.Request(), c.name)
 	if err != nil {
-		return c.manager.New(ctx, fingerprint.Cookie(r))
+		return c.manager.New(ctx, fingerprint.Cookie(ctx.Request()))
 	}
 
 	sess, err := c.manager.GetByToken(ctx, token)
 	if err != nil {
-		return c.manager.New(ctx, fingerprint.Cookie(r))
+		return c.manager.New(ctx, fingerprint.Cookie(ctx.Request()))
 	}
 
 	return sess, nil
 }
 
 // Save session to cookie using signed cookie.
-func (c *Cookie[Data]) Save(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
+func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) error {
 	until := time.Until(sess.ExpiresAt)
 	if until <= 0 {
 		return fmt.Errorf("cannot save expired session (expired %v ago)", -until)
 	}
 	maxAge := int(until.Seconds())
 
-	return c.cookieMgr.SetSigned(w, r, c.name, sess.Token,
+	return c.cookieMgr.SetSigned(ctx.ResponseWriter(), ctx.Request(), c.name, sess.Token,
 		cookie.WithHTTPOnly(true),
 		cookie.WithSecure(true),
 		cookie.WithSameSite(http.SameSiteLaxMode),
@@ -65,8 +65,8 @@ func (c *Cookie[Data]) Save(w http.ResponseWriter, r *http.Request, sess session
 
 // Authenticate user. Calls manager.Authenticate and sets new token in cookie.
 // Returns the authenticated session with rotated token.
-func (c *Cookie[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, r *http.Request, userID uuid.UUID) (session.Session[Data], error) {
-	currentSess, err := c.Load(ctx, r)
+func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (session.Session[Data], error) {
+	currentSess, err := c.Load(ctx)
 	if err != nil {
 		return session.Session[Data]{}, err
 	}
@@ -77,7 +77,7 @@ func (c *Cookie[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, 
 		return session.Session[Data]{}, err
 	}
 
-	if err := c.Save(w, r, authSess); err != nil {
+	if err := c.Save(ctx, authSess); err != nil {
 		return session.Session[Data]{}, err
 	}
 
@@ -86,8 +86,8 @@ func (c *Cookie[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, 
 
 // Logout user. Calls manager.Logout and sets new token in cookie.
 // Returns the anonymous session with rotated token.
-func (c *Cookie[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) (session.Session[Data], error) {
-	currentSess, err := c.Load(ctx, r)
+func (c *Cookie[Data]) Logout(ctx handler.Context) (session.Session[Data], error) {
+	currentSess, err := c.Load(ctx)
 	if err != nil {
 		return session.Session[Data]{}, err
 	}
@@ -98,7 +98,7 @@ func (c *Cookie[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *htt
 		return session.Session[Data]{}, err
 	}
 
-	if err := c.Save(w, r, anonSess); err != nil {
+	if err := c.Save(ctx, anonSess); err != nil {
 		return session.Session[Data]{}, err
 	}
 
@@ -106,8 +106,8 @@ func (c *Cookie[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *htt
 }
 
 // Delete session. Deletes cookie and session from store.
-func (c *Cookie[Data]) Delete(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	currentSess, err := c.Load(ctx, r)
+func (c *Cookie[Data]) Delete(ctx handler.Context) error {
+	currentSess, err := c.Load(ctx)
 	if err != nil {
 		return err
 	}
@@ -116,7 +116,7 @@ func (c *Cookie[Data]) Delete(ctx context.Context, w http.ResponseWriter, r *htt
 		return err
 	}
 
-	c.cookieMgr.Delete(w, c.name)
+	c.cookieMgr.Delete(ctx.ResponseWriter(), c.name)
 
 	return nil
 }
@@ -127,16 +127,16 @@ func (c *Cookie[Data]) Delete(ctx context.Context, w http.ResponseWriter, r *htt
 // The method retrieves the session from the store (which automatically touches it if needed)
 // and saves the updated cookie if the session was refreshed. This ensures the client's
 // cookie MaxAge stays in sync with the server-side session expiration.
-func (c *Cookie[Data]) Touch(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
+func (c *Cookie[Data]) Touch(ctx handler.Context, sess session.Session[Data]) error {
 	// GetByID triggers automatic touch if TouchInterval has passed
-	refreshed, err := c.manager.GetByID(r.Context(), sess.ID)
+	refreshed, err := c.manager.GetByID(ctx, sess.ID)
 	if err != nil {
 		return err
 	}
 
 	// If session was touched (UpdatedAt changed), update the cookie
 	if refreshed.UpdatedAt.After(sess.UpdatedAt) {
-		return c.Save(w, r, refreshed)
+		return c.Save(ctx, refreshed)
 	}
 
 	return nil
