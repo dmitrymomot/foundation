@@ -26,8 +26,8 @@ func TestGenerate(t *testing.T) {
 		fp2 := fingerprint.Generate(req)
 
 		assert.Equal(t, fp1, fp2, "fingerprints should be consistent")
-		assert.Len(t, fp1, 32, "fingerprint should be 32 characters")
-		assert.Regexp(t, "^[a-f0-9]{32}$", fp1, "fingerprint should be hex string")
+		assert.Len(t, fp1, 35, "fingerprint should be 35 characters (v1: + 32 hex)")
+		assert.Regexp(t, "^v1:[a-f0-9]{32}$", fp1, "fingerprint should be v1:hash format")
 	})
 
 	t.Run("generates different fingerprints for different user agents", func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestGenerate(t *testing.T) {
 		assert.NotEqual(t, fp1, fp2, "different user agents should produce different fingerprints")
 	})
 
-	t.Run("generates different fingerprints for different IPs", func(t *testing.T) {
+	t.Run("generates same fingerprints for different IPs with default options", func(t *testing.T) {
 		t.Parallel()
 		headers := map[string]string{
 			"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
@@ -61,7 +61,23 @@ func TestGenerate(t *testing.T) {
 		fp1 := fingerprint.Generate(req1)
 		fp2 := fingerprint.Generate(req2)
 
-		assert.NotEqual(t, fp1, fp2, "different IPs should produce different fingerprints")
+		assert.Equal(t, fp1, fp2, "default options exclude IP, so different IPs should produce same fingerprint")
+	})
+
+	t.Run("generates different fingerprints for different IPs when WithIP is used", func(t *testing.T) {
+		t.Parallel()
+		headers := map[string]string{
+			"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+			"Accept":     "text/html",
+		}
+
+		req1 := createTestRequest(headers, "192.168.1.100:54321")
+		req2 := createTestRequest(headers, "192.168.1.101:54321")
+
+		fp1 := fingerprint.Generate(req1, fingerprint.WithIP())
+		fp2 := fingerprint.Generate(req2, fingerprint.WithIP())
+
+		assert.NotEqual(t, fp1, fp2, "with WithIP(), different IPs should produce different fingerprints")
 	})
 
 	t.Run("generates different fingerprints for different accept headers", func(t *testing.T) {
@@ -94,7 +110,7 @@ func TestGenerate(t *testing.T) {
 
 		fp := fingerprint.Generate(req)
 		require.NotEmpty(t, fp)
-		assert.Len(t, fp, 32)
+		assert.Len(t, fp, 35)
 	})
 
 	t.Run("handles empty request", func(t *testing.T) {
@@ -103,10 +119,10 @@ func TestGenerate(t *testing.T) {
 
 		fp := fingerprint.Generate(req)
 		require.NotEmpty(t, fp)
-		assert.Len(t, fp, 32)
+		assert.Len(t, fp, 35)
 	})
 
-	t.Run("includes header order in fingerprint", func(t *testing.T) {
+	t.Run("includes header set in fingerprint", func(t *testing.T) {
 		t.Parallel()
 		// Different header sets should produce different fingerprints
 		req1 := createTestRequest(map[string]string{
@@ -129,24 +145,24 @@ func TestGenerate(t *testing.T) {
 		assert.NotEqual(t, fp1, fp2, "different header sets should produce different fingerprints")
 	})
 
-	t.Run("uses client IP from headers when available", func(t *testing.T) {
+	t.Run("uses client IP from headers when WithIP is used", func(t *testing.T) {
 		t.Parallel()
 		req := createTestRequest(map[string]string{
 			"User-Agent":       "Mozilla/5.0",
 			"CF-Connecting-IP": "203.0.113.195",
 		}, "192.168.1.100:54321")
 
-		fp := fingerprint.Generate(req)
+		fp := fingerprint.Generate(req, fingerprint.WithIP())
 		require.NotEmpty(t, fp)
-		assert.Len(t, fp, 32)
+		assert.Len(t, fp, 35)
 
 		// Same request without CF header should produce different fingerprint
 		req2 := createTestRequest(map[string]string{
 			"User-Agent": "Mozilla/5.0",
 		}, "192.168.1.100:54321")
 
-		fp2 := fingerprint.Generate(req2)
-		assert.NotEqual(t, fp, fp2, "different client IPs should produce different fingerprints")
+		fp2 := fingerprint.Generate(req2, fingerprint.WithIP())
+		assert.NotEqual(t, fp, fp2, "different client IPs should produce different fingerprints when WithIP is used")
 	})
 }
 
@@ -161,9 +177,9 @@ func TestValidate(t *testing.T) {
 		}, "192.168.1.100:54321")
 
 		storedFingerprint := fingerprint.Generate(req)
-		isValid := fingerprint.Validate(req, storedFingerprint)
+		err := fingerprint.Validate(req, storedFingerprint)
 
-		assert.True(t, isValid, "should validate matching fingerprints")
+		assert.NoError(t, err, "should validate matching fingerprints")
 	})
 
 	t.Run("rejects non-matching fingerprints", func(t *testing.T) {
@@ -177,9 +193,11 @@ func TestValidate(t *testing.T) {
 		}, "192.168.1.100:54321")
 
 		storedFingerprint := fingerprint.Generate(req1)
-		isValid := fingerprint.Validate(req2, storedFingerprint)
+		err := fingerprint.Validate(req2, storedFingerprint)
 
-		assert.False(t, isValid, "should reject non-matching fingerprints")
+		assert.Error(t, err, "should reject non-matching fingerprints")
+		// Note: Without storing which components were used, we can't reliably determine
+		// which specific component changed. The error will be one of the component errors.
 	})
 
 	t.Run("rejects invalid stored fingerprint", func(t *testing.T) {
@@ -188,8 +206,9 @@ func TestValidate(t *testing.T) {
 			"User-Agent": "Mozilla/5.0",
 		}, "192.168.1.100:54321")
 
-		isValid := fingerprint.Validate(req, "invalid-fingerprint")
-		assert.False(t, isValid, "should reject invalid fingerprint format")
+		err := fingerprint.Validate(req, "invalid-fingerprint")
+		assert.Error(t, err, "should reject invalid fingerprint format")
+		assert.ErrorIs(t, err, fingerprint.ErrInvalidFingerprint, "should return ErrInvalidFingerprint")
 	})
 
 	t.Run("rejects empty stored fingerprint", func(t *testing.T) {
@@ -198,8 +217,28 @@ func TestValidate(t *testing.T) {
 			"User-Agent": "Mozilla/5.0",
 		}, "192.168.1.100:54321")
 
-		isValid := fingerprint.Validate(req, "")
-		assert.False(t, isValid, "should reject empty fingerprint")
+		err := fingerprint.Validate(req, "")
+		assert.Error(t, err, "should reject empty fingerprint")
+		assert.ErrorIs(t, err, fingerprint.ErrInvalidFingerprint, "should return ErrInvalidFingerprint")
+	})
+
+	t.Run("detects IP mismatch when stored fingerprint includes IP", func(t *testing.T) {
+		t.Parallel()
+		req1 := createTestRequest(map[string]string{
+			"User-Agent": "Mozilla/5.0",
+			"Accept":     "text/html",
+		}, "192.168.1.100:54321")
+
+		req2 := createTestRequest(map[string]string{
+			"User-Agent": "Mozilla/5.0",
+			"Accept":     "text/html",
+		}, "192.168.1.101:54321")
+
+		storedFingerprint := fingerprint.Generate(req1, fingerprint.WithIP())
+		err := fingerprint.Validate(req2, storedFingerprint)
+
+		assert.Error(t, err, "should detect IP change")
+		assert.ErrorIs(t, err, fingerprint.ErrIPMismatch, "should return ErrIPMismatch")
 	})
 }
 
@@ -323,7 +362,7 @@ func BenchmarkValidate(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		fingerprint.Validate(req, storedFingerprint)
+		_ = fingerprint.Validate(req, storedFingerprint)
 	}
 }
 
@@ -335,6 +374,43 @@ func BenchmarkGenerateMinimalHeaders(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		fingerprint.Generate(req)
+	}
+}
+
+func BenchmarkStrict(b *testing.B) {
+	req := createTestRequest(map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+		"Accept":          "text/html",
+		"Accept-Language": "en-US",
+	}, "192.168.1.100:54321")
+
+	b.ResetTimer()
+	for b.Loop() {
+		fingerprint.Strict(req)
+	}
+}
+
+func BenchmarkCookie(b *testing.B) {
+	req := createTestRequest(map[string]string{
+		"User-Agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+		"Accept":          "text/html",
+		"Accept-Language": "en-US",
+	}, "192.168.1.100:54321")
+
+	b.ResetTimer()
+	for b.Loop() {
+		fingerprint.Cookie(req)
+	}
+}
+
+func BenchmarkJWT(b *testing.B) {
+	req := createTestRequest(map[string]string{
+		"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+	}, "192.168.1.100:54321")
+
+	b.ResetTimer()
+	for b.Loop() {
+		fingerprint.JWT(req)
 	}
 }
 

@@ -5,10 +5,11 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/response"
 	"github.com/dmitrymomot/foundation/core/session"
-	"github.com/google/uuid"
 )
 
 type sessionKey struct{}

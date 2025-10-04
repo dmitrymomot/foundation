@@ -44,8 +44,8 @@ func TestFingerprintDefaultConfiguration(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.NotEmpty(t, capturedFP, "Fingerprint should be generated")
-	assert.Len(t, capturedFP, 32, "Fingerprint should be 32 characters")
-	assert.Regexp(t, "^[a-f0-9]{32}$", capturedFP, "Fingerprint should be hex string")
+	assert.Len(t, capturedFP, 35, "Fingerprint should be 35 characters (v1: + 32 hex)")
+	assert.Regexp(t, "^v1:[a-f0-9]{32}$", capturedFP, "Fingerprint should be v1:hash format")
 	assert.Empty(t, w.Header().Get("X-Device-Fingerprint"), "Default config should not set header")
 }
 
@@ -75,7 +75,7 @@ func TestFingerprintStoreInHeader(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	headerFP := w.Header().Get("X-Device-Fingerprint")
 	assert.NotEmpty(t, headerFP, "Fingerprint should be in response header")
-	assert.Len(t, headerFP, 32, "Header fingerprint should be 32 characters")
+	assert.Len(t, headerFP, 35, "Header fingerprint should be 35 characters (v1: + 32 hex)")
 }
 
 func TestFingerprintCustomHeaderName(t *testing.T) {
