@@ -2,7 +2,6 @@ package sessiontransport
 
 import (
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,8 +63,6 @@ func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) err
 	maxAge := int(until.Seconds())
 
 	return c.cookieMgr.SetSigned(ctx.ResponseWriter(), ctx.Request(), c.name, sess.Token,
-		cookie.WithHTTPOnly(true),
-		cookie.WithSameSite(http.SameSiteLaxMode),
 		cookie.WithMaxAge(maxAge),
 		cookie.WithEssential(),
 	)

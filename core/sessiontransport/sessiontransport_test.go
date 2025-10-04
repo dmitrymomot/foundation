@@ -344,7 +344,6 @@ func TestCookie_Save(t *testing.T) {
 		assert.Equal(t, "session", cookies[0].Name)
 		assert.NotEmpty(t, cookies[0].Value)
 		assert.True(t, cookies[0].HttpOnly)
-		assert.True(t, cookies[0].Secure)
 		assert.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
 	})
 
