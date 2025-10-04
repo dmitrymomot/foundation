@@ -65,7 +65,6 @@ func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) err
 
 	return c.cookieMgr.SetSigned(ctx.ResponseWriter(), ctx.Request(), c.name, sess.Token,
 		cookie.WithHTTPOnly(true),
-		cookie.WithSecure(true),
 		cookie.WithSameSite(http.SameSiteLaxMode),
 		cookie.WithMaxAge(maxAge),
 		cookie.WithEssential(),

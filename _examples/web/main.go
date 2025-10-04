@@ -55,7 +55,7 @@ func main() {
 	)
 
 	// Setup cookie manager
-	cookieMgr, err := cookie.New(cfg.CookieSecrets)
+	cookieMgr, err := cookie.NewFromConfig(cfg.Cookie)
 	if err != nil {
 		log.Error("Failed to create cookie manager", logger.Component("cookie"), logger.Error(err))
 		os.Exit(1)

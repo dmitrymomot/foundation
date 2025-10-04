@@ -13,8 +13,8 @@
     <p><strong>Session ID:</strong> {{.Session.ID}}</p>
     <p><strong>IP Address:</strong> {{.Session.IP}}</p>
     <p><strong>User Agent:</strong> {{.Session.UserAgent}}</p>
-    <p><strong>Created:</strong> {{.Session.CreatedAt.Format "2006-01-02 15:04:05"}}</p>
-    <p><strong>Expires:</strong> {{.Session.ExpiresAt.Format "2006-01-02 15:04:05"}}</p>
+    <p><strong>Created:</strong> {{.Session.CreatedAt}}</p>
+    <p><strong>Expires:</strong> {{.Session.ExpiresAt}}</p>
 </div>
 
 <form method="POST" action="/logout" class="logout-form">
