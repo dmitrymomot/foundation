@@ -48,11 +48,7 @@ func main() {
 	repo := repository.New(db)
 
 	// Setup session manager
-	sesMgr := session.NewManager[SessionData](
-		&sessionStorage{repo},
-		cfg.SessionTTL,
-		cfg.SessionTouchInterval,
-	)
+	sesMgr := session.NewFromConfig(cfg.Session, &sessionStorage{repo})
 
 	// Setup cookie manager
 	cookieMgr, err := cookie.NewFromConfig(cfg.Cookie)
@@ -62,7 +58,7 @@ func main() {
 	}
 
 	// Setup cookie-based session transport
-	sesCookie := sessiontransport.NewCookie(sesMgr, cookieMgr, cfg.CookieName)
+	sesCookie := sessiontransport.NewCookieFromConfig(cfg.SessionTransport, sesMgr, cookieMgr)
 
 	// Load templates
 	templates, err := loadTemplates()

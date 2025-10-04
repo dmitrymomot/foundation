@@ -43,18 +43,9 @@ func main() {
 	repo := repository.New(db)
 
 	// Setup session manager with JWT transport
-	sesMgr := session.NewManager[SessionData](
-		&sessionStorage{repo},
-		cfg.SessionTTL,
-		cfg.SessionTouchInterval,
-	)
+	sesMgr := session.NewFromConfig(cfg.Session, &sessionStorage{repo})
 
-	sesJwt, err := sessiontransport.NewJWT(
-		sesMgr,
-		cfg.JwtSigningKey,
-		cfg.AccessTokenTTL,
-		cfg.AppName,
-	)
+	sesJwt, err := sessiontransport.NewJWTFromConfig(cfg.SessionTransport, sesMgr)
 	if err != nil {
 		log.Error("Failed to create JWT session transport", logger.Component("session.transport.jwt"), logger.Error(err))
 		os.Exit(1)
