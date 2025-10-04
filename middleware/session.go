@@ -197,10 +197,17 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 
 			resp := next(ctx)
 
+			// Get the current session from context (handler might have updated it via Auth/Logout)
+			currentSess, ok := GetSession[Data](ctx)
+			if !ok {
+				// Session was removed from context, skip touching
+				return resp
+			}
+
 			// Skip touching brand new sessions (not yet saved to database)
 			// New sessions have CreatedAt == UpdatedAt
-			if !sess.CreatedAt.Equal(sess.UpdatedAt) {
-				if err := cfg.Transport.Touch(ctx, sess); err != nil {
+			if !currentSess.CreatedAt.Equal(currentSess.UpdatedAt) {
+				if err := cfg.Transport.Touch(ctx, currentSess); err != nil {
 					if ctxErr := ctx.Err(); ctxErr != nil {
 						if cfg.Logger != nil {
 							cfg.Logger.Warn("context cancelled during touch")

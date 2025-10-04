@@ -161,8 +161,13 @@ func (c *Context) Bind(v any) error {
 // Unlike JWT transport, this doesn't return tokens - the session is stored in a cookie.
 // Optional data parameter allows setting session data during authentication.
 func (c *Context) Auth(userID uuid.UUID, data ...SessionData) error {
-	_, err := c.transport.Authenticate(c, userID, data...)
-	return err
+	sess, err := c.transport.Authenticate(c, userID, data...)
+	if err != nil {
+		return err
+	}
+	// Update the session in context so middleware can touch the new session
+	middleware.SetSession[SessionData](c, sess)
+	return nil
 }
 
 // UpdateSession saves modified session data to storage and updates the cookie.
@@ -173,8 +178,13 @@ func (c *Context) UpdateSession(sess session.Session[SessionData]) error {
 
 // Logout logs out the current session by deleting the session cookie.
 func (c *Context) Logout() error {
-	_, err := c.transport.Logout(c)
-	return err
+	sess, err := c.transport.Logout(c)
+	if err != nil {
+		return err
+	}
+	// Update the session in context so middleware can touch the new session
+	middleware.SetSession[SessionData](c, sess)
+	return nil
 }
 
 // newContext creates a new Context instance.
