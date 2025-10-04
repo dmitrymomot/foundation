@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -47,11 +48,14 @@ func TestSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[testSessionData])
+		now := time.Now()
 		sess := session.Session[testSessionData]{
-			ID:     uuid.New(),
-			Token:  "test-token",
-			UserID: uuid.New(),
-			Data:   testSessionData{Theme: "dark", Language: "en"},
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.New(),
+			Data:      testSessionData{Theme: "dark", Language: "en"},
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -84,11 +88,14 @@ func TestSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: uuid.Nil,
-			Data:   "test-data",
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    uuid.Nil,
+			Data:      "test-data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -117,11 +124,14 @@ func TestSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: uuid.Nil,
-			Data:   "test",
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    uuid.Nil,
+			Data:      "test",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -155,7 +165,7 @@ func TestSession(t *testing.T) {
 		loadErr := errors.New("database connection failed")
 
 		mockTransport.On("Load", mock.Anything).Return(session.Session[string]{}, loadErr)
-		mockTransport.On("Touch", mock.Anything, mock.Anything).Return(nil)
+		// Touch should NOT be called - empty session has zero timestamps (CreatedAt == UpdatedAt)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.SessionWithConfig[*router.Context, string](middleware.SessionConfig[*router.Context, string]{
@@ -191,11 +201,14 @@ func TestSession(t *testing.T) {
 		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: uuid.Nil,
-			Data:   "test",
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    uuid.Nil,
+			Data:      "test",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 		touchErr := errors.New("redis connection timeout")
 
@@ -233,6 +246,7 @@ func TestSession(t *testing.T) {
 		}
 
 		mockTransport := new(MockTransport[complexData])
+		now := time.Now()
 		sess := session.Session[complexData]{
 			ID:     uuid.New(),
 			Token:  "token",
@@ -242,6 +256,8 @@ func TestSession(t *testing.T) {
 				Cart:      []string{"item1", "item2"},
 				Count:     42,
 			},
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -276,11 +292,14 @@ func TestGetSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "test-token",
-			UserID: uuid.New(),
-			Data:   "test-data",
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.New(),
+			Data:      "test-data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -347,11 +366,14 @@ func TestMustGetSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "test-token",
-			UserID: uuid.New(),
-			Data:   "test-data",
+			ID:        uuid.New(),
+			Token:     "test-token",
+			UserID:    uuid.New(),
+			Data:      "test-data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -405,11 +427,14 @@ func TestSetSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		originalSess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "original-token",
-			UserID: uuid.New(),
-			Data:   "original",
+			ID:        uuid.New(),
+			Token:     "original-token",
+			UserID:    uuid.New(),
+			Data:      "original",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(originalSess, nil)
@@ -452,11 +477,14 @@ func TestSetSession(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[testSessionData])
+		now := time.Now()
 		originalSess := session.Session[testSessionData]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: uuid.New(),
-			Data:   testSessionData{Theme: "light", Language: "fr"},
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    uuid.New(),
+			Data:      testSessionData{Theme: "light", Language: "fr"},
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(originalSess, nil)
@@ -498,11 +526,14 @@ func TestRequireAuth(t *testing.T) {
 
 		mockTransport := new(MockTransport[string])
 		authenticatedUserID := uuid.New()
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: authenticatedUserID, // Authenticated
-			Data:   "data",
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    authenticatedUserID, // Authenticated
+			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -602,11 +633,14 @@ func TestRequireGuest(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: uuid.Nil, // Anonymous
-			Data:   "data",
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    uuid.Nil, // Anonymous
+			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -676,11 +710,14 @@ func TestRequireGuest(t *testing.T) {
 		t.Parallel()
 
 		mockTransport := new(MockTransport[string])
+		now := time.Now()
 		sess := session.Session[string]{
-			ID:     uuid.New(),
-			Token:  "token",
-			UserID: uuid.Nil, // Anonymous
-			Data:   "data",
+			ID:        uuid.New(),
+			Token:     "token",
+			UserID:    uuid.Nil, // Anonymous
+			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -716,6 +753,7 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 		mockTransport := new(MockTransport[string])
 		testIP := "203.0.113.42"
 		testUA := "Mozilla/5.0 (Windows NT 10.0) Chrome/120.0"
+		now := time.Now()
 
 		sess := session.Session[string]{
 			ID:        uuid.New(),
@@ -724,6 +762,8 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 			IP:        testIP,
 			UserAgent: testUA,
 			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -757,6 +797,7 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 		mockTransport := new(MockTransport[string])
 		testIP := "198.51.100.5"
 		testUA := "Mozilla/5.0 (iPhone) Safari/17.0"
+		now := time.Now()
 
 		sess := session.Session[string]{
 			ID:        uuid.New(),
@@ -765,6 +806,8 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 			IP:        testIP,
 			UserAgent: testUA,
 			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -798,6 +841,7 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 		mockTransport := new(MockTransport[string])
 		testIP := "2001:db8::1"
 		testUA := "Mozilla/5.0 (Macintosh) Firefox/120.0"
+		now := time.Now()
 
 		sess := session.Session[string]{
 			ID:        uuid.New(),
@@ -806,6 +850,8 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 			IP:        testIP,
 			UserAgent: testUA,
 			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -838,6 +884,7 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 
 		mockTransport := new(MockTransport[string])
 		testIP := "203.0.113.1"
+		now := time.Now()
 
 		sess := session.Session[string]{
 			ID:        uuid.New(),
@@ -846,6 +893,8 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 			IP:        testIP,
 			UserAgent: "",
 			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -879,6 +928,7 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 		mockTransport := new(MockTransport[string])
 		testIP := "66.249.66.1"
 		botUA := "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+		now := time.Now()
 
 		sess := session.Session[string]{
 			ID:        uuid.New(),
@@ -887,6 +937,8 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 			IP:        testIP,
 			UserAgent: botUA,
 			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)
@@ -920,6 +972,7 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 		mockTransport := new(MockTransport[string])
 		testIP := "203.0.113.1"
 		testUA := "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0"
+		now := time.Now()
 
 		sess := session.Session[string]{
 			ID:        uuid.New(),
@@ -928,6 +981,8 @@ func TestSession_IPAndUserAgentExtraction(t *testing.T) {
 			IP:        testIP,
 			UserAgent: testUA,
 			Data:      "data",
+			CreatedAt: now,
+			UpdatedAt: now.Add(1 * time.Hour),
 		}
 
 		mockTransport.On("Load", mock.Anything).Return(sess, nil)

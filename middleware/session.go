@@ -197,15 +197,19 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 
 			resp := next(ctx)
 
-			if err := cfg.Transport.Touch(ctx, sess); err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
-					if cfg.Logger != nil {
-						cfg.Logger.Warn("context cancelled during touch")
+			// Skip touching brand new sessions (not yet saved to database)
+			// New sessions have CreatedAt == UpdatedAt
+			if !sess.CreatedAt.Equal(sess.UpdatedAt) {
+				if err := cfg.Transport.Touch(ctx, sess); err != nil {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						if cfg.Logger != nil {
+							cfg.Logger.Warn("context cancelled during touch")
+						}
+						return resp
 					}
-					return resp
-				}
-				if cfg.Logger != nil {
-					cfg.Logger.Error("failed to touch session", "error", err)
+					if cfg.Logger != nil {
+						cfg.Logger.Error("failed to touch session", "error", err)
+					}
 				}
 			}
 
