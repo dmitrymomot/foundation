@@ -19,30 +19,47 @@ This example demonstrates a complete authentication flow using the Foundation fr
 
 ## Running the Application
 
-1. Start PostgreSQL:
+1. Start everything with one command:
+
 ```bash
-docker-compose up -d
+make up
 ```
 
-2. Run the application:
+Or manually:
+
 ```bash
+# Start PostgreSQL
+docker-compose up -d
+
+# Run the application
 go run .
 ```
 
 The server starts on `http://localhost:3000` by default.
+
+To stop and clean up everything:
+
+```bash
+make down
+```
 
 ## API Endpoints
 
 ### Health Checks
 
 #### Liveness Check
+
 ```bash
-curl http://localhost:3000/live
+# Set your port (default: 3000)
+HTTP_PORT=3000
+
+curl http://localhost:8081/live
 ```
 
 #### Readiness Check
+
 ```bash
-curl http://localhost:3000/ready
+curl http://localhost:8081/ready
 ```
 
 ---
@@ -50,11 +67,13 @@ curl http://localhost:3000/ready
 ### Authentication Endpoints
 
 #### 1. Signup
+
 Create a new user account.
 
 **Request:**
+
 ```bash
-curl -X POST http://localhost:3000/auth/signup \
+curl -X POST http://localhost:8081/auth/signup \
   -H "Content-Type: application/json" \
   -d '{
     "name": "John Doe",
@@ -64,24 +83,26 @@ curl -X POST http://localhost:3000/auth/signup \
 ```
 
 **Response:**
+
 ```json
 {
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "John Doe",
-    "email": "john@example.com"
-  },
-  "tokens": {
-    "access_token": "eyJhbGci...",
-    "refresh_token": "eyJhbGci...",
-    "token_type": "Bearer",
-    "expires_in": 3600,
-    "expires_at": "2025-01-04T12:00:00Z"
-  }
+    "user": {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "John Doe",
+        "email": "john@example.com"
+    },
+    "tokens": {
+        "access_token": "eyJhbGci...",
+        "refresh_token": "eyJhbGci...",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "expires_at": "2025-01-04T12:00:00Z"
+    }
 }
 ```
 
 **Password Requirements:**
+
 - Minimum 8 characters
 - At least one uppercase letter
 - At least one lowercase letter
@@ -92,11 +113,13 @@ curl -X POST http://localhost:3000/auth/signup \
 ---
 
 #### 2. Login
+
 Authenticate with existing credentials.
 
 **Request:**
+
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:8081/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "john@example.com",
@@ -105,31 +128,34 @@ curl -X POST http://localhost:3000/auth/login \
 ```
 
 **Response:**
+
 ```json
 {
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "name": "John Doe",
-    "email": "john@example.com"
-  },
-  "tokens": {
-    "access_token": "eyJhbGci...",
-    "refresh_token": "eyJhbGci...",
-    "token_type": "Bearer",
-    "expires_in": 3600,
-    "expires_at": "2025-01-04T12:00:00Z"
-  }
+    "user": {
+        "id": "550e8400-e29b-41d4-a716-446655440000",
+        "name": "John Doe",
+        "email": "john@example.com"
+    },
+    "tokens": {
+        "access_token": "eyJhbGci...",
+        "refresh_token": "eyJhbGci...",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "expires_at": "2025-01-04T12:00:00Z"
+    }
 }
 ```
 
 ---
 
 #### 3. Refresh Tokens
+
 Get a new access token using a refresh token.
 
 **Request:**
+
 ```bash
-curl -X POST http://localhost:3000/auth/refresh \
+curl -X POST http://localhost:8081/auth/refresh \
   -H "Content-Type: application/json" \
   -d '{
     "refresh_token": "eyJhbGci..."
@@ -137,13 +163,14 @@ curl -X POST http://localhost:3000/auth/refresh \
 ```
 
 **Response:**
+
 ```json
 {
-  "access_token": "eyJhbGci...",
-  "refresh_token": "eyJhbGci...",
-  "token_type": "Bearer",
-  "expires_in": 3600,
-  "expires_at": "2025-01-04T13:00:00Z"
+    "access_token": "eyJhbGci...",
+    "refresh_token": "eyJhbGci...",
+    "token_type": "Bearer",
+    "expires_in": 3600,
+    "expires_at": "2025-01-04T13:00:00Z"
 }
 ```
 
@@ -154,31 +181,36 @@ curl -X POST http://localhost:3000/auth/refresh \
 All protected endpoints require a valid access token in the `Authorization` header.
 
 #### 4. Get Profile
+
 Retrieve the authenticated user's profile.
 
 **Request:**
+
 ```bash
-curl http://localhost:3000/api/profile \
+curl http://localhost:8081/api/profile \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
 **Response:**
+
 ```json
 {
-  "id": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "John Doe",
-  "email": "john@example.com"
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "John Doe",
+    "email": "john@example.com"
 }
 ```
 
 ---
 
 #### 5. Update Password
+
 Change the user's password.
 
 **Request:**
+
 ```bash
-curl -X PUT http://localhost:3000/api/profile/password \
+curl -X PUT http://localhost:8081/api/profile/password \
   -H "Authorization: Bearer eyJhbGci..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -188,27 +220,31 @@ curl -X PUT http://localhost:3000/api/profile/password \
 ```
 
 **Response:**
+
 ```json
 {
-  "message": "Password updated successfully"
+    "message": "Password updated successfully"
 }
 ```
 
 ---
 
 #### 6. Logout
+
 End the current session.
 
 **Request:**
+
 ```bash
-curl -X POST http://localhost:3000/api/auth/logout \
+curl -X POST http://localhost:8081/api/auth/logout \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
 **Response:**
+
 ```json
 {
-  "message": "Logged out successfully"
+    "message": "Logged out successfully"
 }
 ```
 
@@ -220,7 +256,7 @@ Here's a complete workflow demonstrating the authentication flow:
 
 ```bash
 # 1. Signup
-SIGNUP_RESPONSE=$(curl -s -X POST http://localhost:3000/auth/signup \
+SIGNUP_RESPONSE=$(curl -s -X POST http://localhost:8081/auth/signup \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Jane Smith",
@@ -236,11 +272,11 @@ echo "Access Token: $ACCESS_TOKEN"
 echo "Refresh Token: $REFRESH_TOKEN"
 
 # 2. Get profile using access token
-curl http://localhost:3000/api/profile \
+curl http://localhost:8081/api/profile \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
 # 3. Update password
-curl -X PUT http://localhost:3000/api/profile/password \
+curl -X PUT http://localhost:8081/api/profile/password \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -249,7 +285,7 @@ curl -X PUT http://localhost:3000/api/profile/password \
   }'
 
 # 4. Refresh tokens
-REFRESH_RESPONSE=$(curl -s -X POST http://localhost:3000/auth/refresh \
+REFRESH_RESPONSE=$(curl -s -X POST http://localhost:8081/auth/refresh \
   -H "Content-Type: application/json" \
   -d "{\"refresh_token\": \"$REFRESH_TOKEN\"}")
 
@@ -257,15 +293,15 @@ NEW_ACCESS_TOKEN=$(echo $REFRESH_RESPONSE | jq -r '.access_token')
 echo "New Access Token: $NEW_ACCESS_TOKEN"
 
 # 5. Use new access token
-curl http://localhost:3000/api/profile \
+curl http://localhost:8081/api/profile \
   -H "Authorization: Bearer $NEW_ACCESS_TOKEN"
 
 # 6. Logout
-curl -X POST http://localhost:3000/api/auth/logout \
+curl -X POST http://localhost:8081/api/auth/logout \
   -H "Authorization: Bearer $NEW_ACCESS_TOKEN"
 
 # 7. Login with updated password
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:8081/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "jane@example.com",
@@ -280,46 +316,51 @@ curl -X POST http://localhost:3000/auth/login \
 The API returns standard HTTP status codes with error details:
 
 ### 400 Bad Request
+
 ```json
 {
-  "error": "Bad Request",
-  "message": "Failed to parse request body",
-  "details": {
-    "errors": {
-      "password": "password must be at least 8 characters long"
+    "error": "Bad Request",
+    "message": "Failed to parse request body",
+    "details": {
+        "errors": {
+            "password": "password must be at least 8 characters long"
+        }
     }
-  }
 }
 ```
 
 ### 401 Unauthorized
+
 ```json
 {
-  "error": "Unauthorized",
-  "message": "Invalid credentials"
+    "error": "Unauthorized",
+    "message": "Invalid credentials"
 }
 ```
 
 ### 404 Not Found
+
 ```json
 {
-  "error": "Not Found",
-  "message": "User not found"
+    "error": "Not Found",
+    "message": "User not found"
 }
 ```
 
 ### 409 Conflict
+
 ```json
 {
-  "error": "Conflict",
-  "message": "Email already exists"
+    "error": "Conflict",
+    "message": "Email already exists"
 }
 ```
 
 ### 500 Internal Server Error
+
 ```json
 {
-  "error": "Internal Server Error"
+    "error": "Internal Server Error"
 }
 ```
 
