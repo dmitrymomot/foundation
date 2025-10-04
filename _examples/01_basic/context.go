@@ -74,6 +74,14 @@ func (c *Context) Session() (session.Session[SessionData], bool) {
 	return middleware.GetSession[SessionData](c)
 }
 
+// UserID returns the authenticated user ID from the session.
+// This method assumes the session middleware has already validated authentication.
+// It should only be used in routes protected by session middleware with RequireAuth: true.
+func (c *Context) UserID() uuid.UUID {
+	sess, _ := c.Session()
+	return sess.UserID
+}
+
 // Bind binds, sanitizes, and validates request data into the provided struct.
 // It automatically selects the appropriate binder based on:
 // - Content-Type header (JSON, Form)

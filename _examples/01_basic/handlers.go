@@ -221,14 +221,8 @@ func logoutHandler() handler.HandlerFunc[*Context] {
 
 func getProfileHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
-		// Get user ID from session
-		sess, ok := ctx.Session()
-		if !ok {
-			return response.Error(response.ErrUnauthorized)
-		}
-
 		// Get user from database
-		user, err := repo.GetUserByID(ctx, sess.UserID)
+		user, err := repo.GetUserByID(ctx, ctx.UserID())
 		if err != nil {
 			if pg.IsNotFoundError(err) {
 				return response.Error(response.ErrNotFound.WithMessage("User not found"))
@@ -259,14 +253,8 @@ func updatePasswordHandler(repo repository.Querier) handler.HandlerFunc[*Context
 			return response.Error(response.ErrBadRequest.WithMessage("Failed to parse request").WithError(err))
 		}
 
-		// Get user ID from session
-		sess, ok := ctx.Session()
-		if !ok {
-			return response.Error(response.ErrUnauthorized)
-		}
-
 		// Get user from database
-		user, err := repo.GetUserByID(ctx, sess.UserID)
+		user, err := repo.GetUserByID(ctx, ctx.UserID())
 		if err != nil {
 			if pg.IsNotFoundError(err) {
 				return response.Error(response.ErrNotFound.WithMessage("User not found"))
@@ -287,7 +275,7 @@ func updatePasswordHandler(repo repository.Querier) handler.HandlerFunc[*Context
 
 		// Update password
 		if err := repo.UpdateUserPassword(ctx, repository.UpdateUserPasswordParams{
-			ID:           sess.UserID,
+			ID:           ctx.UserID(),
 			PasswordHash: newPasswordHash,
 		}); err != nil {
 			return response.Error(response.ErrInternalServerError)
