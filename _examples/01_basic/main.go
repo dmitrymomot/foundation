@@ -80,7 +80,11 @@ func main() {
 
 	// Protected endpoints (require session authentication)
 	r.Group(func(protected router.Router[*Context]) {
-		protected.Use(middleware.Session[*Context](sesJwt, log))
+		protected.Use(middleware.SessionWithConfig[*Context, SessionData](middleware.SessionConfig[*Context, SessionData]{
+			Transport:   sesJwt,
+			Logger:      log,
+			RequireAuth: true,
+		}))
 		protected.Get("/api/profile", getProfileHandler(repo))
 		protected.Put("/api/profile/password", updatePasswordHandler(repo))
 		protected.Post("/api/auth/logout", logoutHandler())
