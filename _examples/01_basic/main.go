@@ -42,18 +42,21 @@ func main() {
 
 	repo := repository.New(db)
 
-	// Setup session manager
-	sesJwt, err := sessiontransport.NewJWT(cfg.JwtSigningKey, sessiontransport.NoOpRevoker{})
-	if err != nil {
-		log.Error("Failed to create JWT session transport", logger.Component("session.transport.jwt"), logger.Error(err))
-		os.Exit(1)
-	}
-	ses, err := session.NewFromConfig[SessionData](cfg.Session,
-		session.WithStore(&sessionStorage{repo}),
-		session.WithTransport[SessionData](sesJwt),
+	// Setup session manager with JWT transport
+	sesMgr := session.NewManager[SessionData](
+		&sessionStorage{repo},
+		cfg.SessionTTL,
+		cfg.SessionTouchInterval,
+	)
+
+	sesJwt, err := sessiontransport.NewJWT(
+		sesMgr,
+		cfg.JwtSigningKey,
+		cfg.AccessTokenTTL,
+		cfg.AppName,
 	)
 	if err != nil {
-		log.Error("Failed to create session manager", logger.Component("session"), logger.Error(err))
+		log.Error("Failed to create JWT session transport", logger.Component("session.transport.jwt"), logger.Error(err))
 		os.Exit(1)
 	}
 
@@ -63,12 +66,25 @@ func main() {
 		router.WithMiddleware(
 			middleware.RequestID[*Context](),
 			middleware.ClientIP[*Context](),
-			middleware.Session[*Context, SessionData](ses),
 		),
 	)
 
+	// Health check endpoints
 	r.Get("/live", health.Liveness)
-	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db))) // ping db connection
+	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db)))
+
+	// Public auth endpoints
+	r.Post("/auth/signup", signupHandler(repo, sesJwt))
+	r.Post("/auth/login", loginHandler(repo, sesJwt))
+	r.Post("/auth/refresh", refreshHandler(sesJwt))
+
+	// Protected endpoints (require JWT authentication)
+	r.Group(func(protected router.Router[*Context]) {
+		protected.Use(middleware.JWT[*Context](cfg.JwtSigningKey))
+		protected.Get("/api/profile", getProfileHandler(repo))
+		protected.Put("/api/profile/password", updatePasswordHandler(repo))
+		protected.Post("/api/auth/logout", logoutHandler(sesJwt))
+	})
 
 	eg, ctx := errgroup.WithContext(ctx)
 
