@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
@@ -61,13 +62,13 @@ func (j *JWT[Data]) Load(ctx context.Context, r *http.Request) (session.Session[
 
 	var claims jwtClaims
 	if err := j.signer.Parse(token, &claims); err != nil {
-		return j.manager.New(ctx)
+		return j.manager.New(ctx, fingerprint.JWT(r))
 	}
 
 	// JTI claim contains Session.Token
 	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
-		return j.manager.New(ctx)
+		return j.manager.New(ctx, fingerprint.JWT(r))
 	}
 
 	return sess, nil

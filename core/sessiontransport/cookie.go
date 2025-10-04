@@ -10,6 +10,7 @@ import (
 
 	"github.com/dmitrymomot/foundation/core/cookie"
 	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
 
 // Cookie provides HTTP cookie-based session transport.
@@ -34,12 +35,12 @@ func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr *cookie.Manager, 
 func (c *Cookie[Data]) Load(ctx context.Context, r *http.Request) (session.Session[Data], error) {
 	token, err := c.cookieMgr.GetSigned(r, c.name)
 	if err != nil {
-		return c.manager.New(ctx)
+		return c.manager.New(ctx, fingerprint.Cookie(r))
 	}
 
 	sess, err := c.manager.GetByToken(ctx, token)
 	if err != nil {
-		return c.manager.New(ctx)
+		return c.manager.New(ctx, fingerprint.Cookie(r))
 	}
 
 	return sess, nil
