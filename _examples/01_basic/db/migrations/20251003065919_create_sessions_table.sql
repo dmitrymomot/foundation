@@ -4,7 +4,7 @@
 -- Create sessions table
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    token_hash TEXT UNIQUE NOT NULL,
+    token TEXT UNIQUE NOT NULL,
     device_id UUID NOT NULL,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     data JSONB NOT NULL DEFAULT '{}'::jsonb,

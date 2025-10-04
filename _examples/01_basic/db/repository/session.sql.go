@@ -12,6 +12,16 @@ import (
 	"github.com/google/uuid"
 )
 
+const DeleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+DELETE FROM sessions
+WHERE expires_at <= CURRENT_TIMESTAMP
+`
+
+func (q *Queries) DeleteExpiredSessions(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, DeleteExpiredSessions)
+	return err
+}
+
 const DeleteSessionByID = `-- name: DeleteSessionByID :exec
 DELETE FROM sessions
 WHERE id = $1
@@ -22,18 +32,40 @@ func (q *Queries) DeleteSessionByID(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-const GetSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, token_hash, device_id, user_id, data, expires_at, created_at, updated_at FROM sessions
-WHERE token_hash = $1
+const GetSessionByID = `-- name: GetSessionByID :one
+SELECT id, token, device_id, user_id, data, expires_at, created_at, updated_at FROM sessions
+WHERE id = $1
   AND expires_at > CURRENT_TIMESTAMP
 `
 
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (Session, error) {
-	row := q.db.QueryRow(ctx, GetSessionByTokenHash, tokenHash)
+func (q *Queries) GetSessionByID(ctx context.Context, id uuid.UUID) (Session, error) {
+	row := q.db.QueryRow(ctx, GetSessionByID, id)
 	var i Session
 	err := row.Scan(
 		&i.ID,
-		&i.TokenHash,
+		&i.Token,
+		&i.DeviceID,
+		&i.UserID,
+		&i.Data,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const GetSessionByToken = `-- name: GetSessionByToken :one
+SELECT id, token, device_id, user_id, data, expires_at, created_at, updated_at FROM sessions
+WHERE token = $1
+  AND expires_at > CURRENT_TIMESTAMP
+`
+
+func (q *Queries) GetSessionByToken(ctx context.Context, token string) (Session, error) {
+	row := q.db.QueryRow(ctx, GetSessionByToken, token)
+	var i Session
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
 		&i.DeviceID,
 		&i.UserID,
 		&i.Data,
@@ -45,21 +77,21 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (
 }
 
 const UpsertSession = `-- name: UpsertSession :one
-INSERT INTO sessions (id, token_hash, device_id, user_id, data, expires_at, created_at, updated_at)
+INSERT INTO sessions (id, token, device_id, user_id, data, expires_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (id) DO UPDATE
-SET token_hash = EXCLUDED.token_hash,
+SET token = EXCLUDED.token,
     device_id = EXCLUDED.device_id,
     user_id = EXCLUDED.user_id,
     data = EXCLUDED.data,
     expires_at = EXCLUDED.expires_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, token_hash, device_id, user_id, data, expires_at, created_at, updated_at
+RETURNING id, token, device_id, user_id, data, expires_at, created_at, updated_at
 `
 
 type UpsertSessionParams struct {
 	ID        uuid.UUID  `json:"id"`
-	TokenHash string     `json:"token_hash"`
+	Token     string     `json:"token"`
 	DeviceID  uuid.UUID  `json:"device_id"`
 	UserID    *uuid.UUID `json:"user_id"`
 	Data      []byte     `json:"data"`
@@ -71,7 +103,7 @@ type UpsertSessionParams struct {
 func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) (Session, error) {
 	row := q.db.QueryRow(ctx, UpsertSession,
 		arg.ID,
-		arg.TokenHash,
+		arg.Token,
 		arg.DeviceID,
 		arg.UserID,
 		arg.Data,
@@ -82,7 +114,7 @@ func (q *Queries) UpsertSession(ctx context.Context, arg UpsertSessionParams) (S
 	var i Session
 	err := row.Scan(
 		&i.ID,
-		&i.TokenHash,
+		&i.Token,
 		&i.DeviceID,
 		&i.UserID,
 		&i.Data,

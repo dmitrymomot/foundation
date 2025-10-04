@@ -12,7 +12,7 @@ import (
 
 type Session struct {
 	ID        uuid.UUID  `json:"id"`
-	TokenHash string     `json:"token_hash"`
+	Token     string     `json:"token"`
 	DeviceID  uuid.UUID  `json:"device_id"`
 	UserID    *uuid.UUID `json:"user_id"`
 	Data      []byte     `json:"data"`
