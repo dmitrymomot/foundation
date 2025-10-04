@@ -2,6 +2,7 @@ package sessiontransport
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -45,13 +46,14 @@ func (c *Cookie[Data]) Load(ctx context.Context, r *http.Request) (session.Sessi
 }
 
 // Save session to cookie using signed cookie.
-func (c *Cookie[Data]) Save(ctx context.Context, w http.ResponseWriter, sess session.Session[Data]) error {
-	maxAge := int(time.Until(sess.ExpiresAt).Seconds())
-	if maxAge < 0 {
-		maxAge = 0
+func (c *Cookie[Data]) Save(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
+	until := time.Until(sess.ExpiresAt)
+	if until <= 0 {
+		return fmt.Errorf("cannot save expired session (expired %v ago)", -until)
 	}
+	maxAge := int(until.Seconds())
 
-	return c.cookieMgr.SetSigned(w, nil, c.name, sess.Token,
+	return c.cookieMgr.SetSigned(w, r, c.name, sess.Token,
 		cookie.WithHTTPOnly(true),
 		cookie.WithSecure(true),
 		cookie.WithSameSite(http.SameSiteLaxMode),
@@ -65,20 +67,17 @@ func (c *Cookie[Data]) Save(ctx context.Context, w http.ResponseWriter, sess ses
 func (c *Cookie[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, r *http.Request, userID uuid.UUID) (session.Session[Data], error) {
 	currentSess, err := c.Load(ctx, r)
 	if err != nil {
-		var empty session.Session[Data]
-		return empty, err
+		return session.Session[Data]{}, err
 	}
 
 	// Rotates token for security
 	authSess, err := c.manager.Authenticate(ctx, currentSess, userID)
 	if err != nil {
-		var empty session.Session[Data]
-		return empty, err
+		return session.Session[Data]{}, err
 	}
 
-	if err := c.Save(ctx, w, authSess); err != nil {
-		var empty session.Session[Data]
-		return empty, err
+	if err := c.Save(w, r, authSess); err != nil {
+		return session.Session[Data]{}, err
 	}
 
 	return authSess, nil
@@ -89,20 +88,17 @@ func (c *Cookie[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, 
 func (c *Cookie[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) (session.Session[Data], error) {
 	currentSess, err := c.Load(ctx, r)
 	if err != nil {
-		var empty session.Session[Data]
-		return empty, err
+		return session.Session[Data]{}, err
 	}
 
 	// Rotates token for security
 	anonSess, err := c.manager.Logout(ctx, currentSess)
 	if err != nil {
-		var empty session.Session[Data]
-		return empty, err
+		return session.Session[Data]{}, err
 	}
 
-	if err := c.Save(ctx, w, anonSess); err != nil {
-		var empty session.Session[Data]
-		return empty, err
+	if err := c.Save(w, r, anonSess); err != nil {
+		return session.Session[Data]{}, err
 	}
 
 	return anonSess, nil
@@ -124,18 +120,22 @@ func (c *Cookie[Data]) Delete(ctx context.Context, w http.ResponseWriter, r *htt
 	return nil
 }
 
-// Touch updates session expiration if interval has passed.
-// Note: GetByID/GetByToken already handle touch logic internally,
-// so this method is primarily for explicit session extension.
-func (c *Cookie[Data]) Touch(ctx context.Context, w http.ResponseWriter, sess session.Session[Data]) error {
+// Touch updates session expiration if the touch interval has elapsed.
+// This is called by the session middleware after each request to extend session lifetime.
+//
+// The method retrieves the session from the store (which automatically touches it if needed)
+// and saves the updated cookie if the session was refreshed. This ensures the client's
+// cookie MaxAge stays in sync with the server-side session expiration.
+func (c *Cookie[Data]) Touch(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
 	// GetByID triggers automatic touch if TouchInterval has passed
-	refreshed, err := c.manager.GetByID(ctx, sess.ID)
+	refreshed, err := c.manager.GetByID(r.Context(), sess.ID)
 	if err != nil {
 		return err
 	}
 
+	// If session was touched (UpdatedAt changed), update the cookie
 	if refreshed.UpdatedAt.After(sess.UpdatedAt) {
-		return c.Save(ctx, w, refreshed)
+		return c.Save(w, r, refreshed)
 	}
 
 	return nil

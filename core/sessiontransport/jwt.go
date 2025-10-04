@@ -56,8 +56,7 @@ func NewJWT[Data any](mgr *session.Manager[Data], secretKey string, accessTTL ti
 func (j *JWT[Data]) Load(ctx context.Context, r *http.Request) (session.Session[Data], error) {
 	token := extractBearerToken(r)
 	if token == "" {
-		var empty session.Session[Data]
-		return empty, ErrNoToken
+		return session.Session[Data]{}, ErrNoToken
 	}
 
 	var claims jwtClaims
@@ -75,31 +74,28 @@ func (j *JWT[Data]) Load(ctx context.Context, r *http.Request) (session.Session[
 }
 
 // Save is no-op for JWT (tokens are immutable).
-func (j *JWT[Data]) Save(ctx context.Context, w http.ResponseWriter, sess session.Session[Data]) error {
+func (j *JWT[Data]) Save(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
 	// JWT tokens are immutable - session changes are persisted to store only
 	return nil
 }
 
 // Authenticate user. Returns token pair with Session.Token in both JTI and refresh_token.
 func (j *JWT[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, r *http.Request, userID uuid.UUID) (session.Session[Data], TokenPair, error) {
-	var empty session.Session[Data]
-	var emptyPair TokenPair
-
 	currentSess, err := j.Load(ctx, r)
 	if err != nil && err != ErrNoToken {
-		return empty, emptyPair, err
+		return session.Session[Data]{}, TokenPair{}, err
 	}
 	// If ErrNoToken, currentSess will be anonymous from Load fallback
 
 	// Rotates token for security
 	authSess, err := j.manager.Authenticate(ctx, currentSess, userID)
 	if err != nil {
-		return empty, emptyPair, err
+		return session.Session[Data]{}, TokenPair{}, err
 	}
 
 	pair, err := j.generateTokenPair(authSess)
 	if err != nil {
-		return empty, emptyPair, err
+		return session.Session[Data]{}, TokenPair{}, err
 	}
 
 	return authSess, pair, nil
@@ -107,35 +103,33 @@ func (j *JWT[Data]) Authenticate(ctx context.Context, w http.ResponseWriter, r *
 
 // Refresh rotates refresh token and generates new access token.
 func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.Session[Data], TokenPair, error) {
-	var empty session.Session[Data]
-	var emptyPair TokenPair
-
 	var claims jwtClaims
 	if err := j.signer.Parse(refreshToken, &claims); err != nil {
-		return empty, emptyPair, ErrInvalidToken
+		return session.Session[Data]{}, TokenPair{}, ErrInvalidToken
 	}
 
 	// JTI contains Session.Token
 	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
-		return empty, emptyPair, err
+		return session.Session[Data]{}, TokenPair{}, err
 	}
 
 	// Refresh rotates token while keeping same session ID (critical for audit logs)
 	refreshedSess, err := j.manager.Refresh(ctx, sess)
 	if err != nil {
-		return empty, emptyPair, err
+		return session.Session[Data]{}, TokenPair{}, err
 	}
 
 	pair, err := j.generateTokenPair(refreshedSess)
 	if err != nil {
-		return empty, emptyPair, err
+		return session.Session[Data]{}, TokenPair{}, err
 	}
 
 	return refreshedSess, pair, nil
 }
 
-// Logout converts authenticated session to anonymous (preserves cart/preferences).
+// Logout deletes the session from the store.
+// For JWT transport, the client must discard their tokens.
 func (j *JWT[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	sess, err := j.Load(ctx, r)
 	if err != nil {
@@ -145,8 +139,7 @@ func (j *JWT[Data]) Logout(ctx context.Context, w http.ResponseWriter, r *http.R
 		return err
 	}
 
-	_, err = j.manager.Logout(ctx, sess)
-	return err
+	return j.manager.Delete(ctx, sess.ID)
 }
 
 // Delete session from store.
@@ -162,12 +155,15 @@ func (j *JWT[Data]) Delete(ctx context.Context, w http.ResponseWriter, r *http.R
 	return j.manager.Delete(ctx, sess.ID)
 }
 
-// Touch updates session expiration if interval passed (JWT is immutable, only saves to DB).
-// Note: GetByID/GetByToken already handle touch logic internally,
-// so this method is primarily for explicit session extension.
-func (j *JWT[Data]) Touch(ctx context.Context, w http.ResponseWriter, sess session.Session[Data]) error {
-	// JWT is immutable - retrieve session to trigger touch if needed
-	_, err := j.manager.GetByID(ctx, sess.ID)
+// Touch updates session expiration in the database if the touch interval has elapsed.
+// This is called by the session middleware after each request to extend session lifetime.
+//
+// For JWT transport, tokens are immutable so we only update the database record.
+// The method retrieves the session from the store, which automatically touches it if needed.
+// The client continues using their existing JWT until it expires or they refresh.
+func (j *JWT[Data]) Touch(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
+	// JWT is immutable - retrieve session to trigger database touch if needed
+	_, err := j.manager.GetByID(r.Context(), sess.ID)
 	return err
 }
 
@@ -199,14 +195,12 @@ func (j *JWT[Data]) generateTokenPair(sess session.Session[Data]) (TokenPair, er
 
 	accessToken, err := j.signer.Generate(accessClaims)
 	if err != nil {
-		var empty TokenPair
-		return empty, err
+		return TokenPair{}, err
 	}
 
 	refreshToken, err := j.signer.Generate(refreshClaims)
 	if err != nil {
-		var empty TokenPair
-		return empty, err
+		return TokenPair{}, err
 	}
 
 	return TokenPair{
