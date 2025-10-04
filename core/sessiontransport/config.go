@@ -32,8 +32,8 @@ type JWTConfig struct {
 	// SecretKey is the JWT signing secret (required, no default)
 	SecretKey string `env:"SESSION_JWT_SECRET" envDefault:""`
 
-	// AccessTTL is the access token duration in seconds
-	AccessTTL int `env:"SESSION_JWT_ACCESS_TTL" envDefault:"900"` // 15 minutes
+	// AccessTTL is the access token duration
+	AccessTTL time.Duration `env:"SESSION_JWT_ACCESS_TTL" envDefault:"15m"`
 
 	// Issuer is the JWT issuer claim
 	Issuer string `env:"SESSION_JWT_ISSUER" envDefault:"foundation"`
@@ -43,7 +43,7 @@ type JWTConfig struct {
 // Note: SecretKey must be set explicitly - it has no default.
 func DefaultJWTConfig() JWTConfig {
 	return JWTConfig{
-		AccessTTL: 900, // 15 minutes
+		AccessTTL: 15 * time.Minute,
 		Issuer:    "foundation",
 	}
 }
@@ -55,7 +55,5 @@ func NewJWTFromConfig[Data any](cfg JWTConfig, mgr *session.Manager[Data]) (*JWT
 		return nil, fmt.Errorf("JWT secret key is required")
 	}
 
-	accessTTL := time.Duration(cfg.AccessTTL) * time.Second
-
-	return NewJWT(mgr, cfg.SecretKey, accessTTL, cfg.Issuer)
+	return NewJWT(mgr, cfg.SecretKey, cfg.AccessTTL, cfg.Issuer)
 }
