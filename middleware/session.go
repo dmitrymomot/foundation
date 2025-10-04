@@ -2,7 +2,7 @@ package middleware
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/dmitrymomot/foundation/core/handler"
@@ -23,17 +23,25 @@ type sessionKey struct{}
 //   - Touches session after request (logs errors but doesn't fail)
 //
 // Transport must implement Load and Touch methods for session management.
+// Logger is used for structured logging of session errors.
 func Session[C handler.Context, Data any](
 	transport interface {
 		Load(context.Context, *http.Request) (session.Session[Data], error)
-		Touch(context.Context, http.ResponseWriter, session.Session[Data]) error
+		Touch(http.ResponseWriter, *http.Request, session.Session[Data]) error
 	},
+	logger *slog.Logger,
 ) handler.Middleware[C] {
 	return func(next handler.HandlerFunc[C]) handler.HandlerFunc[C] {
 		return func(ctx C) handler.Response {
 			sess, err := transport.Load(ctx, ctx.Request())
 			if err != nil {
-				log.Printf("session middleware: failed to load session: %v", err)
+				// Check if context was cancelled
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return response.Error(ctxErr)
+				}
+				if logger != nil {
+					logger.Error("failed to load session", "error", err)
+				}
 				// Use empty session to allow graceful degradation instead of failing the request
 				sess = session.Session[Data]{}
 			}
@@ -42,8 +50,17 @@ func Session[C handler.Context, Data any](
 
 			resp := next(ctx)
 
-			if err := transport.Touch(ctx, ctx.ResponseWriter(), sess); err != nil {
-				log.Printf("session middleware: failed to touch session: %v", err)
+			if err := transport.Touch(ctx.ResponseWriter(), ctx.Request(), sess); err != nil {
+				// Check if context was cancelled during cleanup
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					if logger != nil {
+						logger.Warn("context cancelled during touch")
+					}
+					return resp
+				}
+				if logger != nil {
+					logger.Error("failed to touch session", "error", err)
+				}
 			}
 
 			return resp

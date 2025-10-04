@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,8 +31,8 @@ func (m *MockTransport[Data]) Load(ctx context.Context, r *http.Request) (sessio
 	return args.Get(0).(session.Session[Data]), args.Error(1)
 }
 
-func (m *MockTransport[Data]) Touch(ctx context.Context, w http.ResponseWriter, sess session.Session[Data]) error {
-	args := m.Called(ctx, w, sess)
+func (m *MockTransport[Data]) Touch(w http.ResponseWriter, r *http.Request, sess session.Session[Data]) error {
+	args := m.Called(w, r, sess)
 	return args.Error(0)
 }
 
@@ -59,7 +59,7 @@ func TestSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, testSessionData](mockTransport))
+		r.Use(middleware.Session[*router.Context, testSessionData](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			retrieved, ok := middleware.GetSession[testSessionData](ctx)
@@ -98,7 +98,7 @@ func TestSession(t *testing.T) {
 		handlerCalled := false
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			handlerCalled = true
@@ -129,7 +129,7 @@ func TestSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			return response.JSON(map[string]string{"status": "ok"})
@@ -146,11 +146,11 @@ func TestSession(t *testing.T) {
 	})
 
 	t.Run("handles Load errors gracefully - logs and continues with empty session", func(t *testing.T) {
-		// Note: Not parallel due to global log.SetOutput usage
-		// Capture log output
+		t.Parallel()
+
+		// Capture log output using slog
 		var logBuf bytes.Buffer
-		log.SetOutput(&logBuf)
-		defer log.SetOutput(nil)
+		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		mockTransport := new(MockTransport[string])
 		loadErr := errors.New("database connection failed")
@@ -159,7 +159,7 @@ func TestSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, logger))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			sess, ok := middleware.GetSession[string](ctx)
@@ -182,11 +182,11 @@ func TestSession(t *testing.T) {
 	})
 
 	t.Run("handles Touch errors gracefully - logs and doesn't fail request", func(t *testing.T) {
-		// Note: Not parallel due to global log.SetOutput usage
-		// Capture log output
+		t.Parallel()
+
+		// Capture log output using slog
 		var logBuf bytes.Buffer
-		log.SetOutput(&logBuf)
-		defer log.SetOutput(nil)
+		logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
 		mockTransport := new(MockTransport[string])
 		sess := session.Session[string]{
@@ -201,7 +201,7 @@ func TestSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(touchErr)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, logger))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			return response.JSON(map[string]string{"status": "ok"})
@@ -243,7 +243,7 @@ func TestSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, complexData](mockTransport))
+		r.Use(middleware.Session[*router.Context, complexData](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			retrieved, ok := middleware.GetSession[complexData](ctx)
@@ -282,7 +282,7 @@ func TestGetSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			retrieved, ok := middleware.GetSession[string](ctx)
@@ -353,7 +353,7 @@ func TestMustGetSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			retrieved := middleware.MustGetSession[string](ctx)
@@ -411,7 +411,7 @@ func TestSetSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			// Get original session
@@ -458,7 +458,7 @@ func TestSetSession(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, testSessionData](mockTransport))
+		r.Use(middleware.Session[*router.Context, testSessionData](mockTransport, nil))
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			sess, _ := middleware.GetSession[testSessionData](ctx)
@@ -504,7 +504,7 @@ func TestRequireAuth(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 		r.Use(middleware.RequireAuth[*router.Context, string]())
 
 		r.Get("/protected", func(ctx *router.Context) handler.Response {
@@ -536,7 +536,7 @@ func TestRequireAuth(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 		r.Use(middleware.RequireAuth[*router.Context, string]())
 
 		r.Get("/protected", func(ctx *router.Context) handler.Response {
@@ -590,7 +590,7 @@ func TestRequireGuest(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 		r.Use(middleware.RequireGuest[*router.Context, string]())
 
 		r.Get("/login", func(ctx *router.Context) handler.Response {
@@ -622,7 +622,7 @@ func TestRequireGuest(t *testing.T) {
 		mockTransport.On("Touch", mock.Anything, mock.Anything, sess).Return(nil)
 
 		r := router.New[*router.Context]()
-		r.Use(middleware.Session[*router.Context, string](mockTransport))
+		r.Use(middleware.Session[*router.Context, string](mockTransport, nil))
 		r.Use(middleware.RequireGuest[*router.Context, string]())
 
 		r.Get("/login", func(ctx *router.Context) handler.Response {
