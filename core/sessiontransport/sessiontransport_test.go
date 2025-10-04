@@ -1114,7 +1114,7 @@ func TestJWT_Load(t *testing.T) {
 func TestJWT_Save(t *testing.T) {
 	t.Parallel()
 
-	t.Run("is no-op and always returns nil", func(t *testing.T) {
+	t.Run("persists session data to store", func(t *testing.T) {
 		t.Parallel()
 
 		store := &MockStore[string]{}
@@ -1135,11 +1135,15 @@ func TestJWT_Save(t *testing.T) {
 			UpdatedAt: time.Now(),
 		}
 
+		// Mock expects Save to be called
+		store.On("Save", mock.Anything, mock.AnythingOfType("*session.Session[string]")).Return(nil)
+
 		err = transport.Save(newTestContext(w, r), sess)
 
 		require.NoError(t, err)
+		store.AssertExpectations(t)
 
-		// Verify no response was written
+		// Verify no response was written (JWT tokens are immutable)
 		assert.Empty(t, w.Result().Cookies())
 		assert.Empty(t, w.Body.Bytes())
 	})

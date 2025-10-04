@@ -83,14 +83,15 @@ func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 	return sess, nil
 }
 
-// Save is no-op for JWT (tokens are immutable).
+// Save persists session data to the store.
+// JWT tokens are immutable, but session data in the database can be updated.
 func (j *JWT[Data]) Save(ctx handler.Context, sess session.Session[Data]) error {
-	// JWT tokens are immutable - session changes are persisted to store only
-	return nil
+	return j.manager.Save(ctx, &sess)
 }
 
 // Authenticate user. Returns token pair with Session.Token in both JTI and refresh_token.
-func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (session.Session[Data], TokenPair, error) {
+// Optional data parameter allows setting session data during authentication.
+func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (session.Session[Data], TokenPair, error) {
 	currentSess, err := j.Load(ctx)
 	if err != nil && err != ErrNoToken {
 		return session.Session[Data]{}, TokenPair{}, err
@@ -100,6 +101,14 @@ func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (session
 	authSess, err := j.manager.Authenticate(ctx, currentSess, userID)
 	if err != nil {
 		return session.Session[Data]{}, TokenPair{}, err
+	}
+
+	// Set session data if provided
+	if len(data) > 0 {
+		authSess.Data = data[0]
+		if err := j.manager.Save(ctx, &authSess); err != nil {
+			return session.Session[Data]{}, TokenPair{}, err
+		}
 	}
 
 	pair, err := j.generateTokenPair(authSess)

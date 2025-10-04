@@ -74,7 +74,8 @@ func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) err
 
 // Authenticate user. Calls manager.Authenticate and sets new token in cookie.
 // Returns the authenticated session with rotated token.
-func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (session.Session[Data], error) {
+// Optional data parameter allows setting session data during authentication.
+func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (session.Session[Data], error) {
 	currentSess, err := c.Load(ctx)
 	if err != nil {
 		return session.Session[Data]{}, err
@@ -83,6 +84,14 @@ func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID) (sess
 	authSess, err := c.manager.Authenticate(ctx, currentSess, userID)
 	if err != nil {
 		return session.Session[Data]{}, err
+	}
+
+	// Set session data if provided
+	if len(data) > 0 {
+		authSess.Data = data[0]
+		if err := c.manager.Save(ctx, &authSess); err != nil {
+			return session.Session[Data]{}, err
+		}
 	}
 
 	if err := c.Save(ctx, authSess); err != nil {
