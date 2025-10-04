@@ -505,6 +505,131 @@ func TestFingerprintIntegrationWithActualGenerate(t *testing.T) {
 	assert.Equal(t, expectedFP, capturedFP, "Middleware should use fingerprint.Generate correctly")
 }
 
+func TestFingerprintWithOptions(t *testing.T) {
+	t.Parallel()
+
+	t.Run("strict mode with WithIP option", func(t *testing.T) {
+		t.Parallel()
+
+		r := router.New[*router.Context]()
+
+		fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
+			StoreInContext: true,
+			Options:        []fingerprint.Option{fingerprint.WithIP()},
+		})
+		r.Use(fingerprintMiddleware)
+
+		fingerprints := make([]string, 0, 2)
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			fp, _ := middleware.GetFingerprint(ctx)
+			fingerprints = append(fingerprints, fp)
+			return func(w http.ResponseWriter, r *http.Request) error {
+				w.WriteHeader(http.StatusOK)
+				return nil
+			}
+		})
+
+		// First request from IP 192.168.1.100
+		req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req1.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+		req1.Header.Set("Accept", "text/html")
+		req1.RemoteAddr = "192.168.1.100:12345"
+		w1 := httptest.NewRecorder()
+		r.ServeHTTP(w1, req1)
+
+		// Second request from different IP but same headers
+		req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+		req2.Header.Set("Accept", "text/html")
+		req2.RemoteAddr = "192.168.1.101:12345"
+		w2 := httptest.NewRecorder()
+		r.ServeHTTP(w2, req2)
+
+		require.Len(t, fingerprints, 2)
+		assert.NotEqual(t, fingerprints[0], fingerprints[1], "WithIP option should make different IPs produce different fingerprints")
+	})
+
+	t.Run("JWT mode with WithoutAcceptHeaders option", func(t *testing.T) {
+		t.Parallel()
+
+		r := router.New[*router.Context]()
+
+		fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
+			StoreInContext: true,
+			Options:        []fingerprint.Option{fingerprint.WithoutAcceptHeaders()},
+		})
+		r.Use(fingerprintMiddleware)
+
+		fingerprints := make([]string, 0, 2)
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			fp, _ := middleware.GetFingerprint(ctx)
+			fingerprints = append(fingerprints, fp)
+			return func(w http.ResponseWriter, r *http.Request) error {
+				w.WriteHeader(http.StatusOK)
+				return nil
+			}
+		})
+
+		// First request with Accept: text/html
+		req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req1.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+		req1.Header.Set("Accept", "text/html")
+		w1 := httptest.NewRecorder()
+		r.ServeHTTP(w1, req1)
+
+		// Second request with Accept: application/json
+		req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+		req2.Header.Set("Accept", "application/json")
+		w2 := httptest.NewRecorder()
+		r.ServeHTTP(w2, req2)
+
+		require.Len(t, fingerprints, 2)
+		assert.Equal(t, fingerprints[0], fingerprints[1], "WithoutAcceptHeaders option should ignore Accept header differences")
+	})
+
+	t.Run("default mode excludes IP", func(t *testing.T) {
+		t.Parallel()
+
+		r := router.New[*router.Context]()
+
+		// Default configuration (no Options specified)
+		fingerprintMiddleware := middleware.FingerprintWithConfig[*router.Context](middleware.FingerprintConfig{
+			StoreInContext: true,
+		})
+		r.Use(fingerprintMiddleware)
+
+		fingerprints := make([]string, 0, 2)
+		r.Get("/test", func(ctx *router.Context) handler.Response {
+			fp, _ := middleware.GetFingerprint(ctx)
+			fingerprints = append(fingerprints, fp)
+			return func(w http.ResponseWriter, r *http.Request) error {
+				w.WriteHeader(http.StatusOK)
+				return nil
+			}
+		})
+
+		// First request from IP 192.168.1.100
+		req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req1.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+		req1.Header.Set("Accept", "text/html")
+		req1.RemoteAddr = "192.168.1.100:12345"
+		w1 := httptest.NewRecorder()
+		r.ServeHTTP(w1, req1)
+
+		// Second request from different IP but same headers
+		req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
+		req2.Header.Set("User-Agent", "Mozilla/5.0 (Test)")
+		req2.Header.Set("Accept", "text/html")
+		req2.RemoteAddr = "192.168.1.101:12345"
+		w2 := httptest.NewRecorder()
+		r.ServeHTTP(w2, req2)
+
+		require.Len(t, fingerprints, 2)
+		assert.Equal(t, fingerprints[0], fingerprints[1], "Default mode should exclude IP and produce same fingerprint for different IPs")
+	})
+}
+
 func BenchmarkFingerprintDefault(b *testing.B) {
 	r := router.New[*router.Context]()
 
