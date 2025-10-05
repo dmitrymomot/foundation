@@ -13,6 +13,5 @@ type Store[Data any] interface {
 	GetByToken(ctx context.Context, token string) (*Session[Data], error)
 	Save(ctx context.Context, session *Session[Data]) error
 	Delete(ctx context.Context, id uuid.UUID) error
-	// DeleteExpired removes all expired sessions and returns the count of deleted sessions.
 	DeleteExpired(ctx context.Context) error
 }

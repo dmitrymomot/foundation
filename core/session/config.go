@@ -5,11 +5,9 @@ import "time"
 // Config provides environment-based configuration for session management.
 // It allows control over session duration and touch behavior through environment variables.
 type Config struct {
-	// TTL is the session time-to-live duration
 	TTL time.Duration `env:"SESSION_TTL" envDefault:"24h"`
 
-	// TouchInterval determines how often sessions are updated on access.
-	// This reduces database write operations while keeping sessions alive.
+	// TouchInterval reduces database writes by only updating sessions after this interval
 	TouchInterval time.Duration `env:"SESSION_TOUCH_INTERVAL" envDefault:"15m"`
 }
 

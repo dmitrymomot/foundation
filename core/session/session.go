@@ -27,26 +27,16 @@ type Session[Data any] struct {
 	// Fingerprint is the device fingerprint for security validation (format: v1:hash, 35 chars)
 	Fingerprint string
 
-	// IP is the client IP address
-	IP string
-
-	// UserAgent is the raw User-Agent string from HTTP request
+	IP        string
 	UserAgent string
 
 	// Data holds custom application-specific session information.
 	// Examples: shopping cart, UI preferences, A/B test variants.
 	Data Data
 
-	// ExpiresAt is when the session becomes invalid
 	ExpiresAt time.Time
-
-	// CreatedAt records initial session creation time
 	CreatedAt time.Time
-
-	// UpdatedAt tracks last session modification or touch
 	UpdatedAt time.Time
-
-	// DeletedAt marks the session for deletion
 	DeletedAt time.Time
 
 	// isModified tracks if the session needs saving
@@ -105,7 +95,8 @@ func New[Data any](params NewSessionParams, ttl time.Duration) (Session[Data], e
 }
 
 // Authenticate marks the session for authentication with the given userID.
-// Rotates the session token but preserves the session ID. Optional data parameter sets session data.
+// Rotates the session token but preserves the session ID for security.
+// Optional data parameter sets session data.
 func (s *Session[Data]) Authenticate(userID uuid.UUID, data ...Data) error {
 	if err := s.rotateToken(); err != nil {
 		return err
@@ -130,7 +121,7 @@ func (s *Session[Data]) Refresh() error {
 	return nil
 }
 
-// Logout marks the session for deletion.
+// Logout marks the session for deletion by setting DeletedAt timestamp.
 func (s *Session[Data]) Logout() {
 	s.DeletedAt = time.Now()
 	s.isModified = true
@@ -144,6 +135,7 @@ func (s *Session[Data]) SetData(data Data) {
 }
 
 // Touch extends the session expiration if the touch interval has elapsed.
+// This reduces write operations by only updating when sufficient time has passed.
 func (s *Session[Data]) Touch(ttl, touchInterval time.Duration) {
 	if time.Since(s.UpdatedAt) >= touchInterval {
 		s.ExpiresAt = time.Now().Add(ttl)
@@ -173,7 +165,6 @@ func (s Session[Data]) IsExpired() bool {
 }
 
 // rotateToken generates a new token while preserving the session ID.
-// Private method called by Authenticate and Refresh.
 func (s *Session[Data]) rotateToken() error {
 	newToken, err := generateToken()
 	if err != nil {

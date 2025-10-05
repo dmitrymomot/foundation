@@ -33,36 +33,44 @@
 // # Manager Operations
 //
 // The Manager handles session lifecycle:
-//   - New: Create anonymous session (requires NewSessionParams with IP, Fingerprint, UserAgent)
-//   - GetByID: Retrieve session by stable ID
-//   - GetByToken: Retrieve session by authentication token
-//   - Save: Update session data
-//   - Authenticate: Convert anonymous session to authenticated (rotates token, preserves IP/UserAgent)
-//   - Logout: Convert authenticated session to anonymous (rotates token, preserves IP/UserAgent)
-//   - Delete: Remove session by ID
+//   - GetByID: Retrieve session by stable ID (validates expiration)
+//   - GetByToken: Retrieve session by authentication token (validates expiration)
+//   - Store: Persist session state (handles touch, modification tracking, and deletion)
 //   - CleanupExpired: Remove expired sessions (run periodically)
-//   - Refresh: Rotate token and extend expiration (keeps same session ID)
+//   - GetTTL: Returns configured session time-to-live duration
+//
+// Session operations (called on Session instance):
+//   - New: Create anonymous session (requires NewSessionParams with IP, Fingerprint, UserAgent)
+//   - Authenticate: Mark session for authentication with userID (rotates token)
+//   - Logout: Mark session for deletion (sets DeletedAt timestamp)
+//   - Refresh: Rotate token without changing authentication state
+//   - SetData: Update custom session data
+//   - Touch: Extend expiration if touchInterval elapsed (called automatically by Store)
 //
 // # Store Interface
 //
 // The Store interface defines persistence requirements:
-//   - GetByID: Retrieve by session ID
-//   - GetByToken: Retrieve by authentication token
-//   - Save: Persist session (upsert)
+//   - GetByID: Retrieve by session ID (returns *Session[Data], error)
+//   - GetByToken: Retrieve by authentication token (returns *Session[Data], error)
+//   - Save: Persist session (upsert operation, takes *Session[Data])
 //   - Delete: Remove session by ID
 //   - DeleteExpired: Cleanup expired sessions
 //
-// Implementations must handle concurrent access safely.
+// Implementations must handle concurrent access safely and return ErrNotFound
+// when sessions are not found in the store.
 //
 // # Security Considerations
 //
-// Token Rotation: Both Authenticate and Logout rotate the session token by:
-//  1. Generating a new cryptographically secure token
-//  2. Deleting the old session
-//  3. Creating a new session with new ID and token
+// Token Rotation: The Authenticate and Refresh methods rotate the session token by
+// generating a new cryptographically secure 32-byte (256-bit) token encoded as
+// base64 URL-safe string. The session ID remains stable during these operations.
 //
-// This prevents session fixation attacks where an attacker sets a known session
-// identifier before authentication.
+// Session Deletion: The Logout method marks the session for deletion by setting
+// the DeletedAt timestamp. The Manager.Store() method handles the actual deletion
+// and returns ErrNotAuthenticated to signal the transport to clear cookies/tokens.
+//
+// This approach prevents session fixation attacks and ensures proper cleanup of
+// session tokens across all transport mechanisms.
 //
 // Touch Mechanism: Sessions are extended only when touchInterval has elapsed since
 // the last update, reducing write operations while maintaining session activity.
@@ -83,6 +91,7 @@
 //
 //	import (
 //		"context"
+//		"errors"
 //		"time"
 //
 //		"github.com/dmitrymomot/foundation/core/session"
@@ -113,7 +122,7 @@
 //		IP:          "203.0.113.42",        // from clientip.GetIP(r)
 //		UserAgent:   "Mozilla/5.0...",      // from r.Header.Get("User-Agent")
 //	}
-//	sess, err := mgr.New(ctx, params)
+//	sess, err := session.New[SessionData](params, mgr.GetTTL())
 //	if err != nil {
 //		// handle error
 //	}
@@ -128,9 +137,11 @@
 //	userAgent := sess.UserAgent            // Raw User-Agent string
 //
 //	// Update session data
-//	sess.Data.Theme = "dark"
-//	sess.Data.Language = "en"
-//	if err := mgr.Save(ctx, &sess); err != nil {
+//	sess.SetData(SessionData{
+//		Theme:    "dark",
+//		Language: "en",
+//	})
+//	if err := mgr.Store(ctx, sess); err != nil {
 //		// handle error
 //	}
 //
@@ -142,29 +153,34 @@
 //
 //	// Authenticate session (user logs in)
 //	userID := uuid.New()
-//	authenticated, err := mgr.Authenticate(ctx, sess, userID)
-//	if err != nil {
+//	if err := sess.Authenticate(userID); err != nil {
 //		// handle error
 //	}
-//	// authenticated.Token is different (rotated for security)
-//	// authenticated.ID is different (new session)
-//	// authenticated.UserID == userID
-//	// authenticated.Data preserved from anonymous session
+//	if err := mgr.Store(ctx, sess); err != nil {
+//		// handle error
+//	}
+//	// sess.Token is different (rotated for security)
+//	// sess.ID remains the same (stable identifier)
+//	// sess.UserID == userID
+//	// sess.Data preserved from anonymous session
 //
 //	// Logout session (user logs out)
-//	anonymous, err := mgr.Logout(ctx, authenticated)
-//	if err != nil {
+//	sess.Logout()
+//	if err := mgr.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 //		// handle error
 //	}
-//	// anonymous.Token is different (rotated for security)
-//	// anonymous.ID is different (new session)
-//	// anonymous.UserID == uuid.Nil
-//	// anonymous.Data is cleared
+//	// Manager.Store returns ErrNotAuthenticated after deletion
+//	// This signals transport layer to clear cookies/tokens
 //
-//	// Delete session
-//	if err := mgr.Delete(ctx, sess.ID); err != nil {
+//	// Refresh session token (periodic rotation)
+//	if err := sess.Refresh(); err != nil {
 //		// handle error
 //	}
+//	if err := mgr.Store(ctx, sess); err != nil {
+//		// handle error
+//	}
+//	// sess.Token is different (rotated for security)
+//	// sess.ID remains the same (stable identifier)
 //
 // # Periodic Cleanup
 //
@@ -230,7 +246,8 @@
 //		// Take action: force re-authentication, send alert email, etc.
 //		// Or update IP if expected (e.g., mobile networks)
 //		currentSess.IP = currentIP
-//		mgr.Save(ctx, &currentSess)
+//		currentSess.UpdatedAt = time.Now()
+//		mgr.Store(ctx, currentSess)
 //	}
 //
 // Note: IP changes are common with:
