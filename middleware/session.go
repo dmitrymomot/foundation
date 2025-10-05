@@ -4,8 +4,6 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/google/uuid"
-
 	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/response"
 	"github.com/dmitrymomot/foundation/core/session"
@@ -17,10 +15,10 @@ type sessionKey struct{}
 type SessionConfig[C handler.Context, Data any] struct {
 	// Skip defines a function to skip middleware execution for specific requests
 	Skip func(ctx C) bool
-	// Transport implements Load and Touch methods for session management
+	// Transport implements Load and Store methods for session management
 	Transport interface {
 		Load(handler.Context) (session.Session[Data], error)
-		Touch(handler.Context, session.Session[Data]) error
+		Store(handler.Context, session.Session[Data]) error
 	}
 	// Logger for structured logging (default: slog with io.Discard)
 	Logger *slog.Logger
@@ -36,16 +34,16 @@ type SessionConfig[C handler.Context, Data any] struct {
 }
 
 // Session creates middleware that loads session from transport, stores it in context,
-// and touches it after request completion.
+// and stores it after request completion.
 //
 // The middleware:
 //   - Loads session from transport (logs errors but continues with empty session)
 //   - Automatically captures client IP and User-Agent from HTTP headers
 //   - Stores session in request context
 //   - Processes the request
-//   - Touches session after request (logs errors but doesn't fail)
+//   - Stores session after request (logs errors and returns error response)
 //
-// Transport must implement Load and Touch methods for session management.
+// Transport must implement Load and Store methods for session management.
 // Transport implementations automatically extract IP via clientip.GetIP() and
 // User-Agent from request headers when creating new sessions.
 //
@@ -70,11 +68,11 @@ type SessionConfig[C handler.Context, Data any] struct {
 // The middleware automatically:
 // - Creates a default logger that discards output (use SessionWithConfig for custom logger)
 // - Allows graceful degradation on session load errors
-// - Logs session touch errors without failing the request
+// - Delegates all store errors to ErrorHandler
 func Session[C handler.Context, Data any](
 	transport interface {
 		Load(handler.Context) (session.Session[Data], error)
-		Touch(handler.Context, session.Session[Data]) error
+		Store(handler.Context, session.Session[Data]) error
 	},
 ) handler.Middleware[C] {
 	return SessionWithConfig[C, Data](SessionConfig[C, Data]{
@@ -177,19 +175,17 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 				if ctxErr := ctx.Err(); ctxErr != nil {
 					return response.Error(ctxErr)
 				}
-				if cfg.Logger != nil {
-					cfg.Logger.Error("failed to load session", "error", err)
-				}
+				cfg.Logger.ErrorContext(ctx, "session middleware: failed to load session", "error", err)
 				// Allow graceful degradation instead of failing the request
 				sess = session.Session[Data]{}
 			}
 
 			// Check authentication requirements
-			if cfg.RequireAuth && sess.UserID == uuid.Nil {
+			if cfg.RequireAuth && !sess.IsAuthenticated() {
 				return cfg.ErrorHandler(ctx, response.ErrUnauthorized)
 			}
 
-			if cfg.RequireGuest && sess.UserID != uuid.Nil {
+			if cfg.RequireGuest && sess.IsAuthenticated() {
 				return cfg.ErrorHandler(ctx, response.ErrForbidden)
 			}
 
@@ -197,27 +193,16 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 
 			resp := next(ctx)
 
-			// Get the current session from context (handler might have updated it via Auth/Logout)
+			// Get current session (handler may have mutated it)
 			currentSess, ok := GetSession[Data](ctx)
 			if !ok {
-				// Session was removed from context, skip touching
-				return resp
+				return resp // Session removed from context
 			}
 
-			// Skip touching brand new sessions (not yet saved to database)
-			// New sessions have CreatedAt == UpdatedAt
-			if !currentSess.CreatedAt.Equal(currentSess.UpdatedAt) {
-				if err := cfg.Transport.Touch(ctx, currentSess); err != nil {
-					if ctxErr := ctx.Err(); ctxErr != nil {
-						if cfg.Logger != nil {
-							cfg.Logger.Warn("context cancelled during touch")
-						}
-						return resp
-					}
-					if cfg.Logger != nil {
-						cfg.Logger.Error("failed to touch session", "error", err)
-					}
-				}
+			// ALWAYS store - delegate ALL errors to ErrorHandler
+			if err := cfg.Transport.Store(ctx, currentSess); err != nil {
+				cfg.Logger.ErrorContext(ctx, "session store failed", "error", err)
+				return cfg.ErrorHandler(ctx, err)
 			}
 
 			return resp
