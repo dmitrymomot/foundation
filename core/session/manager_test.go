@@ -270,7 +270,9 @@ func TestManager_Store(t *testing.T) {
 
 		err := mgr.Store(ctx, sess)
 
-		require.NoError(t, err)
+		// Manager.Store returns ErrNotAuthenticated to signal Transport layer
+		require.Error(t, err)
+		assert.ErrorIs(t, err, session.ErrNotAuthenticated)
 		store.AssertExpectations(t)
 	})
 
