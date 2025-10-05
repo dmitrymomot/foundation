@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,13 +16,6 @@ type Manager[Data any] struct {
 	touchInterval time.Duration
 }
 
-// NewSessionParams contains parameters for creating a new session.
-type NewSessionParams struct {
-	Fingerprint string
-	IP          string
-	UserAgent   string
-}
-
 // NewManager creates a session manager with the specified store, time-to-live duration,
 // and touch interval. The touchInterval prevents updating session expiration on every access,
 // reducing write operations to the store.
@@ -35,180 +27,53 @@ func NewManager[Data any](store Store[Data], ttl, touchInterval time.Duration) *
 	}
 }
 
-// New creates and persists a new anonymous session with empty data.
-func (m *Manager[Data]) New(ctx context.Context, params NewSessionParams) (Session[Data], error) {
-	if params.IP == "" {
-		return Session[Data]{}, fmt.Errorf("IP address is required")
-	}
-
-	token, err := generateToken()
-	if err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	now := time.Now()
-	session := Session[Data]{
-		ID:          uuid.New(),
-		Token:       token,
-		UserID:      uuid.Nil,
-		Fingerprint: params.Fingerprint,
-		IP:          params.IP,
-		UserAgent:   params.UserAgent,
-		Data:        *new(Data), // Generic-safe zero value initialization
-		ExpiresAt:   now.Add(m.ttl),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	if err := m.store.Save(ctx, &session); err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to save session: %w", err)
-	}
-
-	return session, nil
-}
-
-// GetByID retrieves a session by ID, extending its expiration if the touch interval has elapsed.
+// GetByID retrieves a session by ID.
+// Returns ErrExpired if the session has expired.
 func (m *Manager[Data]) GetByID(ctx context.Context, id uuid.UUID) (Session[Data], error) {
-	now := time.Now()
 	session, err := m.store.GetByID(ctx, id)
 	if err != nil {
 		return Session[Data]{}, err
 	}
 
-	if now.After(session.ExpiresAt) {
+	if session.IsExpired() {
 		return Session[Data]{}, ErrExpired
-	}
-
-	if m.shouldTouch(session) {
-		touched, err := m.touch(ctx, *session)
-		if err != nil {
-			return Session[Data]{}, err
-		}
-		return touched, nil
 	}
 
 	return *session, nil
 }
 
-// GetByToken retrieves a session by token, extending its expiration if the touch interval has elapsed.
+// GetByToken retrieves a session by token.
+// Returns ErrExpired if the session has expired.
 func (m *Manager[Data]) GetByToken(ctx context.Context, token string) (Session[Data], error) {
-	now := time.Now()
 	session, err := m.store.GetByToken(ctx, token)
 	if err != nil {
 		return Session[Data]{}, err
 	}
 
-	if now.After(session.ExpiresAt) {
+	if session.IsExpired() {
 		return Session[Data]{}, ErrExpired
-	}
-
-	if m.shouldTouch(session) {
-		touched, err := m.touch(ctx, *session)
-		if err != nil {
-			return Session[Data]{}, err
-		}
-		return touched, nil
 	}
 
 	return *session, nil
 }
 
-// Save updates an existing session in the store.
-func (m *Manager[Data]) Save(ctx context.Context, sess *Session[Data]) error {
-	now := time.Now()
-	sess.UpdatedAt = now
-	return m.store.Save(ctx, sess)
-}
-
-// Authenticate converts an anonymous session to an authenticated session.
-// Rotates the session token for security, preserves session data, IP, and UserAgent, and extends expiration.
-func (m *Manager[Data]) Authenticate(ctx context.Context, sess Session[Data], userID uuid.UUID) (Session[Data], error) {
-	newToken, err := generateToken()
-	if err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
+// Store handles all session persistence based on session state.
+// Checks for deletion, applies touch logic, and saves if modified.
+func (m *Manager[Data]) Store(ctx context.Context, sess Session[Data]) error {
+	// Handle deletion
+	if sess.IsDeleted() {
+		return m.store.Delete(ctx, sess.ID)
 	}
 
-	if err := m.store.Delete(ctx, sess.ID); err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to delete old session: %w", err)
+	// Apply touch logic (updates expiration if interval elapsed)
+	sess.Touch(m.ttl, m.touchInterval)
+
+	// Save only if modified
+	if sess.IsModified() {
+		return m.store.Save(ctx, &sess)
 	}
 
-	now := time.Now()
-	authenticated := Session[Data]{
-		ID:          uuid.New(),
-		Token:       newToken,
-		UserID:      userID,
-		Fingerprint: sess.Fingerprint,
-		IP:          sess.IP,
-		UserAgent:   sess.UserAgent,
-		Data:        sess.Data,
-		ExpiresAt:   now.Add(m.ttl),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	if err := m.store.Save(ctx, &authenticated); err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to save authenticated session: %w", err)
-	}
-
-	return authenticated, nil
-}
-
-// Logout converts an authenticated session to an anonymous session.
-// Rotates the session token for security, clears user ID, resets custom data, and extends expiration.
-// Preserves IP and UserAgent to maintain device continuity across authentication state changes.
-func (m *Manager[Data]) Logout(ctx context.Context, sess Session[Data]) (Session[Data], error) {
-	newToken, err := generateToken()
-	if err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	if err := m.store.Delete(ctx, sess.ID); err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to delete old session: %w", err)
-	}
-
-	now := time.Now()
-	anonymous := Session[Data]{
-		ID:          uuid.New(),
-		Token:       newToken,
-		UserID:      uuid.Nil,
-		Fingerprint: sess.Fingerprint,
-		IP:          sess.IP,
-		UserAgent:   sess.UserAgent,
-		Data:        *new(Data), // Generic-safe zero value initialization
-		ExpiresAt:   now.Add(m.ttl),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	if err := m.store.Save(ctx, &anonymous); err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to save anonymous session: %w", err)
-	}
-
-	return anonymous, nil
-}
-
-// Delete removes a session by ID.
-func (m *Manager[Data]) Delete(ctx context.Context, id uuid.UUID) error {
-	return m.store.Delete(ctx, id)
-}
-
-func (m *Manager[Data]) shouldTouch(session *Session[Data]) bool {
-	return time.Since(session.UpdatedAt) >= m.touchInterval
-}
-
-// touch reduces database writes by only extending expiration when touchInterval has elapsed.
-func (m *Manager[Data]) touch(ctx context.Context, sess Session[Data]) (Session[Data], error) {
-	if err := ctx.Err(); err != nil {
-		return Session[Data]{}, err
-	}
-
-	now := time.Now()
-	sess.ExpiresAt = now.Add(m.ttl)
-	sess.UpdatedAt = now
-	if err := m.store.Save(ctx, &sess); err != nil {
-		return Session[Data]{}, err
-	}
-	return sess, nil
+	return nil
 }
 
 // CleanupExpired removes all expired sessions from the store.
@@ -220,28 +85,4 @@ func (m *Manager[Data]) CleanupExpired(ctx context.Context) error {
 // GetTTL returns the session time-to-live duration.
 func (m *Manager[Data]) GetTTL() time.Duration {
 	return m.ttl
-}
-
-// Refresh rotates the session token and extends expiration.
-// Unlike Authenticate/Logout, this keeps the same session ID (critical for audit logs).
-func (m *Manager[Data]) Refresh(ctx context.Context, sess Session[Data]) (Session[Data], error) {
-	if sess.UserID == uuid.Nil {
-		return Session[Data]{}, ErrNotAuthenticated
-	}
-
-	newToken, err := generateToken()
-	if err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to generate token: %w", err)
-	}
-
-	now := time.Now()
-	sess.Token = newToken
-	sess.ExpiresAt = now.Add(m.ttl)
-	sess.UpdatedAt = now
-
-	if err := m.store.Save(ctx, &sess); err != nil {
-		return Session[Data]{}, fmt.Errorf("failed to save refreshed session: %w", err)
-	}
-
-	return sess, nil
 }
