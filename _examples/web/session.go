@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 
 	"github.com/dmitrymomot/foundation/_examples/web/db/repository"
@@ -17,13 +16,6 @@ type SessionData struct {
 
 type sessionStorage struct {
 	repo repository.Querier
-}
-
-// fingerprintToDeviceID converts fingerprint to deterministic UUID
-func fingerprintToDeviceID(fingerprint string) uuid.UUID {
-	hash := sha256.Sum256([]byte(fingerprint))
-	deviceID, _ := uuid.FromBytes(hash[:16])
-	return deviceID
 }
 
 // GetByID retrieves a session by its ID
@@ -106,12 +98,6 @@ func (s *sessionStorage) GetByToken(ctx context.Context, token string) (*session
 
 // Save stores or updates a session
 func (s *sessionStorage) Save(ctx context.Context, sess *session.Session[SessionData]) error {
-	// Convert fingerprint to device_id (use stable UUID if no fingerprint)
-	deviceID := uuid.New()
-	if sess.Fingerprint != "" {
-		deviceID = fingerprintToDeviceID(sess.Fingerprint)
-	}
-
 	// Serialize session data to JSONB
 	dataJSON, err := json.Marshal(sess.Data)
 	if err != nil {
@@ -134,7 +120,6 @@ func (s *sessionStorage) Save(ctx context.Context, sess *session.Session[Session
 	_, err = s.repo.UpsertSession(ctx, repository.UpsertSessionParams{
 		ID:          sess.ID,
 		Token:       sess.Token,
-		DeviceID:    deviceID,
 		Fingerprint: sess.Fingerprint,
 		IpAddress:   sess.IP,
 		UserAgent:   userAgent,
