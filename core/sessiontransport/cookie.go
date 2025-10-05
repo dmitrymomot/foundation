@@ -1,6 +1,7 @@
 package sessiontransport
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -35,20 +36,20 @@ func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr *cookie.Manager, 
 func (c *Cookie[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 	token, err := c.cookieMgr.GetSigned(ctx.Request(), c.name)
 	if err != nil {
-		return c.manager.New(ctx, session.NewSessionParams{
+		return session.New[Data](session.NewSessionParams{
 			Fingerprint: fingerprint.Cookie(ctx.Request()),
 			IP:          clientip.GetIP(ctx.Request()),
 			UserAgent:   ctx.Request().Header.Get("User-Agent"),
-		})
+		}, c.manager.GetTTL())
 	}
 
 	sess, err := c.manager.GetByToken(ctx, token)
 	if err != nil {
-		return c.manager.New(ctx, session.NewSessionParams{
+		return session.New[Data](session.NewSessionParams{
 			Fingerprint: fingerprint.Cookie(ctx.Request()),
 			IP:          clientip.GetIP(ctx.Request()),
 			UserAgent:   ctx.Request().Header.Get("User-Agent"),
-		})
+		}, c.manager.GetTTL())
 	}
 
 	return sess, nil
@@ -68,7 +69,7 @@ func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) err
 	)
 }
 
-// Authenticate user. Calls manager.Authenticate and sets new token in cookie.
+// Authenticate user. Calls sess.Authenticate() and sets new token in cookie.
 // Returns the authenticated session with rotated token.
 // Optional data parameter allows setting session data during authentication.
 func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (session.Session[Data], error) {
@@ -77,44 +78,40 @@ func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data 
 		return session.Session[Data]{}, err
 	}
 
-	authSess, err := c.manager.Authenticate(ctx, currentSess, userID)
-	if err != nil {
+	if err := currentSess.Authenticate(userID, data...); err != nil {
 		return session.Session[Data]{}, err
 	}
 
-	// Set session data if provided
-	if len(data) > 0 {
-		authSess.Data = data[0]
-		if err := c.manager.Save(ctx, &authSess); err != nil {
-			return session.Session[Data]{}, err
-		}
-	}
-
-	if err := c.Save(ctx, authSess); err != nil {
+	if err := c.manager.Store(ctx, currentSess); err != nil {
 		return session.Session[Data]{}, err
 	}
 
-	return authSess, nil
+	if err := c.Save(ctx, currentSess); err != nil {
+		return session.Session[Data]{}, err
+	}
+
+	return currentSess, nil
 }
 
-// Logout user. Calls manager.Logout and sets new token in cookie.
-// Returns the anonymous session with rotated token.
+// Logout user. Calls sess.Logout() to mark session for deletion.
+// Returns an empty session.
 func (c *Cookie[Data]) Logout(ctx handler.Context) (session.Session[Data], error) {
 	currentSess, err := c.Load(ctx)
 	if err != nil {
 		return session.Session[Data]{}, err
 	}
 
-	anonSess, err := c.manager.Logout(ctx, currentSess)
-	if err != nil {
+	currentSess.Logout()
+
+	// Store will delete the session because IsDeleted() is true
+	if err := c.manager.Store(ctx, currentSess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 		return session.Session[Data]{}, err
 	}
 
-	if err := c.Save(ctx, anonSess); err != nil {
-		return session.Session[Data]{}, err
-	}
+	// Cookie will be deleted by Store method
+	c.cookieMgr.Delete(ctx.ResponseWriter(), c.name)
 
-	return anonSess, nil
+	return session.Session[Data]{}, nil
 }
 
 // Delete session. Deletes cookie and session from store.
@@ -124,7 +121,10 @@ func (c *Cookie[Data]) Delete(ctx handler.Context) error {
 		return err
 	}
 
-	if err := c.manager.Delete(ctx, currentSess.ID); err != nil {
+	currentSess.Logout() // Mark for deletion
+
+	// Store will delete the session
+	if err := c.manager.Store(ctx, currentSess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 		return err
 	}
 
@@ -133,20 +133,20 @@ func (c *Cookie[Data]) Delete(ctx handler.Context) error {
 	return nil
 }
 
-// Touch updates session expiration if the touch interval has elapsed.
-// This is called by the session middleware after each request to extend session lifetime.
-// Ensures the client's cookie MaxAge stays synchronized with server-side session expiration.
-func (c *Cookie[Data]) Touch(ctx handler.Context, sess session.Session[Data]) error {
-	// Manager automatically extends expiration if touchInterval has elapsed
-	refreshed, err := c.manager.GetByID(ctx, sess.ID)
+// Store persists session state and updates the cookie.
+func (c *Cookie[Data]) Store(ctx handler.Context, sess session.Session[Data]) error {
+	err := c.manager.Store(ctx, sess)
+
+	// Handle deletion: remove cookie and propagate error
+	if errors.Is(err, session.ErrNotAuthenticated) {
+		c.cookieMgr.Delete(ctx.ResponseWriter(), c.name)
+		return err
+	}
+
 	if err != nil {
 		return err
 	}
 
-	// If session was touched (UpdatedAt changed), update the cookie
-	if refreshed.UpdatedAt.After(sess.UpdatedAt) {
-		return c.Save(ctx, refreshed)
-	}
-
-	return nil
+	// Update cookie with current session
+	return c.Save(ctx, sess)
 }
