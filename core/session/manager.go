@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,10 +60,14 @@ func (m *Manager[Data]) GetByToken(ctx context.Context, token string) (Session[D
 
 // Store handles all session persistence based on session state.
 // Checks for deletion, applies touch logic, and saves if modified.
+// Returns ErrNotAuthenticated when session is deleted to signal Transport.
 func (m *Manager[Data]) Store(ctx context.Context, sess Session[Data]) error {
-	// Handle deletion
+	// Handle deletion - signal with error
 	if sess.IsDeleted() {
-		return m.store.Delete(ctx, sess.ID)
+		if err := m.store.Delete(ctx, sess.ID); err != nil && !errors.Is(err, ErrNotFound) {
+			return errors.Join(ErrDeleteSession, err)
+		}
+		return ErrNotAuthenticated
 	}
 
 	// Apply touch logic (updates expiration if interval elapsed)
