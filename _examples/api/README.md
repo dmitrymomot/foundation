@@ -187,7 +187,7 @@ Retrieve the authenticated user's profile.
 **Request:**
 
 ```bash
-curl http://localhost:8081/api/profile \
+curl http://localhost:8081/profile \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -210,7 +210,7 @@ Change the user's password.
 **Request:**
 
 ```bash
-curl -X PUT http://localhost:8081/api/profile/password \
+curl -X PUT http://localhost:8081/profile/password \
   -H "Authorization: Bearer eyJhbGci..." \
   -H "Content-Type: application/json" \
   -d '{
@@ -236,7 +236,7 @@ End the current session.
 **Request:**
 
 ```bash
-curl -X POST http://localhost:8081/api/auth/logout \
+curl -X POST http://localhost:8081/auth/logout \
   -H "Authorization: Bearer eyJhbGci..."
 ```
 
@@ -272,11 +272,11 @@ echo "Access Token: $ACCESS_TOKEN"
 echo "Refresh Token: $REFRESH_TOKEN"
 
 # 2. Get profile using access token
-curl http://localhost:8081/api/profile \
+curl http://localhost:8081/profile \
   -H "Authorization: Bearer $ACCESS_TOKEN"
 
 # 3. Update password
-curl -X PUT http://localhost:8081/api/profile/password \
+curl -X PUT http://localhost:8081/profile/password \
   -H "Authorization: Bearer $ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -293,11 +293,11 @@ NEW_ACCESS_TOKEN=$(echo $REFRESH_RESPONSE | jq -r '.access_token')
 echo "New Access Token: $NEW_ACCESS_TOKEN"
 
 # 5. Use new access token
-curl http://localhost:8081/api/profile \
+curl http://localhost:8081/profile \
   -H "Authorization: Bearer $NEW_ACCESS_TOKEN"
 
 # 6. Logout
-curl -X POST http://localhost:8081/api/auth/logout \
+curl -X POST http://localhost:8081/auth/logout \
   -H "Authorization: Bearer $NEW_ACCESS_TOKEN"
 
 # 7. Login with updated password
