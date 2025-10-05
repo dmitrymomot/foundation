@@ -16,6 +16,7 @@ import (
 	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/dmitrymomot/foundation/integration/database/pg"
 	"github.com/dmitrymomot/foundation/middleware"
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -53,21 +54,26 @@ func main() {
 
 	// Setup new router with custom context and global middlewares
 	r := router.New[*Context](
-		router.WithContextFactory[*Context](newContext(sesJwt)),
+		router.WithContextFactory[*Context](newContext()),
 		router.WithMiddleware(
 			middleware.RequestID[*Context](),
 			middleware.ClientIP[*Context](),
+			middleware.Fingerprint[*Context](),
 		),
 	)
+
+	// Auth helpers that have access to JWT transport
+	authHelper := newAuthHelper(sesJwt)
+	refreshHelper := newRefreshHelper(sesJwt)
 
 	// Health check endpoints
 	r.Get("/live", health.Liveness)
 	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db)))
 
 	// Public auth endpoints
-	r.Post("/auth/signup", signupHandler(repo))
-	r.Post("/auth/login", loginHandler(repo))
-	r.Post("/auth/refresh", refreshHandler())
+	r.Post("/auth/signup", signupHandler(repo, authHelper))
+	r.Post("/auth/login", loginHandler(repo, authHelper))
+	r.Post("/auth/refresh", refreshHandler(refreshHelper))
 
 	// Protected endpoints (require session authentication)
 	r.Group(func(protected router.Router[*Context]) {
@@ -96,4 +102,43 @@ func main() {
 	}
 
 	log.Info("Application stopped")
+}
+
+// authHelper provides authentication functionality with JWT transport access.
+type authHelper struct {
+	transport *sessiontransport.JWT[SessionData]
+}
+
+func newAuthHelper(transport *sessiontransport.JWT[SessionData]) *authHelper {
+	return &authHelper{transport: transport}
+}
+
+// Authenticate authenticates a user and returns JWT token pair.
+// This creates a new session or authenticates an existing one.
+func (h *authHelper) Authenticate(ctx *Context, userID uuid.UUID, data SessionData) (sessiontransport.TokenPair, error) {
+	sess, tokens, err := h.transport.Authenticate(ctx, userID, data)
+	if err != nil {
+		return sessiontransport.TokenPair{}, err
+	}
+	// Update session in context so middleware can handle it
+	middleware.SetSession[SessionData](ctx, sess)
+	return tokens, nil
+}
+
+// refreshHelper provides token refresh functionality with JWT transport access.
+type refreshHelper struct {
+	transport *sessiontransport.JWT[SessionData]
+}
+
+func newRefreshHelper(transport *sessiontransport.JWT[SessionData]) *refreshHelper {
+	return &refreshHelper{transport: transport}
+}
+
+// Refresh refreshes the session using refresh token and returns new token pair.
+func (h *refreshHelper) Refresh(ctx *Context, refreshToken string) (sessiontransport.TokenPair, error) {
+	tokens, err := h.transport.Refresh(ctx, refreshToken)
+	if err != nil {
+		return sessiontransport.TokenPair{}, err
+	}
+	return tokens, nil
 }

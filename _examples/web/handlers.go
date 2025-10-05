@@ -89,12 +89,8 @@ func signupHandler(repo repository.Querier, tmpl *template.Template) handler.Han
 		var req SignupRequest
 		if err := ctx.Bind(&req); err != nil {
 			errorMsg := "Invalid form data"
-			if validator.IsValidationError(err) {
-				validationErrs := validator.ExtractValidationErrors(err)
-				if len(validationErrs) > 0 {
-					// Show first validation error
-					errorMsg = validationErrs[0].Message
-				}
+			if validationErrs := validator.ExtractValidationErrors(err); len(validationErrs) > 0 {
+				errorMsg = validationErrs[0].Message
 			}
 			return response.Template(tmpl, SignupPageData{
 				Title: "Sign Up",
@@ -149,12 +145,8 @@ func loginHandler(repo repository.Querier, tmpl *template.Template) handler.Hand
 		var req LoginRequest
 		if err := ctx.Bind(&req); err != nil {
 			errorMsg := "Invalid form data"
-			if validator.IsValidationError(err) {
-				validationErrs := validator.ExtractValidationErrors(err)
-				if len(validationErrs) > 0 {
-					// Show first validation error
-					errorMsg = validationErrs[0].Message
-				}
+			if validationErrs := validator.ExtractValidationErrors(err); len(validationErrs) > 0 {
+				errorMsg = validationErrs[0].Message
 			}
 			return response.Template(tmpl, LoginPageData{
 				Title: "Log In",

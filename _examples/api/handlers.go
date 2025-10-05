@@ -58,12 +58,11 @@ type LoginResponse struct {
 
 // Auth Handlers
 
-func signupHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
+func signupHandler(repo repository.Querier, auth *authHelper) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req SignupRequest
 		if err := ctx.Bind(&req); err != nil {
-			if validator.IsValidationError(err) {
-				validationErrs := validator.ExtractValidationErrors(err)
+			if validationErrs := validator.ExtractValidationErrors(err); len(validationErrs) > 0 {
 				return response.Error(
 					response.ErrBadRequest.WithDetails(map[string]any{
 						"errors": validationErrs,
@@ -94,7 +93,7 @@ func signupHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 		}
 
 		// Authenticate with session data (creates token pair)
-		tokens, err := ctx.Auth(user.ID, SessionData{
+		tokens, err := auth.Authenticate(ctx, user.ID, SessionData{
 			Name:  user.Name,
 			Email: user.Email,
 		})
@@ -117,12 +116,11 @@ func signupHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	}
 }
 
-func loginHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
+func loginHandler(repo repository.Querier, auth *authHelper) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req LoginRequest
 		if err := ctx.Bind(&req); err != nil {
-			if validator.IsValidationError(err) {
-				validationErrs := validator.ExtractValidationErrors(err)
+			if validationErrs := validator.ExtractValidationErrors(err); len(validationErrs) > 0 {
 				return response.Error(
 					response.ErrBadRequest.WithDetails(map[string]any{
 						"errors": validationErrs,
@@ -147,7 +145,7 @@ func loginHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 		}
 
 		// Authenticate with session data (creates token pair)
-		tokens, err := ctx.Auth(user.ID, SessionData{
+		tokens, err := auth.Authenticate(ctx, user.ID, SessionData{
 			Name:  user.Name,
 			Email: user.Email,
 		})
@@ -170,12 +168,11 @@ func loginHandler(repo repository.Querier) handler.HandlerFunc[*Context] {
 	}
 }
 
-func refreshHandler() handler.HandlerFunc[*Context] {
+func refreshHandler(refresh *refreshHelper) handler.HandlerFunc[*Context] {
 	return func(ctx *Context) handler.Response {
 		var req RefreshRequest
 		if err := ctx.Bind(&req); err != nil {
-			if validator.IsValidationError(err) {
-				validationErrs := validator.ExtractValidationErrors(err)
+			if validationErrs := validator.ExtractValidationErrors(err); len(validationErrs) > 0 {
 				return response.Error(
 					response.ErrBadRequest.WithDetails(map[string]any{
 						"errors": validationErrs,
@@ -186,7 +183,7 @@ func refreshHandler() handler.HandlerFunc[*Context] {
 		}
 
 		// Refresh tokens
-		tokens, err := ctx.Refresh(req.RefreshToken)
+		tokens, err := refresh.Refresh(ctx, req.RefreshToken)
 		if err != nil {
 			return response.Error(response.ErrUnauthorized.WithMessage("Invalid or expired refresh token"))
 		}
@@ -238,8 +235,7 @@ func updatePasswordHandler(repo repository.Querier) handler.HandlerFunc[*Context
 	return func(ctx *Context) handler.Response {
 		var req UpdatePasswordRequest
 		if err := ctx.Bind(&req); err != nil {
-			if validator.IsValidationError(err) {
-				validationErrs := validator.ExtractValidationErrors(err)
+			if validationErrs := validator.ExtractValidationErrors(err); len(validationErrs) > 0 {
 				return response.Error(
 					response.ErrBadRequest.WithDetails(map[string]any{
 						"errors": validationErrs,

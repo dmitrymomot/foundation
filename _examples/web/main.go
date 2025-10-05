@@ -69,11 +69,12 @@ func main() {
 
 	// Setup new router with custom context, error handler, and global middlewares
 	r := router.New[*Context](
-		router.WithContextFactory[*Context](newContext(sesCookie)),
+		router.WithContextFactory[*Context](newContext()),
 		router.WithErrorHandler[*Context](errorHandler(templates.error)),
 		router.WithMiddleware(
 			middleware.RequestID[*Context](),
 			middleware.ClientIP[*Context](),
+			middleware.Fingerprint[*Context](),
 		),
 	)
 
