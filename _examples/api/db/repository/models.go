@@ -13,7 +13,6 @@ import (
 type Session struct {
 	ID          uuid.UUID  `json:"id"`
 	Token       string     `json:"token"`
-	DeviceID    uuid.UUID  `json:"device_id"`
 	Fingerprint string     `json:"fingerprint"`
 	IpAddress   string     `json:"ip_address"`
 	UserAgent   *string    `json:"user_agent"`

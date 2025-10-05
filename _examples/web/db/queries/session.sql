@@ -9,11 +9,10 @@ WHERE id = $1
   AND expires_at > CURRENT_TIMESTAMP;
 
 -- name: UpsertSession :one
-INSERT INTO sessions (id, token, device_id, fingerprint, ip_address, user_agent, user_id, data, expires_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO sessions (id, token, fingerprint, ip_address, user_agent, user_id, data, expires_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (id) DO UPDATE
 SET token = EXCLUDED.token,
-    device_id = EXCLUDED.device_id,
     fingerprint = EXCLUDED.fingerprint,
     ip_address = EXCLUDED.ip_address,
     user_agent = EXCLUDED.user_agent,

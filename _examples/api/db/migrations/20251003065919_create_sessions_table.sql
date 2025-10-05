@@ -5,7 +5,6 @@
 CREATE TABLE sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     token TEXT UNIQUE NOT NULL,
-    device_id UUID NOT NULL,
     fingerprint TEXT NOT NULL DEFAULT '',
     ip_address TEXT NOT NULL DEFAULT '',
     user_agent TEXT,
