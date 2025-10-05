@@ -35,7 +35,7 @@
 //
 //	// Load session (creates anonymous if missing/invalid)
 //	// IP and User-Agent are automatically extracted from request
-//	sess, err := transport.Load(ctx, r)
+//	sess, err := transport.Load(ctx)
 //
 //	// Access tracked information
 //	clientIP := sess.IP                    // e.g., "203.0.113.42"
@@ -43,13 +43,13 @@
 //	userAgent := sess.UserAgent            // Raw User-Agent string
 //
 //	// Authenticate user (preserves IP and UserAgent)
-//	sess, err = transport.Authenticate(ctx, w, r, userID)
+//	sess, err = transport.Authenticate(ctx, userID)
 //
-//	// Logout user (preserves IP and UserAgent)
-//	sess, err = transport.Logout(ctx, w, r)
+//	// Logout user
+//	sess, err = transport.Logout(ctx)
 //
 //	// Delete session
-//	err = transport.Delete(ctx, w, r)
+//	err = transport.Delete(ctx)
 //
 // # JWT Transport
 //
@@ -75,7 +75,7 @@
 //
 //	// Load session (returns ErrNoToken if no bearer token)
 //	// IP and User-Agent are automatically extracted from request
-//	sess, err := transport.Load(ctx, r)
+//	sess, err := transport.Load(ctx)
 //	if err == sessiontransport.ErrNoToken {
 //		// No token present
 //	}
@@ -85,14 +85,14 @@
 //	device := sess.Device()                // e.g., "Safari/17.0 (iOS, mobile)"
 //
 //	// Authenticate user (returns token pair, preserves IP/UserAgent)
-//	sess, tokens, err := transport.Authenticate(ctx, w, r, userID)
+//	sess, tokens, err := transport.Authenticate(ctx, userID)
 //	// tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresIn
 //
-//	// Refresh tokens (rotates both)
-//	sess, tokens, err = transport.Refresh(ctx, oldRefreshToken)
+//	// Refresh tokens (rotates session token and returns new token pair)
+//	tokens, err = transport.Refresh(ctx, oldRefreshToken)
 //
 //	// Logout user
-//	err = transport.Logout(ctx, w, r)
+//	err = transport.Logout(ctx)
 //
 // # Proxy Header Support
 //

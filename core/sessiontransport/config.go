@@ -10,7 +10,6 @@ import (
 
 // CookieConfig provides environment-based configuration for cookie-based session transport.
 type CookieConfig struct {
-	// CookieName is the name of the session cookie
 	CookieName string `env:"SESSION_COOKIE_NAME" envDefault:"__session"`
 }
 
@@ -29,14 +28,11 @@ func NewCookieFromConfig[Data any](cfg CookieConfig, mgr *session.Manager[Data],
 
 // JWTConfig provides environment-based configuration for JWT-based session transport.
 type JWTConfig struct {
-	// SecretKey is the JWT signing secret (required, no default)
+	// SecretKey is the JWT signing secret (required)
 	SecretKey string `env:"SESSION_JWT_SECRET" envDefault:""`
 
-	// AccessTTL is the access token duration
 	AccessTTL time.Duration `env:"SESSION_JWT_ACCESS_TTL" envDefault:"15m"`
-
-	// Issuer is the JWT issuer claim
-	Issuer string `env:"SESSION_JWT_ISSUER" envDefault:"foundation"`
+	Issuer    string        `env:"SESSION_JWT_ISSUER" envDefault:"foundation"`
 }
 
 // DefaultJWTConfig returns a JWTConfig with sensible defaults.

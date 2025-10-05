@@ -54,9 +54,8 @@ func NewJWT[Data any](mgr *session.Manager[Data], secretKey string, accessTTL ti
 	}, nil
 }
 
-// Load session from JWT bearer token.
-// Returns ErrNoToken if no bearer token present.
-// Creates new anonymous session if token invalid.
+// Load extracts and validates session from JWT bearer token.
+// Returns ErrNoToken if no bearer token present, creates anonymous session if token invalid.
 func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 	token := extractBearerToken(ctx.Request())
 	if token == "" {
@@ -85,13 +84,14 @@ func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 }
 
 // Save persists session data to the store.
-// JWT tokens are immutable, but session data in the database can be updated.
+// Note: JWT tokens are immutable; only database session data is updated.
 func (j *JWT[Data]) Save(ctx handler.Context, sess session.Session[Data]) error {
 	return j.manager.Store(ctx, sess)
 }
 
-// Authenticate user. Returns token pair with Session.Token in both JTI and refresh_token.
-// Optional data parameter allows setting session data during authentication.
+// Authenticate creates an authenticated session and returns a token pair.
+// Session.Token is embedded in both access and refresh token JTI claims.
+// Optional data parameter sets session data during authentication.
 func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (session.Session[Data], TokenPair, error) {
 	currentSess, err := j.Load(ctx)
 	if err != nil && err != ErrNoToken {
@@ -116,7 +116,7 @@ func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...
 }
 
 // Logout deletes the session from the store.
-// For JWT transport, the client must discard their tokens.
+// Client must discard JWT tokens as they cannot be invalidated server-side.
 func (j *JWT[Data]) Logout(ctx handler.Context) error {
 	sess, err := j.Load(ctx)
 	if err != nil {
@@ -126,9 +126,8 @@ func (j *JWT[Data]) Logout(ctx handler.Context) error {
 		return err
 	}
 
-	sess.Logout() // Mark for deletion
+	sess.Logout()
 
-	// Store will delete the session
 	if err := j.manager.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 		return err
 	}
@@ -136,7 +135,7 @@ func (j *JWT[Data]) Logout(ctx handler.Context) error {
 	return nil
 }
 
-// Delete session from store.
+// Delete removes the session from store.
 func (j *JWT[Data]) Delete(ctx handler.Context) error {
 	sess, err := j.Load(ctx)
 	if err != nil {
@@ -146,9 +145,8 @@ func (j *JWT[Data]) Delete(ctx handler.Context) error {
 		return err
 	}
 
-	sess.Logout() // Mark for deletion
+	sess.Logout()
 
-	// Store will delete the session
 	if err := j.manager.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 		return err
 	}
@@ -172,7 +170,7 @@ func (j *JWT[Data]) Auth(sess session.Session[Data]) (TokenPair, error) {
 }
 
 // Refresh validates the refresh token and generates a new token pair.
-// This rotates the session token in the database for security.
+// Rotates the session token in database for security.
 func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
 	var claims jwtClaims
 	if err := j.signer.Parse(refreshToken, &claims); err != nil {
@@ -188,17 +186,14 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (TokenPair
 		return TokenPair{}, session.ErrNotAuthenticated
 	}
 
-	// Rotate session token for security
 	if err := sess.Refresh(); err != nil {
 		return TokenPair{}, err
 	}
 
-	// Save rotated session
 	if err := j.manager.Store(ctx, sess); err != nil {
 		return TokenPair{}, err
 	}
 
-	// Generate new token pair
 	return j.Auth(sess)
 }
 
@@ -209,7 +204,7 @@ func (j *JWT[Data]) generateTokenPair(sess session.Session[Data]) (TokenPair, er
 
 	accessClaims := jwtClaims{
 		StandardClaims: jwt.StandardClaims{
-			ID:        sess.Token, // Session.Token in JTI
+			ID:        sess.Token,
 			Subject:   sess.UserID.String(),
 			Issuer:    j.issuer,
 			IssuedAt:  now.Unix(),
@@ -217,7 +212,7 @@ func (j *JWT[Data]) generateTokenPair(sess session.Session[Data]) (TokenPair, er
 		},
 	}
 
-	// Refresh token uses same JTI but session expiration (longer-lived)
+	// Refresh token shares same JTI but uses longer session expiration
 	refreshClaims := jwtClaims{
 		StandardClaims: jwt.StandardClaims{
 			ID:        sess.Token,

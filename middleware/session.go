@@ -19,18 +19,13 @@ type SessionConfig[C handler.Context, Data any] struct {
 		Load(handler.Context) (session.Session[Data], error)
 		Store(handler.Context, session.Session[Data]) error
 	}
-	// Logger for structured logging (default: slog with io.Discard)
 	Logger *slog.Logger
-	// Skip defines a function to skip middleware execution for specific requests
-	Skip func(ctx C) bool
+	Skip   func(ctx C) bool
 	// RequireAuth enforces authenticated user (UserID != uuid.Nil)
-	// Returns ErrorHandler response if not authenticated
 	RequireAuth bool
 	// RequireGuest enforces guest/unauthenticated (UserID == uuid.Nil)
-	// Returns ErrorHandler response if authenticated
 	RequireGuest bool
 	// ErrorHandler defines custom response for transport and auth failures
-	// Default: returns response.Error(response.ErrUnauthorized)
 	ErrorHandler func(ctx C, err error) handler.Response
 }
 
@@ -180,7 +175,6 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 				return next(ctx)
 			}
 
-			// 1. Load session from Transport
 			sess, err := cfg.Transport.Load(ctx)
 			if err != nil {
 				if !errors.Is(err, session.ErrNotAuthenticated) {
@@ -189,7 +183,6 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 				return cfg.ErrorHandler(ctx, err)
 			}
 
-			// 2. Check auth requirements
 			if cfg.RequireAuth && !sess.IsAuthenticated() {
 				cfg.Logger.WarnContext(ctx, "authentication required but session not authenticated")
 				return cfg.ErrorHandler(ctx, response.ErrUnauthorized)
@@ -200,20 +193,15 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 				return cfg.ErrorHandler(ctx, response.ErrForbidden)
 			}
 
-			// 3. Store session in context
 			ctx.SetValue(sessionKey{}, sess)
 
-			// 4. Execute handler
 			resp := next(ctx)
 
-			// 5. Get session from context (handler may have mutated it)
 			currentSess, ok := GetSession[Data](ctx)
 			if !ok {
-				// Session was removed from context, skip storage
 				return resp
 			}
 
-			// 6. Store session via Transport
 			if err := cfg.Transport.Store(ctx, currentSess); err != nil {
 				if !errors.Is(err, session.ErrNotAuthenticated) {
 					cfg.Logger.ErrorContext(ctx, "session store failed", "error", err)

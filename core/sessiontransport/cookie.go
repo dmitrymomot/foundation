@@ -40,8 +40,8 @@ func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr CookieManager, na
 	}
 }
 
-// Load session from cookie. Creates new anonymous session if no cookie or invalid.
-// This provides graceful degradation - always returns a valid session.
+// Load session from cookie. Creates new anonymous session if no cookie or invalid
+// to provide graceful degradation - always returns a valid session.
 func (c *Cookie[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 	token, err := c.cookieMgr.GetSigned(ctx.Request(), c.name)
 	if err != nil {
@@ -64,7 +64,7 @@ func (c *Cookie[Data]) Load(ctx handler.Context) (session.Session[Data], error) 
 	return sess, nil
 }
 
-// Save session to cookie using signed cookie.
+// Save writes the session token to a signed, essential cookie.
 func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) error {
 	until := time.Until(sess.ExpiresAt)
 	if until <= 0 {
@@ -78,8 +78,7 @@ func (c *Cookie[Data]) Save(ctx handler.Context, sess session.Session[Data]) err
 	)
 }
 
-// Authenticate user. Calls sess.Authenticate() and sets new token in cookie.
-// Returns the authenticated session with rotated token.
+// Authenticate creates an authenticated session with rotated token.
 // Optional data parameter allows setting session data during authentication.
 func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (session.Session[Data], error) {
 	currentSess, err := c.Load(ctx)
@@ -102,8 +101,7 @@ func (c *Cookie[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data 
 	return currentSess, nil
 }
 
-// Logout user. Calls sess.Logout() to mark session for deletion.
-// Returns an empty session.
+// Logout deletes the session from store and removes the cookie.
 func (c *Cookie[Data]) Logout(ctx handler.Context) (session.Session[Data], error) {
 	currentSess, err := c.Load(ctx)
 	if err != nil {
@@ -112,27 +110,24 @@ func (c *Cookie[Data]) Logout(ctx handler.Context) (session.Session[Data], error
 
 	currentSess.Logout()
 
-	// Store will delete the session because IsDeleted() is true
 	if err := c.manager.Store(ctx, currentSess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 		return session.Session[Data]{}, err
 	}
 
-	// Cookie will be deleted by Store method
 	c.cookieMgr.Delete(ctx.ResponseWriter(), c.name)
 
 	return session.Session[Data]{}, nil
 }
 
-// Delete session. Deletes cookie and session from store.
+// Delete removes the session from store and deletes the cookie.
 func (c *Cookie[Data]) Delete(ctx handler.Context) error {
 	currentSess, err := c.Load(ctx)
 	if err != nil {
 		return err
 	}
 
-	currentSess.Logout() // Mark for deletion
+	currentSess.Logout()
 
-	// Store will delete the session
 	if err := c.manager.Store(ctx, currentSess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 		return err
 	}
@@ -146,7 +141,6 @@ func (c *Cookie[Data]) Delete(ctx handler.Context) error {
 func (c *Cookie[Data]) Store(ctx handler.Context, sess session.Session[Data]) error {
 	err := c.manager.Store(ctx, sess)
 
-	// Handle deletion: remove cookie and propagate error
 	if errors.Is(err, session.ErrNotAuthenticated) {
 		c.cookieMgr.Delete(ctx.ResponseWriter(), c.name)
 		return err
@@ -156,6 +150,5 @@ func (c *Cookie[Data]) Store(ctx handler.Context, sess session.Session[Data]) er
 		return err
 	}
 
-	// Update cookie with current session
 	return c.Save(ctx, sess)
 }
