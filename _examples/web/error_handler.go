@@ -15,7 +15,7 @@ type ErrorPageData struct {
 	Message    string
 }
 
-// errorHandler creates a custom error handler that renders HTML error pages using response.Template
+// errorHandler creates a custom error handler that renders HTML error pages using response.TemplateWithStatus
 func errorHandler(tmpl *template.Template) func(ctx *Context, err error) {
 	return func(ctx *Context, err error) {
 		// Default error data
@@ -39,14 +39,7 @@ func errorHandler(tmpl *template.Template) func(ctx *Context, err error) {
 			}
 		}
 
-		// Set content type and status
-		ctx.ResponseWriter().Header().Set("Content-Type", "text/html; charset=utf-8")
-		ctx.ResponseWriter().WriteHeader(data.StatusCode)
-
-		// Render error template
-		if err := tmpl.Execute(ctx.ResponseWriter(), data); err != nil {
-			// Fallback to plain text if template fails
-			http.Error(ctx.ResponseWriter(), data.Message, data.StatusCode)
-		}
+		// Render error template with appropriate status code
+		response.Render(ctx, response.TemplateWithStatus(tmpl, data, data.StatusCode))
 	}
 }

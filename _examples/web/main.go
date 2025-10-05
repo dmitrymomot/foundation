@@ -75,6 +75,7 @@ func main() {
 			middleware.RequestID[*Context](),
 			middleware.ClientIP[*Context](),
 			middleware.Fingerprint[*Context](),
+			middleware.LoggingWithLogger[*Context](log.With(logger.Component("http.request"))),
 		),
 	)
 
@@ -82,11 +83,22 @@ func main() {
 	r.Get("/live", health.Liveness)
 	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db)))
 
-	// Public routes
-	r.Get("/signup", signupPageHandler(templates.signup))
-	r.Post("/signup", signupHandler(repo, templates.signup))
-	r.Get("/login", loginPageHandler(templates.login))
-	r.Post("/login", loginHandler(repo, templates.login))
+	// Public routes (require guest - redirect authenticated users to profile)
+	r.Group(func(public router.Router[*Context]) {
+		public.Use(middleware.SessionWithConfig[*Context, SessionData](middleware.SessionConfig[*Context, SessionData]{
+			Transport:    sesCookie,
+			Logger:       log,
+			RequireGuest: true,
+			ErrorHandler: func(ctx *Context, err error) handler.Response {
+				// Redirect authenticated users to profile page
+				return response.Redirect("/")
+			},
+		}))
+		public.Get("/signup", signupPageHandler(templates.signup))
+		public.Post("/signup", signupHandler(repo, templates.signup))
+		public.Get("/login", loginPageHandler(templates.login))
+		public.Post("/login", loginHandler(repo, templates.login))
+	})
 
 	// Protected routes (require authentication)
 	r.Group(func(protected router.Router[*Context]) {
