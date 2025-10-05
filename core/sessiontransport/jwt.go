@@ -2,6 +2,7 @@ package sessiontransport
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
-// TokenPair represents JWT access and refresh tokens.
+// TokenPair contains JWT access and refresh tokens with metadata.
 type TokenPair struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
@@ -64,20 +65,20 @@ func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 
 	var claims jwtClaims
 	if err := j.signer.Parse(token, &claims); err != nil {
-		return j.manager.New(ctx, session.NewSessionParams{
+		return session.New[Data](session.NewSessionParams{
 			Fingerprint: fingerprint.JWT(ctx.Request()),
 			IP:          clientip.GetIP(ctx.Request()),
 			UserAgent:   ctx.Request().Header.Get("User-Agent"),
-		})
+		}, j.manager.GetTTL())
 	}
 
 	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
-		return j.manager.New(ctx, session.NewSessionParams{
+		return session.New[Data](session.NewSessionParams{
 			Fingerprint: fingerprint.JWT(ctx.Request()),
 			IP:          clientip.GetIP(ctx.Request()),
 			UserAgent:   ctx.Request().Header.Get("User-Agent"),
-		})
+		}, j.manager.GetTTL())
 	}
 
 	return sess, nil
@@ -86,7 +87,7 @@ func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 // Save persists session data to the store.
 // JWT tokens are immutable, but session data in the database can be updated.
 func (j *JWT[Data]) Save(ctx handler.Context, sess session.Session[Data]) error {
-	return j.manager.Save(ctx, &sess)
+	return j.manager.Store(ctx, sess)
 }
 
 // Authenticate user. Returns token pair with Session.Token in both JTI and refresh_token.
@@ -98,51 +99,20 @@ func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...
 	}
 	// ErrNoToken is acceptable - Load creates anonymous session as fallback
 
-	authSess, err := j.manager.Authenticate(ctx, currentSess, userID)
+	if err := currentSess.Authenticate(userID, data...); err != nil {
+		return session.Session[Data]{}, TokenPair{}, err
+	}
+
+	if err := j.manager.Store(ctx, currentSess); err != nil {
+		return session.Session[Data]{}, TokenPair{}, err
+	}
+
+	pair, err := j.generateTokenPair(currentSess)
 	if err != nil {
 		return session.Session[Data]{}, TokenPair{}, err
 	}
 
-	// Set session data if provided
-	if len(data) > 0 {
-		authSess.Data = data[0]
-		if err := j.manager.Save(ctx, &authSess); err != nil {
-			return session.Session[Data]{}, TokenPair{}, err
-		}
-	}
-
-	pair, err := j.generateTokenPair(authSess)
-	if err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
-	}
-
-	return authSess, pair, nil
-}
-
-// Refresh rotates refresh token and generates new access token.
-func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (session.Session[Data], TokenPair, error) {
-	var claims jwtClaims
-	if err := j.signer.Parse(refreshToken, &claims); err != nil {
-		return session.Session[Data]{}, TokenPair{}, ErrInvalidToken
-	}
-
-	sess, err := j.manager.GetByToken(ctx, claims.ID)
-	if err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
-	}
-
-	// Refresh rotates token while keeping same session ID (critical for audit logs)
-	refreshedSess, err := j.manager.Refresh(ctx, sess)
-	if err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
-	}
-
-	pair, err := j.generateTokenPair(refreshedSess)
-	if err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
-	}
-
-	return refreshedSess, pair, nil
+	return currentSess, pair, nil
 }
 
 // Logout deletes the session from the store.
@@ -156,7 +126,14 @@ func (j *JWT[Data]) Logout(ctx handler.Context) error {
 		return err
 	}
 
-	return j.manager.Delete(ctx, sess.ID)
+	sess.Logout() // Mark for deletion
+
+	// Store will delete the session
+	if err := j.manager.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
+		return err
+	}
+
+	return nil
 }
 
 // Delete session from store.
@@ -169,15 +146,60 @@ func (j *JWT[Data]) Delete(ctx handler.Context) error {
 		return err
 	}
 
-	return j.manager.Delete(ctx, sess.ID)
+	sess.Logout() // Mark for deletion
+
+	// Store will delete the session
+	if err := j.manager.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
+		return err
+	}
+
+	return nil
 }
 
-// Touch updates session expiration in the database if the touch interval has elapsed.
-// For JWT transport, tokens are immutable so only the database record is updated.
-// The client continues using their existing JWT until it expires or they refresh.
-func (j *JWT[Data]) Touch(ctx handler.Context, sess session.Session[Data]) error {
-	_, err := j.manager.GetByID(ctx, sess.ID)
-	return err
+// Store persists session state.
+func (j *JWT[Data]) Store(ctx handler.Context, sess session.Session[Data]) error {
+	return j.manager.Store(ctx, sess)
+}
+
+// Auth generates a new token pair after authentication.
+// Call this after sess.Authenticate() to get JWT tokens.
+func (j *JWT[Data]) Auth(sess session.Session[Data]) (TokenPair, error) {
+	if !sess.IsAuthenticated() {
+		return TokenPair{}, session.ErrNotAuthenticated
+	}
+
+	return j.generateTokenPair(sess)
+}
+
+// Refresh validates the refresh token and generates a new token pair.
+// This rotates the session token in the database for security.
+func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
+	var claims jwtClaims
+	if err := j.signer.Parse(refreshToken, &claims); err != nil {
+		return TokenPair{}, ErrInvalidToken
+	}
+
+	sess, err := j.manager.GetByToken(ctx, claims.ID)
+	if err != nil {
+		return TokenPair{}, err
+	}
+
+	if !sess.IsAuthenticated() {
+		return TokenPair{}, session.ErrNotAuthenticated
+	}
+
+	// Rotate session token for security
+	if err := sess.Refresh(); err != nil {
+		return TokenPair{}, err
+	}
+
+	// Save rotated session
+	if err := j.manager.Store(ctx, sess); err != nil {
+		return TokenPair{}, err
+	}
+
+	// Generate new token pair
+	return j.Auth(sess)
 }
 
 // generateTokenPair creates access and refresh token pair.
