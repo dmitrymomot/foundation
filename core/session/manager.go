@@ -29,36 +29,36 @@ func NewManager[Data any](store Store[Data], ttl, touchInterval time.Duration) *
 }
 
 // GetByID retrieves a session by ID and validates expiration.
-func (m *Manager[Data]) GetByID(ctx context.Context, id uuid.UUID) (Session[Data], error) {
+func (m *Manager[Data]) GetByID(ctx context.Context, id uuid.UUID) (*Session[Data], error) {
 	session, err := m.store.GetByID(ctx, id)
 	if err != nil {
-		return Session[Data]{}, err
+		return nil, err
 	}
 
 	if session.IsExpired() {
-		return Session[Data]{}, ErrExpired
+		return nil, ErrExpired
 	}
 
-	return *session, nil
+	return session, nil
 }
 
 // GetByToken retrieves a session by token and validates expiration.
-func (m *Manager[Data]) GetByToken(ctx context.Context, token string) (Session[Data], error) {
+func (m *Manager[Data]) GetByToken(ctx context.Context, token string) (*Session[Data], error) {
 	session, err := m.store.GetByToken(ctx, token)
 	if err != nil {
-		return Session[Data]{}, err
+		return nil, err
 	}
 
 	if session.IsExpired() {
-		return Session[Data]{}, ErrExpired
+		return nil, ErrExpired
 	}
 
-	return *session, nil
+	return session, nil
 }
 
 // Store handles all session persistence based on session state.
 // When a session is deleted, returns ErrNotAuthenticated to signal Transport for cookie/token cleanup.
-func (m *Manager[Data]) Store(ctx context.Context, sess Session[Data]) error {
+func (m *Manager[Data]) Store(ctx context.Context, sess *Session[Data]) error {
 	if sess.IsDeleted() {
 		if err := m.store.Delete(ctx, sess.ID); err != nil && !errors.Is(err, ErrNotFound) {
 			return errors.Join(ErrDeleteSession, err)
@@ -69,7 +69,7 @@ func (m *Manager[Data]) Store(ctx context.Context, sess Session[Data]) error {
 	sess.Touch(m.ttl, m.touchInterval)
 
 	if sess.IsModified() {
-		return m.store.Save(ctx, &sess)
+		return m.store.Save(ctx, sess)
 	}
 
 	return nil

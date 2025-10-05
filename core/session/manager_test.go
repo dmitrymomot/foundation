@@ -52,20 +52,20 @@ func (m *mockStore) DeleteExpired(ctx context.Context) error {
 
 // Helper functions
 
-func createValidSession(t *testing.T) session.Session[testData] {
+func createValidSession(t *testing.T) *session.Session[testData] {
 	sess, err := session.New[testData](session.NewSessionParams{
 		IP: "127.0.0.1",
 	}, time.Hour)
 	require.NoError(t, err)
-	return sess
+	return &sess
 }
 
-func createExpiredSession(t *testing.T) session.Session[testData] {
+func createExpiredSession(t *testing.T) *session.Session[testData] {
 	sess, err := session.New[testData](session.NewSessionParams{
 		IP: "127.0.0.1",
 	}, -time.Hour) // Negative TTL creates already expired session
 	require.NoError(t, err)
-	return sess
+	return &sess
 }
 
 // Tests
@@ -100,7 +100,7 @@ func TestManager_GetByID(t *testing.T) {
 		validSession := createValidSession(t)
 		sessionID := validSession.ID
 
-		store.On("GetByID", ctx, sessionID).Return(&validSession, nil)
+		store.On("GetByID", ctx, sessionID).Return(validSession, nil)
 
 		result, err := mgr.GetByID(ctx, sessionID)
 
@@ -120,13 +120,13 @@ func TestManager_GetByID(t *testing.T) {
 		expiredSession := createExpiredSession(t)
 		sessionID := expiredSession.ID
 
-		store.On("GetByID", ctx, sessionID).Return(&expiredSession, nil)
+		store.On("GetByID", ctx, sessionID).Return(expiredSession, nil)
 
 		result, err := mgr.GetByID(ctx, sessionID)
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, session.ErrExpired)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 
@@ -145,7 +145,7 @@ func TestManager_GetByID(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, session.ErrNotFound)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 
@@ -165,7 +165,7 @@ func TestManager_GetByID(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, storeErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -183,7 +183,7 @@ func TestManager_GetByToken(t *testing.T) {
 		validSession := createValidSession(t)
 		token := validSession.Token
 
-		store.On("GetByToken", ctx, token).Return(&validSession, nil)
+		store.On("GetByToken", ctx, token).Return(validSession, nil)
 
 		result, err := mgr.GetByToken(ctx, token)
 
@@ -203,13 +203,13 @@ func TestManager_GetByToken(t *testing.T) {
 		expiredSession := createExpiredSession(t)
 		token := expiredSession.Token
 
-		store.On("GetByToken", ctx, token).Return(&expiredSession, nil)
+		store.On("GetByToken", ctx, token).Return(expiredSession, nil)
 
 		result, err := mgr.GetByToken(ctx, token)
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, session.ErrExpired)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 
@@ -228,7 +228,7 @@ func TestManager_GetByToken(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, session.ErrNotFound)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 
@@ -248,7 +248,7 @@ func TestManager_GetByToken(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, storeErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }

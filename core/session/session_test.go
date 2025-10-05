@@ -484,7 +484,6 @@ func TestRace_ConcurrentRefresh(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
 
-	tokens := sync.Map{}
 	successCount := atomic.Int32{}
 	errorCount := atomic.Int32{}
 
@@ -495,8 +494,6 @@ func TestRace_ConcurrentRefresh(t *testing.T) {
 			err := sess.Refresh()
 			if err == nil {
 				successCount.Add(1)
-				// Store the token we saw
-				tokens.Store(sess.Token, true)
 			} else {
 				errorCount.Add(1)
 			}
@@ -513,14 +510,6 @@ func TestRace_ConcurrentRefresh(t *testing.T) {
 	assert.Equal(t, userID, sess.UserID, "UserID should be preserved")
 	assert.True(t, sess.IsAuthenticated(), "Session should still be authenticated")
 	assert.NotEmpty(t, sess.Token, "Token should be set")
-
-	// Count unique tokens (should be at least 1, possibly many due to race)
-	uniqueTokens := 0
-	tokens.Range(func(_, _ interface{}) bool {
-		uniqueTokens++
-		return true
-	})
-	assert.Greater(t, uniqueTokens, 0, "At least one unique token should exist")
 }
 
 func TestRace_MixedOperations(t *testing.T) {

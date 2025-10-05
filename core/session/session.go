@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,12 +42,18 @@ type Session[Data any] struct {
 
 	// isModified tracks if the session needs saving
 	isModified bool
+
+	// mu protects concurrent access to session fields
+	mu sync.RWMutex
 }
 
 // Device returns a human-readable device identifier based on the User-Agent string.
 // Returns "Unknown device" if UserAgent is empty or parsing fails.
 // Examples: "Chrome/120.0 (Windows, desktop)", "Safari/17.0 (iOS, mobile)", "Bot: Googlebot"
-func (s Session[Data]) Device() string {
+func (s *Session[Data]) Device() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if s.UserAgent == "" {
 		return "Unknown device"
 	}
@@ -98,6 +105,9 @@ func New[Data any](params NewSessionParams, ttl time.Duration) (Session[Data], e
 // Rotates the session token but preserves the session ID for security.
 // Optional data parameter sets session data.
 func (s *Session[Data]) Authenticate(userID uuid.UUID, data ...Data) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := s.rotateToken(); err != nil {
 		return err
 	}
@@ -113,6 +123,9 @@ func (s *Session[Data]) Authenticate(userID uuid.UUID, data ...Data) error {
 // Refresh rotates the session token without changing authentication state or session ID.
 // Useful for periodic token rotation for security.
 func (s *Session[Data]) Refresh() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := s.rotateToken(); err != nil {
 		return err
 	}
@@ -123,12 +136,18 @@ func (s *Session[Data]) Refresh() error {
 
 // Logout marks the session for deletion by setting DeletedAt timestamp.
 func (s *Session[Data]) Logout() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.DeletedAt = time.Now()
 	s.isModified = true
 }
 
 // SetData updates the session's custom data.
 func (s *Session[Data]) SetData(data Data) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.Data = data
 	s.UpdatedAt = time.Now()
 	s.isModified = true
@@ -137,6 +156,9 @@ func (s *Session[Data]) SetData(data Data) {
 // Touch extends the session expiration if the touch interval has elapsed.
 // This reduces write operations by only updating when sufficient time has passed.
 func (s *Session[Data]) Touch(ttl, touchInterval time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if time.Since(s.UpdatedAt) >= touchInterval {
 		now := time.Now()
 		s.ExpiresAt = now.Add(ttl)
@@ -146,26 +168,39 @@ func (s *Session[Data]) Touch(ttl, touchInterval time.Duration) {
 }
 
 // IsAuthenticated returns true if the session has a valid user ID.
-func (s Session[Data]) IsAuthenticated() bool {
+func (s *Session[Data]) IsAuthenticated() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return s.UserID != uuid.Nil && s.Token != ""
 }
 
 // IsDeleted returns true if the session is marked for deletion.
-func (s Session[Data]) IsDeleted() bool {
+func (s *Session[Data]) IsDeleted() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return !s.DeletedAt.IsZero()
 }
 
 // IsModified returns true if the session has been modified and needs saving.
-func (s Session[Data]) IsModified() bool {
+func (s *Session[Data]) IsModified() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return s.isModified
 }
 
 // IsExpired returns true if the session has expired.
-func (s Session[Data]) IsExpired() bool {
+func (s *Session[Data]) IsExpired() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return time.Now().After(s.ExpiresAt)
 }
 
 // rotateToken generates a new token while preserving the session ID.
+// Must be called with s.mu locked.
 func (s *Session[Data]) rotateToken() error {
 	newToken, err := generateToken()
 	if err != nil {

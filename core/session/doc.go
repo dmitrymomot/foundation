@@ -141,7 +141,7 @@
 //		Theme:    "dark",
 //		Language: "en",
 //	})
-//	if err := mgr.Store(ctx, sess); err != nil {
+//	if err := mgr.Store(ctx, &sess); err != nil {
 //		// handle error
 //	}
 //
@@ -153,30 +153,30 @@
 //
 //	// Authenticate session (user logs in)
 //	userID := uuid.New()
-//	if err := sess.Authenticate(userID); err != nil {
+//	if err := retrieved.Authenticate(userID); err != nil {
 //		// handle error
 //	}
-//	if err := mgr.Store(ctx, sess); err != nil {
+//	if err := mgr.Store(ctx, retrieved); err != nil {
 //		// handle error
 //	}
-//	// sess.Token is different (rotated for security)
-//	// sess.ID remains the same (stable identifier)
-//	// sess.UserID == userID
-//	// sess.Data preserved from anonymous session
+//	// retrieved.Token is different (rotated for security)
+//	// retrieved.ID remains the same (stable identifier)
+//	// retrieved.UserID == userID
+//	// retrieved.Data preserved from anonymous session
 //
 //	// Logout session (user logs out)
-//	sess.Logout()
-//	if err := mgr.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
+//	retrieved.Logout()
+//	if err := mgr.Store(ctx, retrieved); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
 //		// handle error
 //	}
 //	// Manager.Store returns ErrNotAuthenticated after deletion
 //	// This signals transport layer to clear cookies/tokens
 //
 //	// Refresh session token (periodic rotation)
-//	if err := sess.Refresh(); err != nil {
+//	if err := retrieved.Refresh(); err != nil {
 //		// handle error
 //	}
-//	if err := mgr.Store(ctx, sess); err != nil {
+//	if err := mgr.Store(ctx, retrieved); err != nil {
 //		// handle error
 //	}
 //	// sess.Token is different (rotated for security)
