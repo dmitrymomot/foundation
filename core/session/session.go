@@ -138,8 +138,9 @@ func (s *Session[Data]) SetData(data Data) {
 // This reduces write operations by only updating when sufficient time has passed.
 func (s *Session[Data]) Touch(ttl, touchInterval time.Duration) {
 	if time.Since(s.UpdatedAt) >= touchInterval {
-		s.ExpiresAt = time.Now().Add(ttl)
-		s.UpdatedAt = time.Now()
+		now := time.Now()
+		s.ExpiresAt = now.Add(ttl)
+		s.UpdatedAt = now
 		s.isModified = true
 	}
 }
