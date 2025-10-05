@@ -15,7 +15,7 @@ type ErrorPageData struct {
 	Message    string
 }
 
-// errorHandler creates a custom error handler that renders HTML error pages
+// errorHandler creates a custom error handler that renders HTML error pages using response.Template
 func errorHandler(tmpl *template.Template) func(ctx *Context, err error) {
 	return func(ctx *Context, err error) {
 		// Default error data
