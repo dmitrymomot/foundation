@@ -1,255 +1,268 @@
-// Package session provides secure, generic session management for Go web applications.
+// Package session provides pure business logic for managing user sessions with generic data storage.
 //
-// This package implements a flexible session system that supports both anonymous
-// and authenticated sessions with configurable persistence and transport mechanisms.
-// Sessions use cryptographically secure tokens and support automatic expiration,
-// token rotation on authentication, and device tracking for analytics.
+// This package handles session lifecycle without any HTTP knowledge - HTTP integration
+// is handled separately by the sessiontransport package. Sessions can be anonymous
+// (guest users) or authenticated (logged-in users), with seamless conversion between states.
 //
-// # Core Components
+// # Key Features
 //
-// The package provides four main types:
+// - Generic Data type for custom session data structures
+// - Anonymous sessions with UserID = uuid.Nil
+// - Seamless conversion from anonymous to authenticated sessions
+// - Token rotation on authentication/logout (prevents session fixation attacks)
+// - Touch mechanism to extend active sessions without forcing updates on every request
+// - Separate ID and Token: ID is stable (for foreign keys), Token rotates (security)
+// - Clean separation of concerns following session system design principles
 //
-//   - Session[Data]: Generic session container with application-defined data
-//   - Manager[Data]: Coordinates session lifecycle operations
-//   - Store[Data]: Interface for session persistence (Redis, database, etc.)
-//   - Transport: Interface for token transmission (cookies, headers, etc.)
+// # Session Structure
+//
+// A Session contains:
+//   - ID: Stable identifier for database foreign keys, rotates on auth/logout
+//   - Token: Cryptographically secure token for authentication, rotates on auth/logout
+//   - UserID: uuid.Nil for anonymous, actual UUID for authenticated sessions
+//   - Fingerprint: Device fingerprint for security validation ("v1:hash" format, 35 chars)
+//   - IP: Client IP address (required, supports IPv4/IPv6, extracted from proxy headers)
+//   - UserAgent: Raw User-Agent string from HTTP request (optional)
+//   - Data: Generic type parameter for custom session data
+//   - ExpiresAt: Session expiration timestamp
+//   - CreatedAt: Session creation timestamp
+//   - UpdatedAt: Last modification timestamp
+//
+// The Device() method parses UserAgent to return a human-readable device identifier.
+//
+// # Manager Operations
+//
+// The Manager handles session lifecycle:
+//   - GetByID: Retrieve session by stable ID (validates expiration)
+//   - GetByToken: Retrieve session by authentication token (validates expiration)
+//   - Store: Persist session state (handles touch, modification tracking, and deletion)
+//   - CleanupExpired: Remove expired sessions (run periodically)
+//   - GetTTL: Returns configured session time-to-live duration
+//
+// Session operations (called on Session instance):
+//   - New: Create anonymous session (requires NewSessionParams with IP, Fingerprint, UserAgent)
+//   - Authenticate: Mark session for authentication with userID (rotates token)
+//   - Logout: Mark session for deletion (sets DeletedAt timestamp)
+//   - Refresh: Rotate token without changing authentication state
+//   - SetData: Update custom session data
+//   - Touch: Extend expiration if touchInterval elapsed (called automatically by Store)
+//
+// # Store Interface
+//
+// The Store interface defines persistence requirements:
+//   - GetByID: Retrieve by session ID (returns *Session[Data], error)
+//   - GetByToken: Retrieve by authentication token (returns *Session[Data], error)
+//   - Save: Persist session (upsert operation, takes *Session[Data])
+//   - Delete: Remove session by ID
+//   - DeleteExpired: Cleanup expired sessions
+//
+// Implementations must handle concurrent access safely and return ErrNotFound
+// when sessions are not found in the store.
+//
+// # Security Considerations
+//
+// Token Rotation: The Authenticate and Refresh methods rotate the session token by
+// generating a new cryptographically secure 32-byte (256-bit) token encoded as
+// base64 URL-safe string. The session ID remains stable during these operations.
+//
+// Session Deletion: The Logout method marks the session for deletion by setting
+// the DeletedAt timestamp. The Manager.Store() method handles the actual deletion
+// and returns ErrNotAuthenticated to signal the transport to clear cookies/tokens.
+//
+// This approach prevents session fixation attacks and ensures proper cleanup of
+// session tokens across all transport mechanisms.
+//
+// Touch Mechanism: Sessions are extended only when touchInterval has elapsed since
+// the last update, reducing write operations while maintaining session activity.
+//
+// IP and UserAgent Tracking: Sessions track client IP and User-Agent for:
+//   - Session hijacking detection (IP change alerts)
+//   - Security audit logs (device information via Device() method)
+//   - Anomaly detection (unusual device or location changes)
+//
+// IP addresses are extracted by sessiontransport using clientip.GetIP(), which:
+//   - Supports standard proxy headers (X-Forwarded-For, X-Real-IP, etc.)
+//   - Validates IP format (IPv4/IPv6)
+//   - Required field - session creation fails without valid IP
+//
+// UserAgent is optional but recommended for security monitoring via Device() method.
 //
 // # Basic Usage
 //
-// Create a session manager with custom data type:
-//
-//	import "github.com/dmitrymomot/foundation/core/session"
-//
-//	type UserData struct {
-//		Theme    string `json:"theme"`
-//		Language string `json:"language"`
-//	}
-//
-//	manager, err := session.New[UserData](
-//		session.WithStore(myStore),
-//		session.WithTransport(myTransport),
-//		session.WithConfig(
-//			session.WithTTL(24 * time.Hour),
-//			session.WithTouchInterval(5 * time.Minute),
-//		),
-//	)
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//
-// # Configuration-Based Initialization
-//
-// Use environment variables with the config-based approach:
-//
 //	import (
-//		"github.com/caarlos0/env/v11"
+//		"context"
+//		"errors"
+//		"time"
+//
+//		"github.com/dmitrymomot/foundation/core/session"
+//		"github.com/google/uuid"
 //	)
 //
-//	// Load configuration from environment
-//	config := session.DefaultConfig()
-//	if err := env.Parse(&config); err != nil {
-//		log.Fatal(err)
+//	// Define custom session data
+//	type SessionData struct {
+//		Theme      string
+//		Language   string
+//		ShoppingCart []string
 //	}
 //
-//	// Environment variables:
-//	// SESSION_TTL=24h
-//	// SESSION_TOUCH_INTERVAL=5m
-//
-//	// Create manager from config
-//	manager, err := session.NewFromConfig[UserData](
-//		config,
-//		session.WithStore(myStore),
-//		session.WithTransport(myTransport),
+//	// Create manager with a store implementation
+//	store := NewYourStoreImplementation()
+//	mgr := session.NewManager[SessionData](
+//		store,
+//		24*time.Hour,     // TTL: 24 hours
+//		5*time.Minute,    // Touch interval: extend only if >5min since last update
 //	)
+//
+//	ctx := context.Background()
+//
+//	// Create anonymous session (for guest users)
+//	// In practice, sessiontransport automatically extracts these values from HTTP request
+//	params := session.NewSessionParams{
+//		Fingerprint: "v1:abc123...",        // from fingerprint package
+//		IP:          "203.0.113.42",        // from clientip.GetIP(r)
+//		UserAgent:   "Mozilla/5.0...",      // from r.Header.Get("User-Agent")
+//	}
+//	sess, err := session.New[SessionData](params, mgr.GetTTL())
 //	if err != nil {
-//		log.Fatal(err)
+//		// handle error
+//	}
+//	// Note: IP is required, session creation fails without it
+//	// UserAgent is optional but recommended for security monitoring
+//	// Fingerprint format is "v1:hash" (35 characters total)
+//	// All values are preserved through Authenticate/Logout/Refresh operations
+//
+//	// Access IP and device information
+//	clientIP := sess.IP                    // "203.0.113.42"
+//	device := sess.Device()                // "Chrome/120.0 (Windows, desktop)"
+//	userAgent := sess.UserAgent            // Raw User-Agent string
+//
+//	// Update session data
+//	sess.SetData(SessionData{
+//		Theme:    "dark",
+//		Language: "en",
+//	})
+//	if err := mgr.Store(ctx, &sess); err != nil {
+//		// handle error
 //	}
 //
-// Mix configuration with runtime options:
-//
-//	config := session.DefaultConfig()
-//	config.TTL = 48 * time.Hour
-//
-//	// Options can override config values
-//	manager, err := session.NewFromConfig[UserData](
-//		config,
-//		session.WithStore(myStore),
-//		session.WithTransport(myTransport),
-//		session.WithLogger(customLogger),
-//		session.WithTouchInterval(10 * time.Minute), // Overrides config
-//	)
+//	// Retrieve session by token (e.g., from cookie)
+//	retrieved, err := mgr.GetByToken(ctx, sess.Token)
 //	if err != nil {
-//		log.Fatal(err)
+//		// handle error
 //	}
 //
-// Handle requests with session loading:
+//	// Authenticate session (user logs in)
+//	userID := uuid.New()
+//	if err := retrieved.Authenticate(userID); err != nil {
+//		// handle error
+//	}
+//	if err := mgr.Store(ctx, retrieved); err != nil {
+//		// handle error
+//	}
+//	// retrieved.Token is different (rotated for security)
+//	// retrieved.ID remains the same (stable identifier)
+//	// retrieved.UserID == userID
+//	// retrieved.Data preserved from anonymous session
 //
-//	func handler(w http.ResponseWriter, r *http.Request) {
-//		sess, err := manager.Load(w, r)
-//		if err != nil {
-//			http.Error(w, "Session error", http.StatusInternalServerError)
-//			return
-//		}
+//	// Logout session (user logs out)
+//	retrieved.Logout()
+//	if err := mgr.Store(ctx, retrieved); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
+//		// handle error
+//	}
+//	// Manager.Store returns ErrNotAuthenticated after deletion
+//	// This signals transport layer to clear cookies/tokens
 //
-//		// Work with session
-//		if sess.IsAuthenticated() {
-//			fmt.Fprintf(w, "Hello user %s", sess.UserID)
-//		} else {
-//			fmt.Fprintf(w, "Hello anonymous user")
-//		}
+//	// Refresh session token (periodic rotation)
+//	if err := retrieved.Refresh(); err != nil {
+//		// handle error
+//	}
+//	if err := mgr.Store(ctx, retrieved); err != nil {
+//		// handle error
+//	}
+//	// sess.Token is different (rotated for security)
+//	// sess.ID remains the same (stable identifier)
 //
-//		// Modify session data
-//		sess.Data.Theme = "dark"
+// # Periodic Cleanup
 //
-//		// Save changes
-//		if err := manager.Save(w, r, sess); err != nil {
-//			log.Printf("Failed to save session: %v", err)
+// Run periodic cleanup to prevent session table growth:
+//
+//	import "time"
+//
+//	// Run cleanup every hour
+//	ticker := time.NewTicker(1 * time.Hour)
+//	defer ticker.Stop()
+//
+//	for range ticker.C {
+//		if err := mgr.CleanupExpired(ctx); err != nil {
+//			// handle error
 //		}
 //	}
-//
-// # Authentication
-//
-// Sessions start as anonymous and can be upgraded to authenticated:
-//
-//	// Login endpoint
-//	func login(w http.ResponseWriter, r *http.Request) {
-//		userID := authenticateUser(r) // Your authentication logic
-//
-//		// Upgrade session to authenticated (rotates token for security)
-//		if err := manager.Auth(w, r, userID); err != nil {
-//			http.Error(w, "Auth failed", http.StatusInternalServerError)
-//			return
-//		}
-//
-//		http.Redirect(w, r, "/dashboard", http.StatusSeeOther)
-//	}
-//
-//	// Logout endpoint
-//	func logout(w http.ResponseWriter, r *http.Request) {
-//		// Option 1: Return to anonymous state (preserves DeviceID and analytics)
-//		err := manager.Logout(w, r, session.PreserveData(func(old UserData) UserData {
-//			return UserData{
-//				Theme:    old.Theme,    // Keep user preferences
-//				Language: old.Language,
-//				// Other fields are zeroed
-//			}
-//		}))
-//
-//		// Option 2: Complete session deletion
-//		// err := manager.Delete(w, r)
-//
-//		if err != nil {
-//			log.Printf("Logout error: %v", err)
-//		}
-//		http.Redirect(w, r, "/", http.StatusSeeOther)
-//	}
-//
-// # Session States and Lifecycle
-//
-// Sessions have three main states:
-//
-//   - Anonymous: Created automatically, has DeviceID for analytics
-//   - Authenticated: Has UserID after successful login
-//   - Expired: Past TTL, automatically replaced with new anonymous session
-//
-// Each session contains:
-//
-//   - ID: Stable session identifier (never changes)
-//   - Token: Rotatable secure token for authentication
-//   - DeviceID: Persistent device/browser identifier
-//   - UserID: Set after authentication (uuid.Nil for anonymous)
-//   - Data: Application-defined generic data
-//   - Timestamps: Creation, update, and expiration times
-//
-// # Manager Methods
-//
-// The Manager[Data] type provides the following public methods:
-//
-//   - Load(w, r) (Session[Data], error): Load existing session or create new anonymous one
-//   - Save(w, r, session) error: Persist session changes to store and response
-//   - Touch(w, r) error: Extend session expiration on user activity
-//   - Auth(w, r, userID) error: Authenticate session with user ID, rotates token
-//   - Logout(w, r, ...opts) error: Return session to anonymous state
-//   - Delete(w, r) error: Completely remove session from store and client
-//
-// # Session Methods
-//
-// The Session[Data] type provides these methods:
-//
-//   - IsAuthenticated() bool: Returns true if session has valid user ID
-//   - IsExpired() bool: Returns true if session has expired
-//
-// # Security Features
-//
-// The session system includes several security mechanisms:
-//
-//   - Cryptographically secure tokens (32 bytes, base64url encoded)
-//   - Automatic token rotation on authentication
-//   - Configurable session expiration (TTL)
-//   - Touch interval throttling to prevent DoS attacks
-//   - Separation of concerns between transport and storage
-//
-// # Configuration Options
-//
-// Sessions can be configured with:
-//
-//	session.WithTTL(duration)              // Session lifetime (default: 24h)
-//	session.WithTouchInterval(duration)    // Min time between activity updates (default: 5m)
-//
-// TTL determines how long sessions remain valid. TouchInterval prevents excessive
-// storage writes by limiting how frequently session activity updates are recorded.
-// Set TouchInterval to 0 to disable auto-touch functionality.
 //
 // # Error Handling
 //
-// The package defines comprehensive error types:
+// The package defines standard errors:
+//   - ErrExpired: Session has expired
+//   - ErrNotFound: Session not found in store
+//   - ErrNotAuthenticated: Authentication failed
 //
-//   - ErrSessionNotFound: Session doesn't exist in store
-//   - ErrSessionExpired: Session has passed expiration time
-//   - ErrInvalidToken: Malformed or invalid session token
-//   - ErrInvalidUserID: Invalid user ID for authentication
-//   - ErrNoTransport: No transport configured
-//   - ErrNoStore: No store configured
-//   - ErrTokenGeneration: Cryptographic token generation failed
-//   - ErrNoToken: No token found in transport
-//   - ErrTransportFailed: Transport operation failed
+// Example error handling:
 //
-// # Implementation Requirements
-//
-// To use this package, implement the Store and Transport interfaces:
-//
-//	// Store interface for session persistence
-//	type Store[Data any] interface {
-//		Get(ctx context.Context, token string) (Session[Data], error)
-//		Store(ctx context.Context, session Session[Data]) error
-//		Delete(ctx context.Context, id uuid.UUID) error
+//	sess, err := mgr.GetByToken(ctx, token)
+//	if err != nil {
+//		switch {
+//		case errors.Is(err, session.ErrExpired):
+//			// Session expired, create new anonymous session
+//		case errors.Is(err, session.ErrNotFound):
+//			// Session not found, create new anonymous session
+//		default:
+//			// Handle other errors
+//		}
 //	}
 //
-//	// Transport interface for token transmission
-//	type Transport interface {
-//		Extract(r *http.Request) (token string, err error)
-//		Embed(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) error
-//		Revoke(w http.ResponseWriter, r *http.Request) error
+// # Session Hijacking Detection
+//
+// Use IP and Device tracking to detect suspicious session activity:
+//
+//	// On each request, check if IP changed
+//	currentSess, err := mgr.GetByToken(ctx, token)
+//	if err != nil {
+//		// handle error
 //	}
 //
-// Common implementations might use:
-//   - Store: Redis, PostgreSQL, MongoDB, or in-memory for testing
-//   - Transport: HTTP cookies, Authorization headers, or custom schemes
+//	// Get current request IP
+//	currentIP := clientip.GetIP(r)
 //
-// # Thread Safety
+//	// Alert on IP change (potential session hijacking)
+//	if currentSess.IP != currentIP {
+//		// Log security event
+//		logger.Warn("IP changed for session",
+//			"session_id", currentSess.ID,
+//			"user_id", currentSess.UserID,
+//			"old_ip", currentSess.IP,
+//			"new_ip", currentIP,
+//			"old_device", currentSess.Device(),
+//		)
 //
-// The session system uses value semantics throughout to ensure thread safety.
-// Sessions are copied when retrieved from storage and when passed to storage,
-// preventing race conditions in concurrent environments.
+//		// Take action: force re-authentication, send alert email, etc.
+//		// Or update IP if expected (e.g., mobile networks)
+//		currentSess.IP = currentIP
+//		currentSess.UpdatedAt = time.Now()
+//		mgr.Store(ctx, currentSess)
+//	}
 //
-// # Performance Considerations
+// Note: IP changes are common with:
+//   - Mobile networks (cellular towers)
+//   - VPNs (server switching)
+//   - Corporate proxies (load balancing)
 //
-// Use TouchInterval to balance between activity tracking accuracy and storage
-// performance. A 5-minute interval reduces writes by up to 99% while maintaining
-// reasonable session activity tracking.
+// Consider your application's security requirements when implementing IP validation.
 //
-// For high-traffic applications, consider:
-//   - Redis-based store for fast session lookups
-//   - Cookie-based transport to reduce server-side storage
-//   - Appropriate TTL values based on user behavior patterns
+// # Design Principles
+//
+// This package follows clean separation principles:
+//   - No HTTP knowledge (use sessiontransport for HTTP integration)
+//   - Simple, straightforward code without tricks
+//   - Clear responsibilities: business logic only
+//   - Type-safe generic data storage
+//   - Security-first approach with token rotation
 package session

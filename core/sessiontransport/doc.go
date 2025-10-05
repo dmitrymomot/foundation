@@ -1,141 +1,147 @@
-// Package sessiontransport provides secure transport implementations for the session package.
+// Package sessiontransport provides HTTP transport implementations for session management.
 //
-// This package implements the session.Transport interface using different transport mechanisms:
-// cookie-based transport for traditional web applications and JWT-based transport for APIs.
-// Both transports handle the secure embedding, extraction, and revocation of session tokens.
+// This package bridges the gap between the transport-agnostic core/session package
+// and HTTP, providing Cookie-based and JWT-based transports. Both transports use
+// Session.Token for authentication, ensuring a unified security model.
+//
+// # Automatic IP and User-Agent Extraction
+//
+// All transports automatically extract and store client information when creating sessions:
+//   - IP Address: Extracted via clientip.GetIP() with proxy header support
+//   - User-Agent: Extracted from "User-Agent" HTTP header
+//   - Fingerprint: Generated via fingerprint package (transport-specific)
+//
+// This extraction happens in the Load() method when creating new anonymous sessions.
 //
 // # Cookie Transport
 //
-// CookieTransport uses encrypted cookies to store session tokens securely in the client's browser.
-// It provides strong security through encryption and is ideal for traditional web applications.
-// The default cookie name is "__session" and includes essential cookie attributes.
+// Cookie transport stores Session.Token as a signed cookie value. It provides
+// graceful degradation - automatically creating anonymous sessions when cookies
+// are missing or invalid.
 //
-// Basic cookie transport usage:
+// Example usage:
 //
 //	import (
-//		"time"
+//		"github.com/dmitrymomot/foundation/core/session"
 //		"github.com/dmitrymomot/foundation/core/cookie"
 //		"github.com/dmitrymomot/foundation/core/sessiontransport"
 //	)
 //
-//	// Create cookie manager with 32-byte encryption key
-//	manager, err := cookie.New([]string{"your-32-byte-secret-key-here!!"})
-//	if err != nil {
-//		log.Fatal(err)
-//	}
+//	// Setup
+//	store := NewYourStoreImplementation()
+//	sessionMgr := session.NewManager[SessionData](store, 24*time.Hour, 5*time.Minute)
+//	cookieMgr, _ := cookie.New([]string{"your-secret-key"})
+//	transport := sessiontransport.NewCookie(sessionMgr, cookieMgr, "session")
 //
-//	// Create cookie transport with default settings
-//	transport := sessiontransport.NewCookie(manager)
+//	// Load session (creates anonymous if missing/invalid)
+//	// IP and User-Agent are automatically extracted from request
+//	sess, err := transport.Load(ctx)
 //
-//	// Or with custom configuration
-//	transport = sessiontransport.NewCookie(manager,
-//		sessiontransport.WithCookieName("app_session"),
-//		sessiontransport.WithCookieOptions(
-//			cookie.WithSecure(true),
-//			cookie.WithDomain(".example.com"),
-//		),
-//	)
+//	// Access tracked information
+//	clientIP := sess.IP                    // e.g., "203.0.113.42"
+//	device := sess.Device()                // e.g., "Chrome/120.0 (Windows, desktop)"
+//	userAgent := sess.UserAgent            // Raw User-Agent string
+//
+//	// Authenticate user (preserves IP and UserAgent)
+//	sess, err = transport.Authenticate(ctx, userID)
+//
+//	// Logout user
+//	sess, err = transport.Logout(ctx)
+//
+//	// Delete session
+//	err = transport.Delete(ctx)
 //
 // # JWT Transport
 //
-// JWTTransport uses JSON Web Tokens to embed session information that can be verified
-// without server-side storage. The session token becomes the JWT ID (jti) claim.
-// It supports optional token revocation through the Revoker interface.
+// JWT transport stores Session.Token in the JTI (JWT ID) claim. It returns
+// token pairs (access + refresh) and handles token rotation on refresh.
 //
-// Basic JWT transport usage:
-//
-//	import "github.com/dmitrymomot/foundation/core/sessiontransport"
-//
-//	// Create JWT transport without revocation
-//	transport, err := sessiontransport.NewJWT("your-32-byte-signing-key", nil)
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//
-//	// Create with custom configuration
-//	transport, err = sessiontransport.NewJWT("your-signing-key", nil,
-//		sessiontransport.WithJWTHeaderName("X-Session-Token"),
-//		sessiontransport.WithJWTBearerPrefix(false),
-//		sessiontransport.WithJWTIssuer("myapp"),
-//		sessiontransport.WithJWTAudience("api.example.com"),
-//	)
-//	if err != nil {
-//		log.Fatal(err)
-//	}
-//
-// # JWT Token Revocation
-//
-// JWT transport supports optional token revocation through the Revoker interface.
-// This allows maintaining a blacklist of revoked session tokens:
+// Example usage:
 //
 //	import (
-//		"context"
-//		"time"
-//		"github.com/redis/go-redis/v9"
+//		"github.com/dmitrymomot/foundation/core/session"
+//		"github.com/dmitrymomot/foundation/core/sessiontransport"
 //	)
 //
-//	type RedisRevoker struct {
-//		client *redis.Client
+//	// Setup
+//	store := NewYourStoreImplementation()
+//	sessionMgr := session.NewManager[SessionData](store, 24*time.Hour, 5*time.Minute)
+//	transport, _ := sessiontransport.NewJWT(
+//		sessionMgr,
+//		"your-jwt-secret",
+//		15*time.Minute, // access token TTL
+//		"your-app",
+//	)
+//
+//	// Load session (returns ErrNoToken if no bearer token)
+//	// IP and User-Agent are automatically extracted from request
+//	sess, err := transport.Load(ctx)
+//	if err == sessiontransport.ErrNoToken {
+//		// No token present
 //	}
 //
-//	func (r *RedisRevoker) IsRevoked(ctx context.Context, sessionToken string) (bool, error) {
-//		result := r.client.Exists(ctx, "revoked:"+sessionToken)
-//		return result.Val() > 0, result.Err()
-//	}
+//	// Access tracked information (same as Cookie transport)
+//	clientIP := sess.IP                    // e.g., "203.0.113.42"
+//	device := sess.Device()                // e.g., "Safari/17.0 (iOS, mobile)"
 //
-//	func (r *RedisRevoker) Revoke(ctx context.Context, sessionToken string) error {
-//		// Store revoked token with TTL matching JWT expiration
-//		return r.client.Set(ctx, "revoked:"+sessionToken, "1", time.Hour*24).Err()
-//	}
+//	// Authenticate user (returns token pair, preserves IP/UserAgent)
+//	sess, tokens, err := transport.Authenticate(ctx, userID)
+//	// tokens.AccessToken, tokens.RefreshToken, tokens.ExpiresIn
 //
-//	// Use with JWT transport
-//	revoker := &RedisRevoker{client: redisClient}
-//	transport, err := sessiontransport.NewJWT("signing-key", revoker)
-//	if err != nil {
-//		log.Fatal(err)
-//	}
+//	// Refresh tokens (rotates session token and returns new token pair)
+//	tokens, err = transport.Refresh(ctx, oldRefreshToken)
 //
-// For testing or when revocation isn't needed, use NoOpRevoker:
+//	// Logout user
+//	err = transport.Logout(ctx)
 //
-//	transport, err := sessiontransport.NewJWT("signing-key", sessiontransport.NoOpRevoker{})
+// # Proxy Header Support
+//
+// The clientip.GetIP() function supports standard proxy headers in order of priority:
+//  1. X-Forwarded-For (first trusted IP)
+//  2. X-Real-IP
+//  3. CF-Connecting-IP (Cloudflare)
+//  4. True-Client-IP (Akamai, Cloudflare)
+//  5. X-Client-IP
+//  6. Forwarded (RFC 7239)
+//
+// Falls back to RemoteAddr if no proxy headers present. IP addresses are validated
+// for correct IPv4/IPv6 format before being stored in sessions.
+//
+// # Unified Security Model
+//
+// Both transports use Session.Token for authentication:
+//   - Cookie: Session.Token is the signed cookie value
+//   - JWT: Session.Token is stored in the JTI claim
+//
+// This unified approach ensures:
+//   - Consistent token rotation on authentication/logout
+//   - Single source of truth for session authentication
+//   - Easy migration between transports
+//   - Simplified session validation logic
+//   - Automatic IP and User-Agent tracking for security
+//
+// # Token Rotation
+//
+// Both transports implement automatic token rotation:
+//   - Authenticate: New Session.Token on login
+//   - Logout: New Session.Token on logout (prevents session fixation)
+//   - Refresh (JWT): New Session.Token on refresh (prevents token reuse)
+//
+// # Touch Mechanism
+//
+// The Touch method extends session expiration if touchInterval has elapsed.
+// Note that GetByID/GetByToken already handle touch internally, so explicit
+// Touch calls are only needed when you want to extend session lifetime outside
+// of normal request flows.
 //
 // # Error Handling
 //
-// All transport implementations map their specific errors to standard session package errors:
-//   - session.ErrNoToken: No token found in the request
-//   - session.ErrInvalidToken: Token is malformed, expired, corrupted, or revoked
-//   - session.ErrTransportFailed: Infrastructure errors (database, encryption, etc.)
+// The package defines specific errors:
+//   - ErrNoToken: No authentication token present (JWT only)
+//   - ErrInvalidToken: Token format or signature invalid
 //
-// This provides a consistent error interface regardless of the underlying transport mechanism.
-//
-// # Security Considerations
-//
-// Cookie Transport:
-//   - Uses strong encryption via the cookie package
-//   - Supports secure attributes (Secure, HttpOnly, SameSite)
-//   - Resistant to tampering and inspection
-//   - Limited by browser cookie size (typically 4KB)
-//   - Vulnerable to CSRF without proper CSRF protection
-//
-// JWT Transport:
-//   - Tokens are signed but not encrypted (claims are base64-encoded)
-//   - Session token is stored as JWT ID claim for revocation support
-//   - No server-side storage required for basic validation
-//   - Larger payload size compared to encrypted cookies
-//   - Token revocation requires external storage (Redis, database)
-//
-// # Choosing a Transport
-//
-// Use Cookie Transport for:
-//   - Traditional server-rendered web applications
-//   - Maximum security with minimal infrastructure
-//   - Automatic browser cookie handling
-//   - Simple session invalidation
-//
-// Use JWT Transport for:
-//   - REST APIs and stateless services
-//   - Mobile applications and SPAs
-//   - Cross-domain authentication
-//   - Microservices architectures
-//   - When you need to include custom claims
+// Session errors from core/session package are also propagated:
+//   - session.ErrExpired: Session has expired
+//   - session.ErrNotFound: Session not found in store
+//   - session.ErrNotAuthenticated: Authentication failed
 package sessiontransport

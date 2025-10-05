@@ -34,3 +34,4 @@ go.work.sum
 
 # Reference files
 .references/
+.mcp.json

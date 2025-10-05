@@ -23,13 +23,17 @@ type FingerprintConfig struct {
 	StoreInHeader bool
 	// ValidateFunc allows custom validation of the generated fingerprint
 	ValidateFunc func(ctx handler.Context, fingerprint string) error
+	// Options configures fingerprint generation behavior (default uses Cookie mode: excludes IP, includes User-Agent and Accept headers)
+	// Use fingerprint.WithIP() for strict mode, fingerprint.WithoutAcceptHeaders() for JWT mode, or combine options
+	Options []fingerprint.Option
 }
 
 // Fingerprint creates a device fingerprinting middleware with default configuration.
-// By default, it stores the generated fingerprint in the request context.
+// By default, it stores the generated fingerprint in the request context using Cookie mode
+// (excludes IP address to avoid false positives from mobile networks and VPNs).
 //
 // Device fingerprinting creates a unique identifier based on request characteristics
-// like User-Agent, Accept headers, IP address, and other browser/device properties.
+// like User-Agent, Accept headers, header set patterns, and optionally IP address.
 // This helps identify devices for security, analytics, and user experience purposes.
 //
 // Usage:
@@ -69,10 +73,31 @@ func Fingerprint[C handler.Context]() handler.Middleware[C] {
 }
 
 // FingerprintWithConfig creates a device fingerprinting middleware with custom configuration.
-// It generates a unique fingerprint based on request headers, IP address, and other characteristics
+// It generates a unique fingerprint based on request headers and optional IP address
 // to help identify devices and detect suspicious activity.
 //
 // Advanced Usage Examples:
+//
+//	// Default mode (Cookie): Excludes IP, includes User-Agent and Accept headers
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//	}
+//	r.Use(middleware.FingerprintWithConfig[*MyContext](cfg))
+//
+//	// Strict mode: Include IP address for high-security scenarios
+//	// WARNING: May cause false positives for mobile users and VPN users
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//		Options:        []fingerprint.Option{fingerprint.WithIP()},
+//	}
+//	r.Use(middleware.FingerprintWithConfig[*MyContext](cfg))
+//
+//	// JWT mode: Minimal fingerprint excluding Accept headers
+//	cfg := middleware.FingerprintConfig{
+//		StoreInContext: true,
+//		Options:        []fingerprint.Option{fingerprint.WithoutAcceptHeaders()},
+//	}
+//	r.Use(middleware.FingerprintWithConfig[*MyContext](cfg))
 //
 //	// Include fingerprint in response headers for debugging
 //	cfg := middleware.FingerprintConfig{
@@ -125,16 +150,22 @@ func Fingerprint[C handler.Context]() handler.Middleware[C] {
 //	}
 //
 // Configuration options:
+// - Options: Fingerprint generation options (default: Cookie mode without IP)
 // - StoreInContext: Store fingerprint in request context for handler access
 // - StoreInHeader: Include fingerprint in response headers (debugging)
 // - ValidateFunc: Custom fingerprint validation (security, rate limiting)
 // - Skip: Skip processing for specific requests (API endpoints, etc.)
 //
-// Fingerprint characteristics include:
+// Fingerprint characteristics (default Cookie mode):
 // - User-Agent string (browser, OS, device info)
 // - Accept headers (language, encoding, content types)
-// - Client IP address (when available)
-// - Connection characteristics (HTTP version, etc.)
+// - Header set fingerprint (which standard headers are present)
+// - Client IP address (optional, use WithIP() option)
+//
+// Available fingerprint modes via Options:
+// - Cookie mode (default): fingerprint.WithoutIP() - Recommended for most web apps
+// - JWT mode: fingerprint.WithoutAcceptHeaders() - Minimal fingerprint
+// - Strict mode: fingerprint.WithIP() - Includes IP, may cause false positives
 func FingerprintWithConfig[C handler.Context](cfg FingerprintConfig) handler.Middleware[C] {
 	if cfg.HeaderName == "" {
 		cfg.HeaderName = "X-Device-Fingerprint"
@@ -151,7 +182,7 @@ func FingerprintWithConfig[C handler.Context](cfg FingerprintConfig) handler.Mid
 				return next(ctx)
 			}
 
-			fp := fingerprint.Generate(ctx.Request())
+			fp := fingerprint.Generate(ctx.Request(), cfg.Options...)
 
 			if cfg.StoreInContext {
 				ctx.SetValue(fingerprintContextKey{}, fp)

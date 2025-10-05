@@ -1,0 +1,23 @@
+{{define "content"}}
+<h1>Profile</h1>
+
+<h2>User Information</h2>
+<div class="info-box">
+    <p><strong>ID:</strong> {{.User.ID}}</p>
+    <p><strong>Name:</strong> {{.User.Name}}</p>
+    <p><strong>Email:</strong> {{.User.Email}}</p>
+</div>
+
+<h2>Session Information</h2>
+<div class="info-box">
+    <p><strong>Session ID:</strong> {{.Session.ID}}</p>
+    <p><strong>IP Address:</strong> {{.Session.IP}}</p>
+    <p><strong>User Agent:</strong> {{.Session.UserAgent}}</p>
+    <p><strong>Created:</strong> {{.Session.CreatedAt}}</p>
+    <p><strong>Expires:</strong> {{.Session.ExpiresAt}}</p>
+</div>
+
+<form method="POST" action="/logout" class="logout-form">
+    <button type="submit">Log Out</button>
+</form>
+{{end}}

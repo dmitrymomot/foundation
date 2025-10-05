@@ -2,559 +2,1106 @@ package sessiontransport_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/dmitrymomot/foundation/core/session"
 	"github.com/dmitrymomot/foundation/core/sessiontransport"
+	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
-const testSigningKey = "test-secret-key-at-least-32-bytes-long"
+// JWT-specific helper functions
 
-func TestJWTTransport_Extract(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(testSigningKey, nil)
-	require.NoError(t, err)
-
-	t.Run("extract valid token with Bearer prefix", func(t *testing.T) {
-		// First embed a token
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-session-token"
-		ttl := time.Hour
-
-		err := transport.Embed(w, r, sessionToken, ttl)
-		require.NoError(t, err)
-
-		// Get the JWT from the response header
-		jwtToken := w.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
-
-		// Now try to extract it
-		r2 := httptest.NewRequest("GET", "/", nil)
-		r2.Header.Set("Authorization", jwtToken)
-
-		extractedToken, err := transport.Extract(r2)
-		assert.NoError(t, err)
-		assert.Equal(t, sessionToken, extractedToken)
-	})
-
-	t.Run("no token in header", func(t *testing.T) {
-		r := httptest.NewRequest("GET", "/", nil)
-		_, err := transport.Extract(r)
-		assert.ErrorIs(t, err, session.ErrNoToken)
-	})
-
-	t.Run("invalid Bearer format", func(t *testing.T) {
-		r := httptest.NewRequest("GET", "/", nil)
-		r.Header.Set("Authorization", "InvalidFormat token")
-		_, err := transport.Extract(r)
-		assert.ErrorIs(t, err, session.ErrInvalidToken)
-	})
-
-	t.Run("empty Bearer token", func(t *testing.T) {
-		r := httptest.NewRequest("GET", "/", nil)
-		r.Header.Set("Authorization", "Bearer ")
-		_, err := transport.Extract(r)
-		assert.ErrorIs(t, err, session.ErrNoToken)
-	})
-
-	t.Run("invalid JWT signature", func(t *testing.T) {
-		r := httptest.NewRequest("GET", "/", nil)
-		r.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzZXNzaW9uX3Rva2VuIjoidGVzdCJ9.invalid")
-		_, err := transport.Extract(r)
-		assert.ErrorIs(t, err, session.ErrInvalidToken)
-	})
-}
-
-func TestJWTTransport_ExtractWithoutBearerPrefix(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(
-		testSigningKey,
-		nil,
-		sessiontransport.WithJWTBearerPrefix(false),
+func createJWTTransport(t *testing.T) (*sessiontransport.JWT[testData], *mockStore) {
+	t.Helper()
+	store := &mockStore{}
+	mgr := session.NewManager[testData](store, time.Hour, 5*time.Minute)
+	transport, err := sessiontransport.NewJWT[testData](
+		mgr,
+		"test-secret-key-that-is-at-least-32-bytes-long",
+		15*time.Minute, // accessTTL
+		"test-issuer",
 	)
 	require.NoError(t, err)
+	return transport, store
+}
 
-	// First embed a token
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	sessionToken := "test-session-token"
-	ttl := time.Hour
-
-	err = transport.Embed(w, r, sessionToken, ttl)
+func createValidJWT(t *testing.T, secretKey string, sessionToken string) string {
+	t.Helper()
+	signer, err := jwt.NewFromString(secretKey)
 	require.NoError(t, err)
 
-	// Get the JWT from the response header (should not have Bearer prefix)
-	jwtToken := w.Header().Get("Authorization")
-	require.NotEmpty(t, jwtToken)
-	assert.NotContains(t, jwtToken, "Bearer ")
+	claims := jwt.StandardClaims{
+		ID:        sessionToken,
+		Subject:   uuid.New().String(),
+		Issuer:    "test-issuer",
+		IssuedAt:  time.Now().Unix(),
+		ExpiresAt: time.Now().Add(15 * time.Minute).Unix(),
+	}
 
-	// Now try to extract it
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.Header.Set("Authorization", jwtToken)
-
-	extractedToken, err := transport.Extract(r2)
-	assert.NoError(t, err)
-	assert.Equal(t, sessionToken, extractedToken)
-}
-
-func TestJWTTransport_CustomHeader(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(
-		testSigningKey,
-		nil,
-		sessiontransport.WithJWTHeaderName("X-Session-Token"),
-	)
+	token, err := signer.Generate(claims)
 	require.NoError(t, err)
+	return token
+}
 
-	// Embed a token
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	sessionToken := "test-session-token"
-	ttl := time.Hour
+func createJWTContext(t *testing.T, authHeader string) *mockContext {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if authHeader != "" {
+		req.Header.Set("Authorization", authHeader)
+	}
+	req.Header.Set("User-Agent", "Test-Agent/1.0")
+	req.Header.Set("X-Forwarded-For", "127.0.0.1")
 
-	err = transport.Embed(w, r, sessionToken, ttl)
+	return &mockContext{
+		request:        req,
+		responseWriter: httptest.NewRecorder(),
+	}
+}
+
+func createAuthenticatedSession(t *testing.T) *session.Session[testData] {
+	t.Helper()
+	sess := createValidSession(t)
+	err := sess.Authenticate(uuid.New())
 	require.NoError(t, err)
-
-	// Check it's in the custom header
-	jwtToken := w.Header().Get("X-Session-Token")
-	require.NotEmpty(t, jwtToken)
-	assert.Contains(t, jwtToken, "Bearer ")
-
-	// Authorization header should be empty
-	assert.Empty(t, w.Header().Get("Authorization"))
-
-	// Extract from custom header
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.Header.Set("X-Session-Token", jwtToken)
-
-	extractedToken, err := transport.Extract(r2)
-	assert.NoError(t, err)
-	assert.Equal(t, sessionToken, extractedToken)
+	return sess
 }
 
-func TestJWTTransport_Embed(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(
-		testSigningKey,
-		nil,
-		sessiontransport.WithJWTIssuer("test-issuer"),
-		sessiontransport.WithJWTAudience("test-audience"),
-	)
-	require.NoError(t, err)
+// Load Method Tests
 
-	t.Run("embed token successfully", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-session-token"
-		ttl := time.Hour
-
-		err := transport.Embed(w, r, sessionToken, ttl)
-		assert.NoError(t, err)
-
-		// Check header is set
-		authHeader := w.Header().Get("Authorization")
-		assert.NotEmpty(t, authHeader)
-		assert.Contains(t, authHeader, "Bearer ")
-	})
-}
-
-func TestJWTTransport_Revoke(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(testSigningKey, nil)
-	require.NoError(t, err)
-
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-
-	// First embed a token
-	err = transport.Embed(w, r, "test-token", time.Hour)
-	require.NoError(t, err)
-	require.NotEmpty(t, w.Header().Get("Authorization"))
-
-	// Revoke should remove the header
-	err = transport.Revoke(w, r)
-	assert.NoError(t, err)
-	assert.Empty(t, w.Header().Get("Authorization"))
-}
-
-// MockRevoker is a testify/mock implementation of the Revoker interface
-type MockRevoker struct {
-	mock.Mock
-}
-
-func (m *MockRevoker) IsRevoked(ctx context.Context, jti string) (bool, error) {
-	args := m.Called(ctx, jti)
-	return args.Bool(0), args.Error(1)
-}
-
-func (m *MockRevoker) Revoke(ctx context.Context, jti string) error {
-	args := m.Called(ctx, jti)
-	return args.Error(0)
-}
-
-func TestJWTTransport_WithRevoker(t *testing.T) {
+func TestJWTLoad_NoAuthHeader(t *testing.T) {
 	t.Parallel()
 
-	t.Run("extract non-revoked token", func(t *testing.T) {
+	t.Run("returns ErrNoToken when Authorization header is missing", func(t *testing.T) {
 		t.Parallel()
 
-		mockRevoker := &MockRevoker{}
-		transport, err := sessiontransport.NewJWT(testSigningKey, mockRevoker)
-		require.NoError(t, err)
+		transport, _ := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
 
-		// Embed a token
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-session-token"
-		err = transport.Embed(w, r, sessionToken, time.Hour)
-		require.NoError(t, err)
+		_, err := transport.Load(ctx)
 
-		jwtToken := w.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
-
-		// Setup mock expectations
-		mockRevoker.On("IsRevoked", mock.Anything, sessionToken).Return(false, nil).Once()
-
-		r2 := httptest.NewRequest("GET", "/", nil)
-		r2.Header.Set("Authorization", jwtToken)
-
-		extractedToken, err := transport.Extract(r2)
-		assert.NoError(t, err)
-		assert.Equal(t, sessionToken, extractedToken)
-
-		mockRevoker.AssertExpectations(t)
-	})
-
-	t.Run("revoke token", func(t *testing.T) {
-		t.Parallel()
-
-		mockRevoker := &MockRevoker{}
-		transport, err := sessiontransport.NewJWT(testSigningKey, mockRevoker)
-		require.NoError(t, err)
-
-		// Embed a token
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-session-token"
-		err = transport.Embed(w, r, sessionToken, time.Hour)
-		require.NoError(t, err)
-
-		jwtToken := w.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
-
-		// Setup mock expectations
-		mockRevoker.On("Revoke", mock.Anything, sessionToken).Return(nil).Once()
-
-		w2 := httptest.NewRecorder()
-		r2 := httptest.NewRequest("GET", "/", nil)
-		r2.Header.Set("Authorization", jwtToken)
-
-		err = transport.Revoke(w2, r2)
-		assert.NoError(t, err)
-
-		mockRevoker.AssertExpectations(t)
-	})
-
-	t.Run("extract revoked token fails", func(t *testing.T) {
-		t.Parallel()
-
-		mockRevoker := &MockRevoker{}
-		transport, err := sessiontransport.NewJWT(testSigningKey, mockRevoker)
-		require.NoError(t, err)
-
-		// Embed a token
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-session-token"
-		err = transport.Embed(w, r, sessionToken, time.Hour)
-		require.NoError(t, err)
-
-		jwtToken := w.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
-
-		// Setup mock expectations
-		mockRevoker.On("IsRevoked", mock.Anything, sessionToken).Return(true, nil).Once()
-
-		r2 := httptest.NewRequest("GET", "/", nil)
-		r2.Header.Set("Authorization", jwtToken)
-
-		_, err = transport.Extract(r2)
-		assert.ErrorIs(t, err, session.ErrInvalidToken)
-
-		mockRevoker.AssertExpectations(t)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
 	})
 }
 
-func TestJWTTransport_SessionTokenAsJWTID(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(testSigningKey, nil)
-	require.NoError(t, err)
-
-	// Embed a token
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	sessionToken := "test-session-token-as-jti"
-	err = transport.Embed(w, r, sessionToken, time.Hour)
-	require.NoError(t, err)
-
-	// Extract and verify session token is returned
-	jwtToken := w.Header().Get("Authorization")
-	require.NotEmpty(t, jwtToken)
-
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.Header.Set("Authorization", jwtToken)
-
-	extractedToken, err := transport.Extract(r2)
-	assert.NoError(t, err)
-	assert.Equal(t, sessionToken, extractedToken)
-	// The session token is now used as JWT ID internally
-}
-
-func TestJWTTransport_ExpiredToken(t *testing.T) {
-	transport, err := sessiontransport.NewJWT(testSigningKey, nil)
-	require.NoError(t, err)
-
-	// Embed a token with negative TTL to ensure it's already expired
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("GET", "/", nil)
-	sessionToken := "test-session-token"
-	ttl := -1 * time.Second // Negative TTL - token is already expired
-
-	err = transport.Embed(w, r, sessionToken, ttl)
-	require.NoError(t, err)
-
-	jwtToken := w.Header().Get("Authorization")
-	require.NotEmpty(t, jwtToken)
-
-	// Try to extract expired token
-	r2 := httptest.NewRequest("GET", "/", nil)
-	r2.Header.Set("Authorization", jwtToken)
-
-	_, err = transport.Extract(r2)
-	assert.ErrorIs(t, err, session.ErrInvalidToken)
-}
-
-func TestNoOpRevoker(t *testing.T) {
+func TestJWTLoad_EmptyAuthHeader(t *testing.T) {
 	t.Parallel()
 
-	revoker := sessiontransport.NoOpRevoker{}
-	ctx := context.Background()
-
-	t.Run("IsRevoked always returns false", func(t *testing.T) {
+	t.Run("returns ErrNoToken when Authorization header is empty", func(t *testing.T) {
 		t.Parallel()
 
-		revoked, err := revoker.IsRevoked(ctx, "any-token")
-		assert.NoError(t, err)
-		assert.False(t, revoked)
-	})
+		transport, _ := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
 
-	t.Run("Revoke does nothing", func(t *testing.T) {
-		t.Parallel()
+		_, err := transport.Load(ctx)
 
-		err := revoker.Revoke(ctx, "any-token")
-		assert.NoError(t, err)
-
-		// Token should still not be revoked
-		revoked, err := revoker.IsRevoked(ctx, "any-token")
-		assert.NoError(t, err)
-		assert.False(t, revoked)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
 	})
 }
 
-func TestJWTTransport_ConstructorValidation(t *testing.T) {
+func TestJWTLoad_NotBearerFormat(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty signing key fails", func(t *testing.T) {
+	t.Run("returns ErrNoToken when not Bearer format", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := sessiontransport.NewJWT("", nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to create JWT service")
+		transport, _ := createJWTTransport(t)
+		ctx := createJWTContext(t, "Basic dXNlcjpwYXNz")
+
+		_, err := transport.Load(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
 	})
+}
 
-	t.Run("short signing key fails", func(t *testing.T) {
+func TestJWTLoad_BearerOnly(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrNoToken when only Bearer without token", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := sessiontransport.NewJWT("short", nil)
-		if err != nil {
-			assert.Contains(t, err.Error(), "failed to create JWT service")
-		} else {
-			// If short key is accepted, just verify transport is created
-			// (JWT service might accept short keys for testing)
-			t.Skip("Short signing key was accepted by JWT service")
+		transport, _ := createJWTTransport(t)
+		ctx := createJWTContext(t, "Bearer")
+
+		_, err := transport.Load(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sessiontransport.ErrNoToken)
+	})
+}
+
+func TestJWTLoad_InvalidJWT(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates anonymous session on JWT parse failure", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "Bearer invalid-jwt-token")
+
+		sess, err := transport.Load(ctx)
+
+		require.NoError(t, err)
+		assert.False(t, sess.IsAuthenticated())
+		assert.Equal(t, uuid.Nil, sess.UserID)
+		assert.Equal(t, "127.0.0.1", sess.IP)
+		assert.Equal(t, "Test-Agent/1.0", sess.UserAgent)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTLoad_TokenNotFound(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates anonymous session when GetByToken fails", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		validJWT := createValidJWT(t, secretKey, "session-token-123")
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, "session-token-123").
+			Return(nil, session.ErrNotFound)
+
+		sess, err := transport.Load(ctx)
+
+		require.NoError(t, err)
+		assert.False(t, sess.IsAuthenticated())
+		assert.Equal(t, uuid.Nil, sess.UserID)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTLoad_SessionExpired(t *testing.T) {
+	t.Parallel()
+
+	t.Run("creates anonymous session when session is expired", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		validJWT := createValidJWT(t, secretKey, "session-token-123")
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, "session-token-123").
+			Return(nil, session.ErrExpired)
+
+		sess, err := transport.Load(ctx)
+
+		require.NoError(t, err)
+		assert.False(t, sess.IsAuthenticated())
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTLoad_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("loads session from valid JWT", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		validJWT := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, existingSession.Token).
+			Return(existingSession, nil)
+
+		sess, err := transport.Load(ctx)
+
+		require.NoError(t, err)
+		assert.Equal(t, existingSession.ID, sess.ID)
+		assert.Equal(t, existingSession.Token, sess.Token)
+		assert.True(t, sess.IsAuthenticated())
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTLoad_ExtractsJTI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies JTI claim used as session token", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		expectedToken := "unique-session-token-jti"
+		validJWT := createValidJWT(t, secretKey, expectedToken)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		existingSession := createAuthenticatedSession(t)
+		existingSession.Token = expectedToken
+
+		store.On("GetByToken", ctx, expectedToken).
+			Return(existingSession, nil)
+
+		sess, err := transport.Load(ctx)
+
+		require.NoError(t, err)
+		assert.Equal(t, expectedToken, sess.Token)
+		store.AssertExpectations(t)
+	})
+}
+
+// Save Method Tests
+
+func TestJWTSave_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delegates to Manager.Store successfully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		sess := createAuthenticatedSession(t)
+
+		store.On("Save", ctx, sess).Return(nil)
+
+		err := transport.Save(ctx, sess)
+
+		require.NoError(t, err)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTSave_Error(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates Manager.Store errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		sess := createAuthenticatedSession(t)
+		storeErr := errors.New("database error")
+
+		store.On("Save", ctx, sess).Return(storeErr)
+
+		err := transport.Save(ctx, sess)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+// Authenticate Method Tests
+
+func TestJWTAuthenticate_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("full authentication chain with TokenPair generation", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		userID := uuid.New()
+
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			return s.IsAuthenticated() && s.UserID == userID
+		})).Return(nil)
+
+		sess, pair, err := transport.Authenticate(ctx, userID)
+
+		require.NoError(t, err)
+		assert.True(t, sess.IsAuthenticated())
+		assert.Equal(t, userID, sess.UserID)
+		assert.NotEmpty(t, pair.AccessToken)
+		assert.NotEmpty(t, pair.RefreshToken)
+		assert.Equal(t, "Bearer", pair.TokenType)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTAuthenticate_NoToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("handles ErrNoToken gracefully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		userID := uuid.New()
+
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			return s.IsAuthenticated() && s.UserID == userID
+		})).Return(nil)
+
+		sess, pair, err := transport.Authenticate(ctx, userID)
+
+		require.NoError(t, err)
+		assert.True(t, sess.IsAuthenticated())
+		assert.NotEmpty(t, pair.AccessToken)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTAuthenticate_WithData(t *testing.T) {
+	t.Parallel()
+
+	t.Run("handles optional data parameter", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		userID := uuid.New()
+		data := testData{
+			CartItems: []string{"item1", "item2"},
+			Theme:     "dark",
 		}
-	})
 
-	t.Run("valid signing key succeeds", func(t *testing.T) {
-		t.Parallel()
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			return s.Data.Theme == "dark" && len(s.Data.CartItems) == 2
+		})).Return(nil)
 
-		transport, err := sessiontransport.NewJWT(testSigningKey, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, transport)
-	})
+		sess, _, err := transport.Authenticate(ctx, userID, data)
 
-	t.Run("options are applied correctly", func(t *testing.T) {
-		t.Parallel()
-
-		transport, err := sessiontransport.NewJWT(
-			testSigningKey,
-			nil,
-			sessiontransport.WithJWTHeaderName("X-Custom-Header"),
-			sessiontransport.WithJWTBearerPrefix(false),
-			sessiontransport.WithJWTIssuer("test-issuer"),
-			sessiontransport.WithJWTAudience("test-audience"),
-		)
 		require.NoError(t, err)
-
-		// Test that options were applied by testing behavior
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-
-		err = transport.Embed(w, r, "test-token", time.Hour)
-		require.NoError(t, err)
-
-		// Should be in custom header without Bearer prefix
-		customHeader := w.Header().Get("X-Custom-Header")
-		assert.NotEmpty(t, customHeader)
-		assert.NotContains(t, customHeader, "Bearer ")
-
-		// Authorization header should be empty
-		assert.Empty(t, w.Header().Get("Authorization"))
+		assert.Equal(t, "dark", sess.Data.Theme)
+		assert.Len(t, sess.Data.CartItems, 2)
+		store.AssertExpectations(t)
 	})
 }
 
-func TestJWTTransport_RevokerErrorScenarios(t *testing.T) {
+func TestJWTAuthenticate_TokenRotation(t *testing.T) {
 	t.Parallel()
 
-	t.Run("revoker IsRevoked error returns transport failed", func(t *testing.T) {
+	t.Run("verifies token rotation on authentication", func(t *testing.T) {
 		t.Parallel()
 
-		mockRevoker := &MockRevoker{}
-		transport, err := sessiontransport.NewJWT(testSigningKey, mockRevoker)
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createValidSession(t)
+		oldToken := existingSession.Token
+		validJWT := createValidJWT(t, secretKey, oldToken)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+		userID := uuid.New()
+
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			return s.Token != oldToken && s.IsAuthenticated()
+		})).Return(nil)
+
+		sess, _, err := transport.Authenticate(ctx, userID)
+
 		require.NoError(t, err)
-
-		// Embed a token first
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-session-token"
-		err = transport.Embed(w, r, sessionToken, time.Hour)
-		require.NoError(t, err)
-
-		jwtToken := w.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
-
-		// Setup mock to return error
-		mockRevoker.On("IsRevoked", mock.Anything, sessionToken).Return(false, assert.AnError).Once()
-
-		// Extract should fail with transport error
-		r2 := httptest.NewRequest("GET", "/", nil)
-		r2.Header.Set("Authorization", jwtToken)
-
-		_, err = transport.Extract(r2)
-		assert.ErrorIs(t, err, session.ErrTransportFailed)
-
-		mockRevoker.AssertExpectations(t)
-	})
-
-	t.Run("revoker Revoke error is returned", func(t *testing.T) {
-		t.Parallel()
-
-		mockRevoker := &MockRevoker{}
-		transport, err := sessiontransport.NewJWT(testSigningKey, mockRevoker)
-		require.NoError(t, err)
-
-		// First create a valid token to revoke
-		w1 := httptest.NewRecorder()
-		r1 := httptest.NewRequest("GET", "/", nil)
-		sessionToken := "test-token"
-		err = transport.Embed(w1, r1, sessionToken, time.Hour)
-		require.NoError(t, err)
-
-		jwtToken := w1.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
-
-		// Setup mock to return error
-		mockRevoker.On("Revoke", mock.Anything, sessionToken).Return(assert.AnError).Once()
-
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		r.Header.Set("Authorization", jwtToken)
-
-		err = transport.Revoke(w, r)
-		assert.Error(t, err)
-		assert.Equal(t, assert.AnError, err)
-
-		mockRevoker.AssertExpectations(t)
+		assert.NotEqual(t, oldToken, sess.Token)
+		store.AssertExpectations(t)
 	})
 }
 
-func TestJWTTransport_EdgeCases(t *testing.T) {
+func TestJWTAuthenticate_LoadError(t *testing.T) {
 	t.Parallel()
 
-	transport, err := sessiontransport.NewJWT(testSigningKey, nil)
-	require.NoError(t, err)
-
-	t.Run("zero TTL creates expired token", func(t *testing.T) {
+	t.Run("creates anonymous session when GetByToken fails", func(t *testing.T) {
 		t.Parallel()
 
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		validJWT := createValidJWT(t, secretKey, "token-123")
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+		userID := uuid.New()
 
-		// Use a very small negative TTL to ensure expiration
-		err := transport.Embed(w, r, "test-token", -time.Millisecond)
+		// Load will fail to get session, but will create anonymous session
+		store.On("GetByToken", ctx, "token-123").
+			Return(nil, session.ErrNotFound)
+		// Then Authenticate will store the newly authenticated session
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			return s.IsAuthenticated() && s.UserID == userID
+		})).Return(nil)
+
+		sess, _, err := transport.Authenticate(ctx, userID)
+
+		require.NoError(t, err)
+		assert.True(t, sess.IsAuthenticated())
+		assert.Equal(t, userID, sess.UserID)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTAuthenticate_AuthError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates Authenticate errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		// Use uuid.Nil which should cause authentication to fail
+		// Actually, Authenticate accepts any UUID, so we need to test differently
+		// Let's test Store error instead
+
+		storeErr := errors.New("store failed")
+		store.On("Save", ctx, mock.Anything).Return(storeErr)
+
+		_, _, err := transport.Authenticate(ctx, uuid.New())
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTAuthenticate_StoreError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates Manager.Store errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		storeErr := errors.New("database write error")
+
+		store.On("Save", ctx, mock.Anything).Return(storeErr)
+
+		_, _, err := transport.Authenticate(ctx, uuid.New())
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTAuthenticate_TokenPairStructure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("validates TokenPair fields", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		userID := uuid.New()
+
+		store.On("Save", ctx, mock.Anything).Return(nil)
+
+		_, pair, err := transport.Authenticate(ctx, userID)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, pair.AccessToken)
+		assert.NotEmpty(t, pair.RefreshToken)
+		assert.Equal(t, "Bearer", pair.TokenType)
+		assert.Equal(t, 900, pair.ExpiresIn) // 15 minutes in seconds
+		assert.WithinDuration(t, time.Now().Add(15*time.Minute), pair.ExpiresAt, 5*time.Second)
+		store.AssertExpectations(t)
+	})
+}
+
+// Logout Method Tests
+
+func TestJWTLogout_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("deletes session successfully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		validJWT := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, existingSession.Token).
+			Return(existingSession, nil)
+		store.On("Delete", ctx, existingSession.ID).Return(nil)
+
+		err := transport.Logout(ctx)
+
+		require.NoError(t, err)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTLogout_NoToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil on ErrNoToken", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+
+		err := transport.Logout(ctx)
+
+		require.NoError(t, err)
+	})
+}
+
+func TestJWTLogout_NotAuthenticatedOK(t *testing.T) {
+	t.Parallel()
+
+	t.Run("handles ErrNotAuthenticated gracefully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		anonSession := createValidSession(t)
+		validJWT := createValidJWT(t, secretKey, anonSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, anonSession.Token).
+			Return(anonSession, nil)
+		store.On("Delete", ctx, anonSession.ID).
+			Return(session.ErrNotAuthenticated)
+
+		err := transport.Logout(ctx)
+
+		require.NoError(t, err)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTLogout_Error(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates other errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		validJWT := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+		storeErr := errors.New("database error")
+
+		store.On("GetByToken", ctx, existingSession.Token).
+			Return(existingSession, nil)
+		store.On("Delete", ctx, existingSession.ID).Return(storeErr)
+
+		err := transport.Logout(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+// Delete Method Tests
+
+func TestJWTDelete_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("deletes session successfully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		validJWT := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, existingSession.Token).
+			Return(existingSession, nil)
+		store.On("Delete", ctx, existingSession.ID).Return(nil)
+
+		err := transport.Delete(ctx)
+
+		require.NoError(t, err)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTDelete_NoToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns nil on ErrNoToken", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+
+		err := transport.Delete(ctx)
+
+		require.NoError(t, err)
+	})
+}
+
+func TestJWTDelete_NotAuthenticatedOK(t *testing.T) {
+	t.Parallel()
+
+	t.Run("handles ErrNotAuthenticated gracefully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		anonSession := createValidSession(t)
+		validJWT := createValidJWT(t, secretKey, anonSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+
+		store.On("GetByToken", ctx, anonSession.Token).
+			Return(anonSession, nil)
+		store.On("Delete", ctx, anonSession.ID).
+			Return(session.ErrNotAuthenticated)
+
+		err := transport.Delete(ctx)
+
+		require.NoError(t, err)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTDelete_Error(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates other errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		validJWT := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := createJWTContext(t, "Bearer "+validJWT)
+		storeErr := errors.New("database error")
+
+		store.On("GetByToken", ctx, existingSession.Token).
+			Return(existingSession, nil)
+		store.On("Delete", ctx, existingSession.ID).Return(storeErr)
+
+		err := transport.Delete(ctx)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+// Store Method Tests
+
+func TestJWTStore_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("delegates to Manager.Store successfully", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		sess := createAuthenticatedSession(t)
+
+		store.On("Save", ctx, sess).Return(nil)
+
+		err := transport.Store(ctx, sess)
+
+		require.NoError(t, err)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTStore_Error(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates Manager.Store errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		ctx := createJWTContext(t, "")
+		sess := createAuthenticatedSession(t)
+		storeErr := errors.New("database error")
+
+		store.On("Save", ctx, sess).Return(storeErr)
+
+		err := transport.Store(ctx, sess)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+// Auth Method Tests
+
+func TestJWTAuth_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("generates TokenPair for authenticated session", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
+
+		pair, err := transport.Auth(sess)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, pair.AccessToken)
+		assert.NotEmpty(t, pair.RefreshToken)
+		assert.Equal(t, "Bearer", pair.TokenType)
+	})
+}
+
+func TestJWTAuth_NotAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrNotAuthenticated for anonymous session", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		sess := createValidSession(t)
+
+		_, err := transport.Auth(sess)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, session.ErrNotAuthenticated)
+	})
+}
+
+func TestJWTAuth_TokenType(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies TokenType is Bearer", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
+
+		pair, err := transport.Auth(sess)
+
+		require.NoError(t, err)
+		assert.Equal(t, "Bearer", pair.TokenType)
+	})
+}
+
+func TestJWTAuth_ExpiresIn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies ExpiresIn from accessTTL", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
+
+		pair, err := transport.Auth(sess)
+
+		require.NoError(t, err)
+		assert.Equal(t, 900, pair.ExpiresIn) // 15 minutes = 900 seconds
+	})
+}
+
+func TestJWTAuth_ExpiresAt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies ExpiresAt calculation", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
+
+		before := time.Now().Add(15 * time.Minute)
+		pair, err := transport.Auth(sess)
+		after := time.Now().Add(15 * time.Minute)
+
+		require.NoError(t, err)
+		assert.True(t, pair.ExpiresAt.After(before) || pair.ExpiresAt.Equal(before))
+		assert.True(t, pair.ExpiresAt.Before(after) || pair.ExpiresAt.Equal(after))
+	})
+}
+
+func TestJWTAuth_AccessTokenClaims(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies access token claims", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
+
+		pair, err := transport.Auth(sess)
 		require.NoError(t, err)
 
-		jwtToken := w.Header().Get("Authorization")
-		require.NotEmpty(t, jwtToken)
+		// Parse access token to verify claims
+		signer, err := jwt.NewFromString("test-secret-key-that-is-at-least-32-bytes-long")
+		require.NoError(t, err)
 
-		// Add small delay to ensure token has expired
-		time.Sleep(10 * time.Millisecond)
+		var claims jwt.StandardClaims
+		err = signer.Parse(pair.AccessToken, &claims)
+		require.NoError(t, err)
 
-		// Token should be immediately expired
-		r2 := httptest.NewRequest("GET", "/", nil)
-		r2.Header.Set("Authorization", jwtToken)
-
-		_, err = transport.Extract(r2)
-		if err != nil {
-			// Expired token should return some error - could be ErrInvalidToken
-			t.Logf("Got error (as expected for expired token): %v", err)
-			assert.Error(t, err)
-		} else {
-			// If no error, the JWT might not have strict expiration validation
-			t.Skip("JWT did not fail on expired token - implementation may not validate expiration strictly")
-		}
+		assert.Equal(t, sess.Token, claims.ID) // JTI = Session.Token
+		assert.Equal(t, sess.UserID.String(), claims.Subject)
+		assert.Equal(t, "test-issuer", claims.Issuer)
+		assert.NotZero(t, claims.ExpiresAt)
+		assert.NotZero(t, claims.IssuedAt)
 	})
+}
 
-	t.Run("revoke with no token in request succeeds", func(t *testing.T) {
+func TestJWTAuth_RefreshTokenClaims(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies refresh token uses session.ExpiresAt", func(t *testing.T) {
 		t.Parallel()
 
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
 
-		err := transport.Revoke(w, r)
-		assert.NoError(t, err)
+		pair, err := transport.Auth(sess)
+		require.NoError(t, err)
+
+		// Parse refresh token to verify claims
+		signer, err := jwt.NewFromString("test-secret-key-that-is-at-least-32-bytes-long")
+		require.NoError(t, err)
+
+		var claims jwt.StandardClaims
+		err = signer.Parse(pair.RefreshToken, &claims)
+		require.NoError(t, err)
+
+		assert.Equal(t, sess.Token, claims.ID) // JTI = Session.Token
+		assert.Equal(t, sess.ExpiresAt.Unix(), claims.ExpiresAt)
 	})
+}
 
-	t.Run("revoke with invalid token format succeeds", func(t *testing.T) {
+func TestJWTAuth_BothTokensHaveSameJTI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies both tokens use Session.Token as JTI", func(t *testing.T) {
 		t.Parallel()
 
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		r.Header.Set("Authorization", "InvalidFormat")
+		transport, _ := createJWTTransport(t)
+		sess := createAuthenticatedSession(t)
 
-		err := transport.Revoke(w, r)
-		assert.NoError(t, err)
+		pair, err := transport.Auth(sess)
+		require.NoError(t, err)
+
+		signer, err := jwt.NewFromString("test-secret-key-that-is-at-least-32-bytes-long")
+		require.NoError(t, err)
+
+		var accessClaims jwt.StandardClaims
+		err = signer.Parse(pair.AccessToken, &accessClaims)
+		require.NoError(t, err)
+
+		var refreshClaims jwt.StandardClaims
+		err = signer.Parse(pair.RefreshToken, &refreshClaims)
+		require.NoError(t, err)
+
+		assert.Equal(t, sess.Token, accessClaims.ID)
+		assert.Equal(t, sess.Token, refreshClaims.ID)
+		assert.Equal(t, accessClaims.ID, refreshClaims.ID)
 	})
+}
 
-	t.Run("revoke with unparseable JWT succeeds", func(t *testing.T) {
+// Refresh Method Tests
+
+func TestJWTRefresh_Success(t *testing.T) {
+	t.Parallel()
+
+	t.Run("generates new TokenPair with rotated token", func(t *testing.T) {
 		t.Parallel()
 
-		w := httptest.NewRecorder()
-		r := httptest.NewRequest("GET", "/", nil)
-		r.Header.Set("Authorization", "Bearer invalid.jwt.token")
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		oldToken := existingSession.Token
+		refreshToken := createValidJWT(t, secretKey, oldToken)
+		ctx := context.Background()
 
-		err := transport.Revoke(w, r)
-		assert.NoError(t, err)
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			return s.Token != oldToken && s.IsAuthenticated()
+		})).Return(nil)
+
+		pair, err := transport.Refresh(ctx, refreshToken)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, pair.AccessToken)
+		assert.NotEmpty(t, pair.RefreshToken)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTRefresh_InvalidToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrInvalidToken on parse failure", func(t *testing.T) {
+		t.Parallel()
+
+		transport, _ := createJWTTransport(t)
+		ctx := context.Background()
+
+		_, err := transport.Refresh(ctx, "invalid-token")
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, sessiontransport.ErrInvalidToken)
+	})
+}
+
+func TestJWTRefresh_TokenNotFound(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates GetByToken errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		refreshToken := createValidJWT(t, secretKey, "nonexistent-token")
+		ctx := context.Background()
+
+		store.On("GetByToken", ctx, "nonexistent-token").
+			Return(nil, session.ErrNotFound)
+
+		_, err := transport.Refresh(ctx, refreshToken)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, session.ErrNotFound)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTRefresh_NotAuthenticated(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns ErrNotAuthenticated for anonymous session", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		anonSession := createValidSession(t)
+		refreshToken := createValidJWT(t, secretKey, anonSession.Token)
+		ctx := context.Background()
+
+		store.On("GetByToken", ctx, anonSession.Token).Return(anonSession, nil)
+
+		_, err := transport.Refresh(ctx, refreshToken)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, session.ErrNotAuthenticated)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTRefresh_TokenRotation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies new Session.Token is generated", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		oldToken := existingSession.Token
+		refreshToken := createValidJWT(t, secretKey, oldToken)
+		ctx := context.Background()
+
+		var rotatedSession *session.Session[testData]
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			rotatedSession = s
+			return s.Token != oldToken
+		})).Return(nil)
+
+		_, err := transport.Refresh(ctx, refreshToken)
+
+		require.NoError(t, err)
+		assert.NotEqual(t, oldToken, rotatedSession.Token)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTRefresh_StoreError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("propagates Manager.Store errors", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		refreshToken := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := context.Background()
+		storeErr := errors.New("database error")
+
+		store.On("GetByToken", ctx, existingSession.Token).Return(existingSession, nil)
+		store.On("Save", ctx, mock.Anything).Return(storeErr)
+
+		_, err := transport.Refresh(ctx, refreshToken)
+
+		require.Error(t, err)
+		assert.ErrorIs(t, err, storeErr)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTRefresh_NewJTI(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies new tokens have new JTI (rotated token)", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		oldToken := existingSession.Token
+		refreshToken := createValidJWT(t, secretKey, oldToken)
+		ctx := context.Background()
+
+		var rotatedSession *session.Session[testData]
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			rotatedSession = s
+			return true
+		})).Return(nil)
+
+		pair, err := transport.Refresh(ctx, refreshToken)
+		require.NoError(t, err)
+
+		// Parse new access token
+		signer, err := jwt.NewFromString(secretKey)
+		require.NoError(t, err)
+
+		var claims jwt.StandardClaims
+		err = signer.Parse(pair.AccessToken, &claims)
+		require.NoError(t, err)
+
+		assert.NotEqual(t, oldToken, claims.ID)
+		assert.Equal(t, rotatedSession.Token, claims.ID)
+		store.AssertExpectations(t)
+	})
+}
+
+func TestJWTRefresh_PreservesUserID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("verifies UserID is preserved after refresh", func(t *testing.T) {
+		t.Parallel()
+
+		transport, store := createJWTTransport(t)
+		secretKey := "test-secret-key-that-is-at-least-32-bytes-long"
+		existingSession := createAuthenticatedSession(t)
+		originalUserID := existingSession.UserID
+		refreshToken := createValidJWT(t, secretKey, existingSession.Token)
+		ctx := context.Background()
+
+		var rotatedSession *session.Session[testData]
+		store.On("GetByToken", ctx, existingSession.Token).Return(existingSession, nil)
+		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
+			rotatedSession = s
+			return true
+		})).Return(nil)
+
+		pair, err := transport.Refresh(ctx, refreshToken)
+		require.NoError(t, err)
+
+		// Verify UserID is preserved
+		assert.Equal(t, originalUserID, rotatedSession.UserID)
+
+		// Verify UserID in new token
+		signer, err := jwt.NewFromString(secretKey)
+		require.NoError(t, err)
+
+		var claims jwt.StandardClaims
+		err = signer.Parse(pair.AccessToken, &claims)
+		require.NoError(t, err)
+
+		assert.Equal(t, originalUserID.String(), claims.Subject)
+		store.AssertExpectations(t)
 	})
 }

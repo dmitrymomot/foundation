@@ -155,5 +155,5 @@ func (s *Server) Run(ctx context.Context, handler http.Handler) func() error {
 // Run is a convenience function that creates and runs a server with default settings.
 func Run(ctx context.Context, addr string, handler http.Handler) error {
 	server := New(addr)
-	return server.Start(ctx, handler)
+	return server.Run(ctx, handler)()
 }

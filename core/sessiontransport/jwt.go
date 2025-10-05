@@ -1,211 +1,277 @@
 package sessiontransport
 
 import (
+	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/session"
+	"github.com/dmitrymomot/foundation/pkg/clientip"
+	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 	"github.com/dmitrymomot/foundation/pkg/jwt"
 )
 
-// JWTTransport implements session.Transport using JWT tokens.
-// Supports optional token revocation through the Revoker interface.
-type JWTTransport struct {
-	service      *jwt.Service
-	revoker      Revoker // Can be nil for no revocation
-	headerName   string
-	bearerPrefix bool
-	issuer       string
-	audience     string
+// TokenPair contains JWT access and refresh tokens with metadata.
+type TokenPair struct {
+	AccessToken  string    `json:"access_token"`
+	RefreshToken string    `json:"refresh_token"`
+	TokenType    string    `json:"token_type"`
+	ExpiresIn    int       `json:"expires_in"`
+	ExpiresAt    time.Time `json:"expires_at"`
 }
 
-// JWTOption configures the JWT transport.
-type JWTOption func(*JWTTransport)
-
-// WithJWTHeaderName sets a custom header name for JWT tokens.
-// Default is "Authorization".
-func WithJWTHeaderName(name string) JWTOption {
-	return func(t *JWTTransport) {
-		if name != "" {
-			t.headerName = name
-		}
-	}
+// JWT provides JWT-based session transport.
+// It stores Session.Token in JTI claim (unified approach with Cookie).
+type JWT[Data any] struct {
+	manager   *session.Manager[Data]
+	signer    *jwt.Service
+	accessTTL time.Duration
+	issuer    string
 }
 
-// WithJWTBearerPrefix controls whether to use "Bearer " prefix.
-// Default is true.
-func WithJWTBearerPrefix(usePrefix bool) JWTOption {
-	return func(t *JWTTransport) {
-		t.bearerPrefix = usePrefix
-	}
-}
-
-// WithJWTIssuer sets the issuer claim for generated tokens.
-func WithJWTIssuer(issuer string) JWTOption {
-	return func(t *JWTTransport) {
-		t.issuer = issuer
-	}
-}
-
-// WithJWTAudience sets the audience claim for generated tokens.
-func WithJWTAudience(audience string) JWTOption {
-	return func(t *JWTTransport) {
-		t.audience = audience
-	}
+// jwtClaims represents JWT custom claims for session tokens.
+type jwtClaims struct {
+	jwt.StandardClaims
 }
 
 // NewJWT creates a new JWT-based session transport.
-// The revoker can be nil if token revocation is not needed.
-func NewJWT(signingKey string, revoker Revoker, opts ...JWTOption) (*JWTTransport, error) {
-	service, err := jwt.NewFromString(signingKey)
+func NewJWT[Data any](mgr *session.Manager[Data], secretKey string, accessTTL time.Duration, issuer string) (*JWT[Data], error) {
+	signer, err := jwt.NewFromString(secretKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create JWT service: %w", err)
+		return nil, err
 	}
 
-	t := &JWTTransport{
-		service:      service,
-		revoker:      revoker,
-		headerName:   "Authorization",
-		bearerPrefix: true,
-	}
-
-	for _, opt := range opts {
-		opt(t)
-	}
-
-	return t, nil
+	return &JWT[Data]{
+		manager:   mgr,
+		signer:    signer,
+		accessTTL: accessTTL,
+		issuer:    issuer,
+	}, nil
 }
 
-// Extract retrieves and validates the session token from the JWT in the request header.
-func (t *JWTTransport) Extract(r *http.Request) (string, error) {
-	// Get token from header
-	authHeader := r.Header.Get(t.headerName)
-	if authHeader == "" {
-		return "", session.ErrNoToken
+// Load extracts and validates session from JWT bearer token.
+// Returns ErrNoToken if no bearer token present, creates anonymous session if token invalid.
+func (j *JWT[Data]) Load(ctx handler.Context) (*session.Session[Data], error) {
+	token := extractBearerToken(ctx.Request())
+	if token == "" {
+		return nil, ErrNoToken
 	}
 
-	// Extract token from header value
-	tokenString := authHeader
-	if t.bearerPrefix {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			return "", session.ErrInvalidToken
+	var claims jwtClaims
+	if err := j.signer.Parse(token, &claims); err != nil {
+		sess, newErr := session.New[Data](session.NewSessionParams{
+			Fingerprint: fingerprint.JWT(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		}, j.manager.GetTTL())
+		if newErr != nil {
+			return nil, newErr
 		}
-		tokenString = parts[1]
+		return &sess, nil
 	}
 
-	if tokenString == "" {
-		return "", session.ErrNoToken
-	}
-
-	// Parse and validate JWT
-	var claims jwt.StandardClaims
-	err := t.service.Parse(tokenString, &claims)
+	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
-		// Map JWT errors to session errors
-		if errors.Is(err, jwt.ErrExpiredToken) ||
-			errors.Is(err, jwt.ErrInvalidToken) ||
-			errors.Is(err, jwt.ErrInvalidSignature) ||
-			errors.Is(err, jwt.ErrUnexpectedSigningMethod) {
-			return "", session.ErrInvalidToken
+		sess, newErr := session.New[Data](session.NewSessionParams{
+			Fingerprint: fingerprint.JWT(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		}, j.manager.GetTTL())
+		if newErr != nil {
+			return nil, newErr
 		}
-		return "", session.ErrTransportFailed
+		return &sess, nil
 	}
 
-	// Check if session token (stored as JWT ID) is revoked
-	if t.revoker != nil && claims.ID != "" {
-		ctx := r.Context()
-		revoked, err := t.revoker.IsRevoked(ctx, claims.ID)
-		if err != nil {
-			return "", session.ErrTransportFailed
-		}
-		if revoked {
-			return "", session.ErrInvalidToken
-		}
-	}
-
-	// Return the JWT ID which IS the session token
-	if claims.ID == "" {
-		return "", session.ErrInvalidToken
-	}
-
-	return claims.ID, nil
+	return sess, nil
 }
 
-// Embed creates a JWT containing the session token and adds it to the response header.
-func (t *JWTTransport) Embed(w http.ResponseWriter, r *http.Request, token string, ttl time.Duration) error {
-	// Create claims with session token as JWT ID
+// Save persists session data to the store.
+// Note: JWT tokens are immutable; only database session data is updated.
+func (j *JWT[Data]) Save(ctx handler.Context, sess *session.Session[Data]) error {
+	return j.manager.Store(ctx, sess)
+}
+
+// Authenticate creates an authenticated session and returns a token pair.
+// Session.Token is embedded in both access and refresh token JTI claims.
+// Optional data parameter sets session data during authentication.
+func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (*session.Session[Data], TokenPair, error) {
+	currentSess, err := j.Load(ctx)
+	if err != nil {
+		if err != ErrNoToken {
+			return nil, TokenPair{}, err
+		}
+		// ErrNoToken - create new anonymous session as fallback
+		sess, newErr := session.New[Data](session.NewSessionParams{
+			Fingerprint: fingerprint.JWT(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		}, j.manager.GetTTL())
+		if newErr != nil {
+			return nil, TokenPair{}, newErr
+		}
+		currentSess = &sess
+	}
+
+	if err := currentSess.Authenticate(userID, data...); err != nil {
+		return nil, TokenPair{}, err
+	}
+
+	if err := j.manager.Store(ctx, currentSess); err != nil {
+		return nil, TokenPair{}, err
+	}
+
+	pair, err := j.generateTokenPair(currentSess)
+	if err != nil {
+		return nil, TokenPair{}, err
+	}
+
+	return currentSess, pair, nil
+}
+
+// Logout deletes the session from the store.
+// Client must discard JWT tokens as they cannot be invalidated server-side.
+func (j *JWT[Data]) Logout(ctx handler.Context) error {
+	sess, err := j.Load(ctx)
+	if err != nil {
+		if err == ErrNoToken {
+			return nil
+		}
+		return err
+	}
+
+	sess.Logout()
+
+	if err := j.manager.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
+		return err
+	}
+
+	return nil
+}
+
+// Delete removes the session from store.
+func (j *JWT[Data]) Delete(ctx handler.Context) error {
+	sess, err := j.Load(ctx)
+	if err != nil {
+		if err == ErrNoToken {
+			return nil
+		}
+		return err
+	}
+
+	sess.Logout()
+
+	if err := j.manager.Store(ctx, sess); err != nil && !errors.Is(err, session.ErrNotAuthenticated) {
+		return err
+	}
+
+	return nil
+}
+
+// Store persists session state.
+func (j *JWT[Data]) Store(ctx handler.Context, sess *session.Session[Data]) error {
+	return j.manager.Store(ctx, sess)
+}
+
+// Auth generates a new token pair after authentication.
+// Call this after sess.Authenticate() to get JWT tokens.
+func (j *JWT[Data]) Auth(sess *session.Session[Data]) (TokenPair, error) {
+	if !sess.IsAuthenticated() {
+		return TokenPair{}, session.ErrNotAuthenticated
+	}
+
+	return j.generateTokenPair(sess)
+}
+
+// Refresh validates the refresh token and generates a new token pair.
+// Rotates the session token in database for security.
+func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (TokenPair, error) {
+	var claims jwtClaims
+	if err := j.signer.Parse(refreshToken, &claims); err != nil {
+		return TokenPair{}, ErrInvalidToken
+	}
+
+	sess, err := j.manager.GetByToken(ctx, claims.ID)
+	if err != nil {
+		return TokenPair{}, err
+	}
+
+	if !sess.IsAuthenticated() {
+		return TokenPair{}, session.ErrNotAuthenticated
+	}
+
+	if err := sess.Refresh(); err != nil {
+		return TokenPair{}, err
+	}
+
+	if err := j.manager.Store(ctx, sess); err != nil {
+		return TokenPair{}, err
+	}
+
+	return j.Auth(sess)
+}
+
+// generateTokenPair creates access and refresh token pair.
+func (j *JWT[Data]) generateTokenPair(sess *session.Session[Data]) (TokenPair, error) {
 	now := time.Now()
-	claims := jwt.StandardClaims{
-		ID:        token, // Session token IS the JWT ID
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(ttl).Unix(),
-		Issuer:    t.issuer,
-		Audience:  t.audience,
+	expiresAt := now.Add(j.accessTTL)
+
+	accessClaims := jwtClaims{
+		StandardClaims: jwt.StandardClaims{
+			ID:        sess.Token,
+			Subject:   sess.UserID.String(),
+			Issuer:    j.issuer,
+			IssuedAt:  now.Unix(),
+			ExpiresAt: expiresAt.Unix(),
+		},
 	}
 
-	// Generate JWT
-	jwtToken, err := t.service.Generate(claims)
+	// Refresh token shares same JTI but uses longer session expiration
+	refreshClaims := jwtClaims{
+		StandardClaims: jwt.StandardClaims{
+			ID:        sess.Token,
+			Subject:   sess.UserID.String(),
+			Issuer:    j.issuer,
+			IssuedAt:  now.Unix(),
+			ExpiresAt: sess.ExpiresAt.Unix(),
+		},
+	}
+
+	accessToken, err := j.signer.Generate(accessClaims)
 	if err != nil {
-		return session.ErrTransportFailed
+		return TokenPair{}, err
 	}
 
-	// Set header
-	headerValue := jwtToken
-	if t.bearerPrefix {
-		headerValue = "Bearer " + jwtToken
+	refreshToken, err := j.signer.Generate(refreshClaims)
+	if err != nil {
+		return TokenPair{}, err
 	}
-	w.Header().Set(t.headerName, headerValue)
 
-	return nil
+	return TokenPair{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		TokenType:    "Bearer",
+		ExpiresIn:    int(j.accessTTL.Seconds()),
+		ExpiresAt:    expiresAt,
+	}, nil
 }
 
-// Revoke removes the JWT from the response header and revokes the session token if configured.
-func (t *JWTTransport) Revoke(w http.ResponseWriter, r *http.Request) error {
-	// Remove the header from response
-	w.Header().Del(t.headerName)
-
-	// If no revoker configured, we're done
-	if t.revoker == nil {
-		return nil
-	}
-
-	// Get token from request header
-	authHeader := r.Header.Get(t.headerName)
+// extractBearerToken extracts Bearer token from Authorization header.
+func extractBearerToken(r *http.Request) string {
+	authHeader := r.Header.Get("Authorization")
 	if authHeader == "" {
-		return nil // No token to revoke
+		return ""
 	}
 
-	// Extract token from header value
-	tokenString := authHeader
-	if t.bearerPrefix {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			return nil // Invalid format, skip revocation
-		}
-		tokenString = parts[1]
+	parts := strings.SplitN(authHeader, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
 	}
 
-	if tokenString == "" {
-		return nil // No token to revoke
-	}
-
-	// Parse JWT to get the session token (stored as JWT ID)
-	var claims jwt.StandardClaims
-	err := t.service.Parse(tokenString, &claims)
-	if err != nil {
-		// Invalid token, skip revocation
-		return nil
-	}
-
-	// Revoke the session token if present
-	if claims.ID != "" {
-		ctx := r.Context()
-		return t.revoker.Revoke(ctx, claims.ID)
-	}
-
-	return nil
+	return parts[1]
 }

@@ -315,6 +315,6 @@ func TestRunConvenienceFunction(t *testing.T) {
 	defer cancel()
 
 	err := server.Run(ctx, fmt.Sprintf(":%d", port), testHandler())
-	// Context deadline exceeded is expected
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	// Run swallows context errors for errgroup compatibility
+	assert.NoError(t, err)
 }
