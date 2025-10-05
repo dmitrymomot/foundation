@@ -3,6 +3,7 @@ package sessiontransport
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,16 +15,24 @@ import (
 	"github.com/dmitrymomot/foundation/pkg/fingerprint"
 )
 
+// CookieManager defines the interface for managing HTTP cookies.
+// This interface allows for testing with mock implementations.
+type CookieManager interface {
+	GetSigned(r *http.Request, name string) (string, error)
+	SetSigned(w http.ResponseWriter, r *http.Request, name, value string, opts ...cookie.Option) error
+	Delete(w http.ResponseWriter, name string)
+}
+
 // Cookie provides HTTP cookie-based session transport.
 // It stores Session.Token as the cookie value (signed via cookie.Manager).
 type Cookie[Data any] struct {
 	manager   *session.Manager[Data]
-	cookieMgr *cookie.Manager
+	cookieMgr CookieManager
 	name      string
 }
 
 // NewCookie creates a new cookie-based session transport.
-func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr *cookie.Manager, name string) *Cookie[Data] {
+func NewCookie[Data any](mgr *session.Manager[Data], cookieMgr CookieManager, name string) *Cookie[Data] {
 	return &Cookie[Data]{
 		manager:   mgr,
 		cookieMgr: cookieMgr,
