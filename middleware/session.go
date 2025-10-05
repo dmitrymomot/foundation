@@ -16,8 +16,8 @@ type sessionKey struct{}
 type SessionConfig[C handler.Context, Data any] struct {
 	// Transport implements Load and Store methods for session management (required)
 	Transport interface {
-		Load(handler.Context) (session.Session[Data], error)
-		Store(handler.Context, session.Session[Data]) error
+		Load(handler.Context) (*session.Session[Data], error)
+		Store(handler.Context, *session.Session[Data]) error
 	}
 	Logger *slog.Logger
 	Skip   func(ctx C) bool
@@ -66,8 +66,8 @@ type SessionConfig[C handler.Context, Data any] struct {
 // - Enforces strict error handling throughout the session lifecycle
 func Session[C handler.Context, Data any](
 	transport interface {
-		Load(handler.Context) (session.Session[Data], error)
-		Store(handler.Context, session.Session[Data]) error
+		Load(handler.Context) (*session.Session[Data], error)
+		Store(handler.Context, *session.Session[Data]) error
 	},
 ) handler.Middleware[C] {
 	return SessionWithConfig[C, Data](SessionConfig[C, Data]{
@@ -127,7 +127,8 @@ func Session[C handler.Context, Data any](
 //		ErrorHandler: func(ctx *MyContext, err error) handler.Response {
 //			// Custom strategy: log and continue with empty session
 //			logger.Error("session error", "error", err)
-//			middleware.SetSession(ctx, session.Session[MySessionData]{})
+//			sess := &session.Session[MySessionData]{}
+//			middleware.SetSession(ctx, sess)
 //			return nil // Continue processing (ErrorHandler can return nil to continue)
 //		},
 //	}
@@ -215,22 +216,22 @@ func SessionWithConfig[C handler.Context, Data any](cfg SessionConfig[C, Data]) 
 }
 
 // GetSession retrieves session from context.
-// Returns the session and true if found, empty session and false otherwise.
-func GetSession[Data any](ctx handler.Context) (session.Session[Data], bool) {
+// Returns the session and true if found, nil and false otherwise.
+func GetSession[Data any](ctx handler.Context) (*session.Session[Data], bool) {
 	if ctx == nil {
-		return session.Session[Data]{}, false
+		return nil, false
 	}
 
-	if sess, ok := ctx.Value(sessionKey{}).(session.Session[Data]); ok {
+	if sess, ok := ctx.Value(sessionKey{}).(*session.Session[Data]); ok {
 		return sess, true
 	}
 
-	return session.Session[Data]{}, false
+	return nil, false
 }
 
 // MustGetSession retrieves session from context or panics if not found.
 // Use this when session existence is guaranteed by middleware.
-func MustGetSession[Data any](ctx handler.Context) session.Session[Data] {
+func MustGetSession[Data any](ctx handler.Context) *session.Session[Data] {
 	sess, ok := GetSession[Data](ctx)
 	if !ok {
 		panic("session not found in context")
@@ -240,6 +241,6 @@ func MustGetSession[Data any](ctx handler.Context) session.Session[Data] {
 
 // SetSession updates session in context.
 // Use this to store modified session state during request processing.
-func SetSession[Data any](ctx handler.Context, sess session.Session[Data]) {
+func SetSession[Data any](ctx handler.Context, sess *session.Session[Data]) {
 	ctx.SetValue(sessionKey{}, sess)
 }

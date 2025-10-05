@@ -67,7 +67,7 @@ func (c *Context) Param(key string) string {
 
 // Session retrieves the current session from the request context.
 // Returns the session and a boolean indicating whether it was found.
-func (c *Context) Session() (session.Session[SessionData], bool) {
+func (c *Context) Session() (*session.Session[SessionData], bool) {
 	return middleware.GetSession[SessionData](c)
 }
 

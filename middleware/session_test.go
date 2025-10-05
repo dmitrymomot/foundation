@@ -33,12 +33,15 @@ type mockTransport struct {
 	mock.Mock
 }
 
-func (m *mockTransport) Load(ctx handler.Context) (session.Session[testSessionData], error) {
+func (m *mockTransport) Load(ctx handler.Context) (*session.Session[testSessionData], error) {
 	args := m.Called(ctx)
-	return args.Get(0).(session.Session[testSessionData]), args.Error(1)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*session.Session[testSessionData]), args.Error(1)
 }
 
-func (m *mockTransport) Store(ctx handler.Context, sess session.Session[testSessionData]) error {
+func (m *mockTransport) Store(ctx handler.Context, sess *session.Session[testSessionData]) error {
 	args := m.Called(ctx, sess)
 	return args.Error(0)
 }
@@ -51,7 +54,7 @@ func TestSession(t *testing.T) {
 
 		transport := &mockTransport{}
 		userID := uuid.New()
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			UserID:    userID,
@@ -89,7 +92,7 @@ func TestSession(t *testing.T) {
 		transport := &mockTransport{}
 		sessionID := uuid.New()
 		userID := uuid.New()
-		originalSess := session.Session[testSessionData]{
+		originalSess := &session.Session[testSessionData]{
 			ID:        sessionID,
 			Token:     "original-token",
 			UserID:    userID,
@@ -100,7 +103,7 @@ func TestSession(t *testing.T) {
 		transport.On("Load", mock.Anything).Return(originalSess, nil)
 
 		// Verify Store receives the mutated session
-		transport.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[testSessionData]) bool {
+		transport.On("Store", mock.Anything, mock.MatchedBy(func(s *session.Session[testSessionData]) bool {
 			return s.ID == sessionID && s.Data.Theme == "dark"
 		})).Return(nil)
 
@@ -156,7 +159,7 @@ func TestSessionWithConfig(t *testing.T) {
 
 		transport := &mockTransport{}
 		customLogger := slog.New(slog.NewTextHandler(io.Discard, nil))
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -224,7 +227,7 @@ func TestSessionWithConfig(t *testing.T) {
 		transport := &mockTransport{}
 
 		// Anonymous session (UserID = uuid.Nil)
-		anonSess := session.Session[testSessionData]{
+		anonSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "anon-token",
 			UserID:    uuid.Nil,
@@ -258,7 +261,7 @@ func TestSessionWithConfig(t *testing.T) {
 		transport := &mockTransport{}
 		userID := uuid.New()
 
-		authSess := session.Session[testSessionData]{
+		authSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "auth-token",
 			UserID:    userID,
@@ -296,7 +299,7 @@ func TestSessionWithConfig(t *testing.T) {
 		transport := &mockTransport{}
 		userID := uuid.New()
 
-		authSess := session.Session[testSessionData]{
+		authSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "auth-token",
 			UserID:    userID,
@@ -329,7 +332,7 @@ func TestSessionWithConfig(t *testing.T) {
 
 		transport := &mockTransport{}
 
-		guestSess := session.Session[testSessionData]{
+		guestSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "guest-token",
 			UserID:    uuid.Nil,
@@ -367,7 +370,7 @@ func TestSessionWithConfig(t *testing.T) {
 		transport := &mockTransport{}
 		loadErr := errors.New("database connection failed")
 
-		transport.On("Load", mock.Anything).Return(session.Session[testSessionData]{}, loadErr)
+		transport.On("Load", mock.Anything).Return(nil, loadErr)
 
 		customErrorCalled := false
 		r := router.New[*router.Context]()
@@ -402,7 +405,7 @@ func TestSessionWithConfig(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -445,7 +448,7 @@ func TestSessionWithConfig(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		anonSess := session.Session[testSessionData]{
+		anonSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "anon-token",
 			UserID:    uuid.Nil,
@@ -486,7 +489,7 @@ func TestSessionWithConfig(t *testing.T) {
 
 		transport := &mockTransport{}
 		userID := uuid.New()
-		authSess := session.Session[testSessionData]{
+		authSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "auth-token",
 			UserID:    userID,
@@ -528,7 +531,7 @@ func TestSessionWithConfig(t *testing.T) {
 		transport := &mockTransport{}
 		loadErr := errors.New("transient error")
 
-		transport.On("Load", mock.Anything).Return(session.Session[testSessionData]{}, loadErr)
+		transport.On("Load", mock.Anything).Return(nil, loadErr)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.SessionWithConfig[*router.Context, testSessionData](middleware.SessionConfig[*router.Context, testSessionData]{
@@ -557,7 +560,7 @@ func TestSessionWithConfig(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -602,7 +605,7 @@ func TestSessionWithConfig(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		transport.On("Load", mock.Anything).Return(session.Session[testSessionData]{}, session.ErrNotAuthenticated)
+		transport.On("Load", mock.Anything).Return(nil, session.ErrNotAuthenticated)
 
 		r := router.New[*router.Context]()
 		r.Use(middleware.SessionWithConfig[*router.Context, testSessionData](middleware.SessionConfig[*router.Context, testSessionData]{
@@ -629,7 +632,7 @@ func TestSessionWithConfig(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -668,7 +671,7 @@ func TestGetSession(t *testing.T) {
 
 		transport := &mockTransport{}
 		userID := uuid.New()
-		expectedSess := session.Session[testSessionData]{
+		expectedSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			UserID:    userID,
@@ -709,7 +712,7 @@ func TestGetSession(t *testing.T) {
 		r.Get("/test", func(ctx *router.Context) handler.Response {
 			sess, ok := middleware.GetSession[testSessionData](ctx)
 			assert.False(t, ok)
-			assert.Equal(t, session.Session[testSessionData]{}, sess)
+			assert.Nil(t, sess)
 			return response.JSON(map[string]string{"status": "ok"})
 		})
 
@@ -726,7 +729,7 @@ func TestGetSession(t *testing.T) {
 
 		sess, ok := middleware.GetSession[testSessionData](nil)
 		assert.False(t, ok)
-		assert.Equal(t, session.Session[testSessionData]{}, sess)
+		assert.Nil(t, sess)
 	})
 
 	t.Run("returns false for wrong data type", func(t *testing.T) {
@@ -741,7 +744,7 @@ func TestGetSession(t *testing.T) {
 			}
 			sess, ok := middleware.GetSession[differentData](ctx)
 			assert.False(t, ok)
-			assert.Equal(t, session.Session[differentData]{}, sess)
+			assert.Nil(t, sess)
 			return response.JSON(map[string]string{"status": "ok"})
 		})
 
@@ -762,7 +765,7 @@ func TestMustGetSession(t *testing.T) {
 
 		transport := &mockTransport{}
 		userID := uuid.New()
-		expectedSess := session.Session[testSessionData]{
+		expectedSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			UserID:    userID,
@@ -836,7 +839,7 @@ func TestSetSession(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		originalSess := session.Session[testSessionData]{
+		originalSess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "original-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -846,7 +849,7 @@ func TestSetSession(t *testing.T) {
 		transport.On("Load", mock.Anything).Return(originalSess, nil)
 
 		// Verify the updated session is stored
-		transport.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[testSessionData]) bool {
+		transport.On("Store", mock.Anything, mock.MatchedBy(func(s *session.Session[testSessionData]) bool {
 			return s.Data.Theme == "dark" && len(s.Data.CartItems) == 2
 		})).Return(nil)
 
@@ -883,7 +886,7 @@ func TestSetSession(t *testing.T) {
 		r := router.New[*router.Context]()
 
 		r.Get("/test", func(ctx *router.Context) handler.Response {
-			newSess := session.Session[testSessionData]{
+			newSess := &session.Session[testSessionData]{
 				ID:        uuid.New(),
 				Token:     "new-token",
 				ExpiresAt: time.Now().Add(time.Hour),
@@ -916,7 +919,7 @@ func TestSessionEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -949,7 +952,7 @@ func TestSessionEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -997,7 +1000,7 @@ func TestSessionEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
@@ -1005,7 +1008,7 @@ func TestSessionEdgeCases(t *testing.T) {
 		}
 
 		transport.On("Load", mock.Anything).Return(sess, nil)
-		transport.On("Store", mock.Anything, mock.MatchedBy(func(s session.Session[testSessionData]) bool {
+		transport.On("Store", mock.Anything, mock.MatchedBy(func(s *session.Session[testSessionData]) bool {
 			return s.Data.Theme == "" && len(s.Data.CartItems) == 0
 		})).Return(nil)
 
@@ -1058,7 +1061,7 @@ func TestSessionEdgeCases(t *testing.T) {
 		t.Parallel()
 
 		transport := &mockTransport{}
-		sess := session.Session[testSessionData]{
+		sess := &session.Session[testSessionData]{
 			ID:        uuid.New(),
 			Token:     "test-token",
 			ExpiresAt: time.Now().Add(time.Hour),
