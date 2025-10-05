@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/dmitrymomot/foundation/_examples/api/db/repository"
 	"github.com/dmitrymomot/foundation/core/config"
+	"github.com/dmitrymomot/foundation/core/handler"
 	"github.com/dmitrymomot/foundation/core/health"
 	"github.com/dmitrymomot/foundation/core/logger"
+	"github.com/dmitrymomot/foundation/core/response"
 	"github.com/dmitrymomot/foundation/core/router"
 	"github.com/dmitrymomot/foundation/core/server"
 	"github.com/dmitrymomot/foundation/core/session"
@@ -70,9 +73,11 @@ func main() {
 	r.Get("/live", health.Liveness)
 	r.Get("/ready", health.Readiness[*Context](log, pg.Healthcheck(db)))
 
-	// Public auth endpoints
+	// Public auth endpoints (no session middleware - use authHelper pattern)
 	r.Post("/auth/signup", signupHandler(repo, authHelper))
 	r.Post("/auth/login", loginHandler(repo, authHelper))
+
+	// Refresh doesn't require guest (can be used while authenticated)
 	r.Post("/auth/refresh", refreshHandler(refreshHelper))
 
 	// Protected endpoints (require session authentication)
@@ -82,9 +87,9 @@ func main() {
 			Logger:      log,
 			RequireAuth: true,
 		}))
-		protected.Get("/api/profile", getProfileHandler(repo))
-		protected.Put("/api/profile/password", updatePasswordHandler(repo))
-		protected.Post("/api/auth/logout", logoutHandler())
+		protected.Get("/profile", getProfileHandler(repo))
+		protected.Put("/profile/password", updatePasswordHandler(repo))
+		protected.Post("/auth/logout", logoutHandler())
 	})
 
 	eg, ctx := errgroup.WithContext(ctx)
