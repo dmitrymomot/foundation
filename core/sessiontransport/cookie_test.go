@@ -139,7 +139,7 @@ func (m *mockContext) SetValue(key, val any) {
 
 // Helper functions
 
-func createValidSession(t *testing.T) session.Session[testData] {
+func createValidSession(t *testing.T) *session.Session[testData] {
 	t.Helper()
 	sess, err := session.New[testData](session.NewSessionParams{
 		Fingerprint: "v1:test-fingerprint-hash-12345678901",
@@ -147,10 +147,10 @@ func createValidSession(t *testing.T) session.Session[testData] {
 		UserAgent:   "Mozilla/5.0 Test Browser",
 	}, time.Hour)
 	require.NoError(t, err)
-	return sess
+	return &sess
 }
 
-func createExpiredSession(t *testing.T) session.Session[testData] {
+func createExpiredSession(t *testing.T) *session.Session[testData] {
 	t.Helper()
 	sess, err := session.New[testData](session.NewSessionParams{
 		Fingerprint: "v1:test-fingerprint-hash-12345678901",
@@ -158,7 +158,7 @@ func createExpiredSession(t *testing.T) session.Session[testData] {
 		UserAgent:   "Mozilla/5.0 Test Browser",
 	}, -time.Hour) // Negative TTL creates already expired session
 	require.NoError(t, err)
-	return sess
+	return &sess
 }
 
 func createMockContext(t *testing.T) *mockContext {
@@ -215,7 +215,7 @@ func TestCookieLoad_Success(t *testing.T) {
 			ctx.Request().AddCookie(c)
 		}
 
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&validSession, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(validSession, nil)
 
 		result, err := transport.Load(ctx)
 
@@ -534,7 +534,7 @@ func TestCookieAuthenticate_LoadError(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, storeErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -560,7 +560,7 @@ func TestCookieAuthenticate_StoreError(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, storeErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -589,7 +589,7 @@ func TestCookieAuthenticate_SaveError(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, saveErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -611,7 +611,7 @@ func TestCookieLogout_Success(t *testing.T) {
 		wrapper.onGetSigned = func(r *http.Request, name string) (string, error) {
 			return authSession.Token, nil
 		}
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&authSession, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(authSession, nil)
 		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 		deleteCalled := false
@@ -622,7 +622,7 @@ func TestCookieLogout_Success(t *testing.T) {
 		result, err := transport.Logout(ctx)
 
 		require.NoError(t, err)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		assert.True(t, deleteCalled)
 		store.AssertExpectations(t)
 	})
@@ -649,7 +649,7 @@ func TestCookieLogout_LoadError(t *testing.T) {
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, storeErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -668,7 +668,7 @@ func TestCookieLogout_NotAuthenticatedOK(t *testing.T) {
 		wrapper.onGetSigned = func(r *http.Request, name string) (string, error) {
 			return anonSession.Token, nil
 		}
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&anonSession, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(anonSession, nil)
 		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(session.ErrNotAuthenticated)
 
 		wrapper.onDelete = func(w http.ResponseWriter, name string) {}
@@ -676,7 +676,7 @@ func TestCookieLogout_NotAuthenticatedOK(t *testing.T) {
 		result, err := transport.Logout(ctx)
 
 		require.NoError(t, err)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -697,14 +697,14 @@ func TestCookieLogout_DeleteError(t *testing.T) {
 		wrapper.onGetSigned = func(r *http.Request, name string) (string, error) {
 			return authSession.Token, nil
 		}
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&authSession, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(authSession, nil)
 		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(deleteErr)
 
 		result, err := transport.Logout(ctx)
 
 		require.Error(t, err)
 		assert.ErrorIs(t, err, deleteErr)
-		assert.Equal(t, uuid.Nil, result.ID)
+		assert.Nil(t, result)
 		store.AssertExpectations(t)
 	})
 }
@@ -725,7 +725,7 @@ func TestCookieDelete_Success(t *testing.T) {
 		wrapper.onGetSigned = func(r *http.Request, name string) (string, error) {
 			return sess.Token, nil
 		}
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&sess, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(sess, nil)
 		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(nil)
 
 		deleteCalled := false
@@ -780,7 +780,7 @@ func TestCookieDelete_NotAuthenticatedOK(t *testing.T) {
 		wrapper.onGetSigned = func(r *http.Request, name string) (string, error) {
 			return anonSession.Token, nil
 		}
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&anonSession, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(anonSession, nil)
 		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(session.ErrNotAuthenticated)
 
 		wrapper.onDelete = func(w http.ResponseWriter, name string) {}
@@ -807,7 +807,7 @@ func TestCookieDelete_DeleteError(t *testing.T) {
 		wrapper.onGetSigned = func(r *http.Request, name string) (string, error) {
 			return sess.Token, nil
 		}
-		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(&sess, nil)
+		store.On("GetByToken", ctx, mock.AnythingOfType("string")).Return(sess, nil)
 		store.On("Delete", ctx, mock.AnythingOfType("uuid.UUID")).Return(deleteErr)
 
 		err := transport.Delete(ctx)

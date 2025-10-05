@@ -67,7 +67,7 @@ func createJWTContext(t *testing.T, authHeader string) *mockContext {
 	}
 }
 
-func createAuthenticatedSession(t *testing.T) session.Session[testData] {
+func createAuthenticatedSession(t *testing.T) *session.Session[testData] {
 	t.Helper()
 	sess := createValidSession(t)
 	err := sess.Authenticate(uuid.New())
@@ -219,7 +219,7 @@ func TestJWTLoad_Success(t *testing.T) {
 		ctx := createJWTContext(t, "Bearer "+validJWT)
 
 		store.On("GetByToken", ctx, existingSession.Token).
-			Return(&existingSession, nil)
+			Return(existingSession, nil)
 
 		sess, err := transport.Load(ctx)
 
@@ -247,7 +247,7 @@ func TestJWTLoad_ExtractsJTI(t *testing.T) {
 		existingSession.Token = expectedToken
 
 		store.On("GetByToken", ctx, expectedToken).
-			Return(&existingSession, nil)
+			Return(existingSession, nil)
 
 		sess, err := transport.Load(ctx)
 
@@ -269,7 +269,7 @@ func TestJWTSave_Success(t *testing.T) {
 		ctx := createJWTContext(t, "")
 		sess := createAuthenticatedSession(t)
 
-		store.On("Save", ctx, &sess).Return(nil)
+		store.On("Save", ctx, sess).Return(nil)
 
 		err := transport.Save(ctx, sess)
 
@@ -289,7 +289,7 @@ func TestJWTSave_Error(t *testing.T) {
 		sess := createAuthenticatedSession(t)
 		storeErr := errors.New("database error")
 
-		store.On("Save", ctx, &sess).Return(storeErr)
+		store.On("Save", ctx, sess).Return(storeErr)
 
 		err := transport.Save(ctx, sess)
 
@@ -391,7 +391,7 @@ func TestJWTAuthenticate_TokenRotation(t *testing.T) {
 		ctx := createJWTContext(t, "Bearer "+validJWT)
 		userID := uuid.New()
 
-		store.On("GetByToken", ctx, oldToken).Return(&existingSession, nil)
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
 			return s.Token != oldToken && s.IsAuthenticated()
 		})).Return(nil)
@@ -515,7 +515,7 @@ func TestJWTLogout_Success(t *testing.T) {
 		ctx := createJWTContext(t, "Bearer "+validJWT)
 
 		store.On("GetByToken", ctx, existingSession.Token).
-			Return(&existingSession, nil)
+			Return(existingSession, nil)
 		store.On("Delete", ctx, existingSession.ID).Return(nil)
 
 		err := transport.Logout(ctx)
@@ -553,7 +553,7 @@ func TestJWTLogout_NotAuthenticatedOK(t *testing.T) {
 		ctx := createJWTContext(t, "Bearer "+validJWT)
 
 		store.On("GetByToken", ctx, anonSession.Token).
-			Return(&anonSession, nil)
+			Return(anonSession, nil)
 		store.On("Delete", ctx, anonSession.ID).
 			Return(session.ErrNotAuthenticated)
 
@@ -578,7 +578,7 @@ func TestJWTLogout_Error(t *testing.T) {
 		storeErr := errors.New("database error")
 
 		store.On("GetByToken", ctx, existingSession.Token).
-			Return(&existingSession, nil)
+			Return(existingSession, nil)
 		store.On("Delete", ctx, existingSession.ID).Return(storeErr)
 
 		err := transport.Logout(ctx)
@@ -604,7 +604,7 @@ func TestJWTDelete_Success(t *testing.T) {
 		ctx := createJWTContext(t, "Bearer "+validJWT)
 
 		store.On("GetByToken", ctx, existingSession.Token).
-			Return(&existingSession, nil)
+			Return(existingSession, nil)
 		store.On("Delete", ctx, existingSession.ID).Return(nil)
 
 		err := transport.Delete(ctx)
@@ -642,7 +642,7 @@ func TestJWTDelete_NotAuthenticatedOK(t *testing.T) {
 		ctx := createJWTContext(t, "Bearer "+validJWT)
 
 		store.On("GetByToken", ctx, anonSession.Token).
-			Return(&anonSession, nil)
+			Return(anonSession, nil)
 		store.On("Delete", ctx, anonSession.ID).
 			Return(session.ErrNotAuthenticated)
 
@@ -667,7 +667,7 @@ func TestJWTDelete_Error(t *testing.T) {
 		storeErr := errors.New("database error")
 
 		store.On("GetByToken", ctx, existingSession.Token).
-			Return(&existingSession, nil)
+			Return(existingSession, nil)
 		store.On("Delete", ctx, existingSession.ID).Return(storeErr)
 
 		err := transport.Delete(ctx)
@@ -690,7 +690,7 @@ func TestJWTStore_Success(t *testing.T) {
 		ctx := createJWTContext(t, "")
 		sess := createAuthenticatedSession(t)
 
-		store.On("Save", ctx, &sess).Return(nil)
+		store.On("Save", ctx, sess).Return(nil)
 
 		err := transport.Store(ctx, sess)
 
@@ -710,7 +710,7 @@ func TestJWTStore_Error(t *testing.T) {
 		sess := createAuthenticatedSession(t)
 		storeErr := errors.New("database error")
 
-		store.On("Save", ctx, &sess).Return(storeErr)
+		store.On("Save", ctx, sess).Return(storeErr)
 
 		err := transport.Store(ctx, sess)
 
@@ -904,7 +904,7 @@ func TestJWTRefresh_Success(t *testing.T) {
 		refreshToken := createValidJWT(t, secretKey, oldToken)
 		ctx := context.Background()
 
-		store.On("GetByToken", ctx, oldToken).Return(&existingSession, nil)
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
 			return s.Token != oldToken && s.IsAuthenticated()
 		})).Return(nil)
@@ -968,7 +968,7 @@ func TestJWTRefresh_NotAuthenticated(t *testing.T) {
 		refreshToken := createValidJWT(t, secretKey, anonSession.Token)
 		ctx := context.Background()
 
-		store.On("GetByToken", ctx, anonSession.Token).Return(&anonSession, nil)
+		store.On("GetByToken", ctx, anonSession.Token).Return(anonSession, nil)
 
 		_, err := transport.Refresh(ctx, refreshToken)
 
@@ -991,10 +991,10 @@ func TestJWTRefresh_TokenRotation(t *testing.T) {
 		refreshToken := createValidJWT(t, secretKey, oldToken)
 		ctx := context.Background()
 
-		var rotatedSession session.Session[testData]
-		store.On("GetByToken", ctx, oldToken).Return(&existingSession, nil)
+		var rotatedSession *session.Session[testData]
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
-			rotatedSession = *s
+			rotatedSession = s
 			return s.Token != oldToken
 		})).Return(nil)
 
@@ -1019,7 +1019,7 @@ func TestJWTRefresh_StoreError(t *testing.T) {
 		ctx := context.Background()
 		storeErr := errors.New("database error")
 
-		store.On("GetByToken", ctx, existingSession.Token).Return(&existingSession, nil)
+		store.On("GetByToken", ctx, existingSession.Token).Return(existingSession, nil)
 		store.On("Save", ctx, mock.Anything).Return(storeErr)
 
 		_, err := transport.Refresh(ctx, refreshToken)
@@ -1043,10 +1043,10 @@ func TestJWTRefresh_NewJTI(t *testing.T) {
 		refreshToken := createValidJWT(t, secretKey, oldToken)
 		ctx := context.Background()
 
-		var rotatedSession session.Session[testData]
-		store.On("GetByToken", ctx, oldToken).Return(&existingSession, nil)
+		var rotatedSession *session.Session[testData]
+		store.On("GetByToken", ctx, oldToken).Return(existingSession, nil)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
-			rotatedSession = *s
+			rotatedSession = s
 			return true
 		})).Return(nil)
 
@@ -1080,10 +1080,10 @@ func TestJWTRefresh_PreservesUserID(t *testing.T) {
 		refreshToken := createValidJWT(t, secretKey, existingSession.Token)
 		ctx := context.Background()
 
-		var rotatedSession session.Session[testData]
-		store.On("GetByToken", ctx, existingSession.Token).Return(&existingSession, nil)
+		var rotatedSession *session.Session[testData]
+		store.On("GetByToken", ctx, existingSession.Token).Return(existingSession, nil)
 		store.On("Save", ctx, mock.MatchedBy(func(s *session.Session[testData]) bool {
-			rotatedSession = *s
+			rotatedSession = s
 			return true
 		})).Return(nil)
 

@@ -56,28 +56,36 @@ func NewJWT[Data any](mgr *session.Manager[Data], secretKey string, accessTTL ti
 
 // Load extracts and validates session from JWT bearer token.
 // Returns ErrNoToken if no bearer token present, creates anonymous session if token invalid.
-func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
+func (j *JWT[Data]) Load(ctx handler.Context) (*session.Session[Data], error) {
 	token := extractBearerToken(ctx.Request())
 	if token == "" {
-		return session.Session[Data]{}, ErrNoToken
+		return nil, ErrNoToken
 	}
 
 	var claims jwtClaims
 	if err := j.signer.Parse(token, &claims); err != nil {
-		return session.New[Data](session.NewSessionParams{
+		sess, newErr := session.New[Data](session.NewSessionParams{
 			Fingerprint: fingerprint.JWT(ctx.Request()),
 			IP:          clientip.GetIP(ctx.Request()),
 			UserAgent:   ctx.Request().Header.Get("User-Agent"),
 		}, j.manager.GetTTL())
+		if newErr != nil {
+			return nil, newErr
+		}
+		return &sess, nil
 	}
 
 	sess, err := j.manager.GetByToken(ctx, claims.ID)
 	if err != nil {
-		return session.New[Data](session.NewSessionParams{
+		sess, newErr := session.New[Data](session.NewSessionParams{
 			Fingerprint: fingerprint.JWT(ctx.Request()),
 			IP:          clientip.GetIP(ctx.Request()),
 			UserAgent:   ctx.Request().Header.Get("User-Agent"),
 		}, j.manager.GetTTL())
+		if newErr != nil {
+			return nil, newErr
+		}
+		return &sess, nil
 	}
 
 	return sess, nil
@@ -85,31 +93,42 @@ func (j *JWT[Data]) Load(ctx handler.Context) (session.Session[Data], error) {
 
 // Save persists session data to the store.
 // Note: JWT tokens are immutable; only database session data is updated.
-func (j *JWT[Data]) Save(ctx handler.Context, sess session.Session[Data]) error {
+func (j *JWT[Data]) Save(ctx handler.Context, sess *session.Session[Data]) error {
 	return j.manager.Store(ctx, sess)
 }
 
 // Authenticate creates an authenticated session and returns a token pair.
 // Session.Token is embedded in both access and refresh token JTI claims.
 // Optional data parameter sets session data during authentication.
-func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (session.Session[Data], TokenPair, error) {
+func (j *JWT[Data]) Authenticate(ctx handler.Context, userID uuid.UUID, data ...Data) (*session.Session[Data], TokenPair, error) {
 	currentSess, err := j.Load(ctx)
-	if err != nil && err != ErrNoToken {
-		return session.Session[Data]{}, TokenPair{}, err
+	if err != nil {
+		if err != ErrNoToken {
+			return nil, TokenPair{}, err
+		}
+		// ErrNoToken - create new anonymous session as fallback
+		sess, newErr := session.New[Data](session.NewSessionParams{
+			Fingerprint: fingerprint.JWT(ctx.Request()),
+			IP:          clientip.GetIP(ctx.Request()),
+			UserAgent:   ctx.Request().Header.Get("User-Agent"),
+		}, j.manager.GetTTL())
+		if newErr != nil {
+			return nil, TokenPair{}, newErr
+		}
+		currentSess = &sess
 	}
-	// ErrNoToken is acceptable - Load creates anonymous session as fallback
 
 	if err := currentSess.Authenticate(userID, data...); err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
+		return nil, TokenPair{}, err
 	}
 
 	if err := j.manager.Store(ctx, currentSess); err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
+		return nil, TokenPair{}, err
 	}
 
 	pair, err := j.generateTokenPair(currentSess)
 	if err != nil {
-		return session.Session[Data]{}, TokenPair{}, err
+		return nil, TokenPair{}, err
 	}
 
 	return currentSess, pair, nil
@@ -155,13 +174,13 @@ func (j *JWT[Data]) Delete(ctx handler.Context) error {
 }
 
 // Store persists session state.
-func (j *JWT[Data]) Store(ctx handler.Context, sess session.Session[Data]) error {
+func (j *JWT[Data]) Store(ctx handler.Context, sess *session.Session[Data]) error {
 	return j.manager.Store(ctx, sess)
 }
 
 // Auth generates a new token pair after authentication.
 // Call this after sess.Authenticate() to get JWT tokens.
-func (j *JWT[Data]) Auth(sess session.Session[Data]) (TokenPair, error) {
+func (j *JWT[Data]) Auth(sess *session.Session[Data]) (TokenPair, error) {
 	if !sess.IsAuthenticated() {
 		return TokenPair{}, session.ErrNotAuthenticated
 	}
@@ -198,7 +217,7 @@ func (j *JWT[Data]) Refresh(ctx context.Context, refreshToken string) (TokenPair
 }
 
 // generateTokenPair creates access and refresh token pair.
-func (j *JWT[Data]) generateTokenPair(sess session.Session[Data]) (TokenPair, error) {
+func (j *JWT[Data]) generateTokenPair(sess *session.Session[Data]) (TokenPair, error) {
 	now := time.Now()
 	expiresAt := now.Add(j.accessTTL)
 
