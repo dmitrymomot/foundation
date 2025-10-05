@@ -3,13 +3,11 @@ package main
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/dmitrymomot/foundation/core/binder"
 	"github.com/dmitrymomot/foundation/core/sanitizer"
 	"github.com/dmitrymomot/foundation/core/session"
-	"github.com/dmitrymomot/foundation/core/sessiontransport"
 	"github.com/dmitrymomot/foundation/core/validator"
 	"github.com/dmitrymomot/foundation/middleware"
 	"github.com/google/uuid"
@@ -17,10 +15,9 @@ import (
 
 // Context is the default context implementation that delegates to the request's context.
 type Context struct {
-	w         http.ResponseWriter
-	r         *http.Request
-	params    map[string]string
-	transport *sessiontransport.JWT[SessionData]
+	w      http.ResponseWriter
+	r      *http.Request
+	params map[string]string
 }
 
 // Deadline returns the time when work done on behalf of this context should be canceled.
@@ -125,24 +122,9 @@ func (c *Context) Bind(v any) error {
 		}
 	}
 
-	// Bind body based on Content-Type
-	contentType := c.r.Header.Get("Content-Type")
-	if contentType != "" {
-		// Remove charset and other parameters
-		if idx := strings.Index(contentType, ";"); idx != -1 {
-			contentType = strings.TrimSpace(contentType[:idx])
-		}
-
-		switch contentType {
-		case "application/json":
-			if err := binder.JSON()(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
-				return err
-			}
-		case "application/x-www-form-urlencoded", "multipart/form-data":
-			if err := binder.Form()(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
-				return err
-			}
-		}
+	// Bind JSON data (API only uses JSON)
+	if err := binder.JSON()(c.r, v); err != nil && err != binder.ErrBinderNotApplicable {
+		return err
 	}
 
 	// Sanitize using struct tags
@@ -158,42 +140,22 @@ func (c *Context) Bind(v any) error {
 	return nil
 }
 
-// Auth authenticates a user and returns token pair.
-// It wraps transport.Authenticate with context.
-// Optional data parameter allows setting session data during authentication.
-func (c *Context) Auth(userID uuid.UUID, data ...SessionData) (sessiontransport.TokenPair, error) {
-	_, tokens, err := c.transport.Authenticate(c, userID, data...)
-	return tokens, err
-}
-
-// UpdateSession saves modified session data to storage.
-// For JWT transport, only the database is updated (tokens remain immutable).
-// Use this when you need to update session data after authentication.
-func (c *Context) UpdateSession(sess session.Session[SessionData]) error {
-	return c.transport.Save(c, sess)
-}
-
-// Refresh refreshes the session using refresh token and returns new token pair.
-// It wraps transport.Refresh with the refresh token.
-func (c *Context) Refresh(refreshToken string) (sessiontransport.TokenPair, error) {
-	_, tokens, err := c.transport.Refresh(c, refreshToken)
-	return tokens, err
-}
-
-// Logout logs out the current session.
-// It wraps transport.Logout with context.
+// Logout logs out the current user by marking the session for deletion.
+// The session middleware automatically handles the deletion.
 func (c *Context) Logout() error {
-	return c.transport.Logout(c)
+	sess := middleware.MustGetSession[SessionData](c)
+	sess.Logout()
+	middleware.SetSession[SessionData](c, sess)
+	return nil
 }
 
 // newContext creates a new Context instance.
-func newContext(transport *sessiontransport.JWT[SessionData]) func(http.ResponseWriter, *http.Request, map[string]string) *Context {
+func newContext() func(http.ResponseWriter, *http.Request, map[string]string) *Context {
 	return func(w http.ResponseWriter, r *http.Request, params map[string]string) *Context {
 		return &Context{
-			w:         w,
-			r:         r,
-			params:    params,
-			transport: transport,
+			w:      w,
+			r:      r,
+			params: params,
 		}
 	}
 }
